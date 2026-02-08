@@ -11,6 +11,7 @@ import os from "os";
 // Importar utilidades
 import { inicializarWss } from "./utils/transmitir.js";
 import { inicializarBds } from "./utils/db-init.js";
+import { programarBackupsAutomaticos, crearBackup, listarBackups, restaurarBackup } from "./utils/backup.js";
 
 // Importar rutas
 import { registrarRutasInventario } from "./routes/inventario.js";
@@ -53,6 +54,23 @@ registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventario);
 registrarRutasCortesias(app, bdVentas, bdProduccion);
 registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas);
 
+// Rutas de backup
+app.post("/api/backup/crear", async (req, res) => {
+  const resultado = await crearBackup();
+  res.json({ exito: resultado, mensaje: resultado ? "Backup creado exitosamente" : "Error al crear backup" });
+});
+
+app.get("/api/backup/listar", async (req, res) => {
+  const backups = await listarBackups();
+  res.json({ backups });
+});
+
+app.post("/api/backup/restaurar", async (req, res) => {
+  const { timestamp } = req.body;
+  const resultado = await restaurarBackup(timestamp);
+  res.json({ exito: resultado, mensaje: resultado ? "Backup restaurado exitosamente" : "Error al restaurar backup" });
+});
+
 // Servir frontend
 app.use(express.static(frontendPath));
 
@@ -80,6 +98,8 @@ servidor.listen(PUERTO, "0.0.0.0", () => {
   console.log(`\n✅ Servidor ejecutándose en puerto ${PUERTO}`);
   if (process.env.NODE_ENV === 'production') {
     console.log(`🌍 Aplicación en producción`);
+    // Activar sistema de backups automáticos en producción
+    programarBackupsAutomaticos();
   } else {
     console.log(`📱 Acceso local: http://localhost:${PUERTO}`);
     console.log(`🌐 Acceso remoto: http://${ipLocal}:${PUERTO}`);

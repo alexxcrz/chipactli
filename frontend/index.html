@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title id="pageTitle">Chipactli - Inicio</title>
 <link rel="icon" type="image/png" href="images/favicon.ico">
+<!-- PWA Manifest -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#4CAF50">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Chipactli">
+<meta name="description" content="Sistema de gestión de inventario, recetas y producción">
 <!-- Suprimir error de Chrome extensions -->
 <script>
 window.addEventListener('error', (e) => {
@@ -938,6 +945,69 @@ table tr:hover { background:#f9f9f9; }
   <p id="mensajeNotificacion">Operación completada</p>
   <button class="boton botonExito" onclick="cerrarNotificacion()" style="margin-top:15px">Aceptar</button>
 </div>
+
+<!-- Registro del Service Worker para PWA -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('✅ Service Worker registrado:', registration);
+        
+        // Verificar actualizaciones cada hora
+        setInterval(() => {
+          registration.update();
+        }, 3600000);
+      })
+      .catch((error) => {
+        console.log('❌ Error al registrar Service Worker:', error);
+      });
+  });
+
+  // Detectar cuando hay una nueva versión disponible
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (confirm('🔄 Hay una nueva versión disponible. ¿Recargar la aplicación?')) {
+      window.location.reload();
+    }
+  });
+}
+
+// Botón de instalación de PWA
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  
+  // Mostrar botón de instalación (puedes customizar esto)
+  console.log('📱 La app se puede instalar');
+  
+  // Opcional: Mostrar un banner o botón para instalar
+  const installButton = document.createElement('button');
+  installButton.textContent = '📱 Instalar App';
+  installButton.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 24px;background:#4CAF50;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 4px 8px rgba(0,0,0,0.3);z-index:10000;';
+  installButton.id = 'installAppButton';
+  
+  installButton.addEventListener('click', async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`Usuario ${outcome === 'accepted' ? 'aceptó' : 'rechazó'} la instalación`);
+      deferredPrompt = null;
+      installButton.remove();
+    }
+  });
+  
+  document.body.appendChild(installButton);
+});
+
+// Cuando la app ya está instalada
+window.addEventListener('appinstalled', () => {
+  console.log('✅ App instalada exitosamente');
+  deferredPrompt = null;
+  const installButton = document.getElementById('installAppButton');
+  if (installButton) installButton.remove();
+});
+</script>
 
 <script type="module" src="main.js"></script>
 </body>

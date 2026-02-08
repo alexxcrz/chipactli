@@ -7,6 +7,7 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
+import { promises as fs } from "fs";
 
 // Importar utilidades
 import { inicializarWss } from "./utils/transmitir.js";
@@ -35,7 +36,7 @@ inicializarWss(wss);
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 // Inicializar bases de datos
 const bdInventario = new Database("./inventario.db");
@@ -44,6 +45,23 @@ const bdProduccion = new Database("./produccion.db");
 const bdVentas = new Database("./ventas.db");
 
 inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas);
+
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+
+function validarAdmin(req, res) {
+  const token = req.get("x-admin-token");
+  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+    res.status(401).json({ exito: false, mensaje: "No autorizado" });
+    return false;
+  }
+  return true;
+}
+
+function cerrarBase(db) {
+  return new Promise((resolve) => {
+    db.close(() => resolve());
+  });
+}
 
 // Registrar rutas
 registrarRutasInventario(app, bdInventario);
@@ -56,19 +74,59 @@ registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas);
 
 // Rutas de backup
 app.post("/api/backup/crear", async (req, res) => {
+  if (!validarAdmin(req, res)) return;
   const resultado = await crearBackup();
   res.json({ exito: resultado, mensaje: resultado ? "Backup creado exitosamente" : "Error al crear backup" });
 });
 
 app.get("/api/backup/listar", async (req, res) => {
+  if (!validarAdmin(req, res)) return;
   const backups = await listarBackups();
   res.json({ backups });
 });
 
 app.post("/api/backup/restaurar", async (req, res) => {
+  if (!validarAdmin(req, res)) return;
   const { timestamp } = req.body;
   const resultado = await restaurarBackup(timestamp);
   res.json({ exito: resultado, mensaje: resultado ? "Backup restaurado exitosamente" : "Error al restaurar backup" });
+});
+
+app.post("/api/backup/importar", async (req, res) => {
+  if (!validarAdmin(req, res)) return;
+
+  const { archivos } = req.body;
+  const mapaArchivos = {
+    inventario: "inventario.db",
+    recetas: "recetas.db",
+    produccion: "produccion.db",
+    ventas: "ventas.db"
+  };
+
+  if (!archivos || typeof archivos !== "object") {
+    res.status(400).json({ exito: false, mensaje: "Archivos invalidos" });
+    return;
+  }
+
+  try {
+    await cerrarBase(bdInventario);
+    await cerrarBase(bdRecetas);
+    await cerrarBase(bdProduccion);
+    await cerrarBase(bdVentas);
+
+    for (const [clave, nombreArchivo] of Object.entries(mapaArchivos)) {
+      if (!archivos[clave]) continue;
+      const datosBase64 = archivos[clave];
+      const buffer = Buffer.from(datosBase64, "base64");
+      const destino = path.join(__dirname, nombreArchivo);
+      await fs.writeFile(destino, buffer);
+    }
+
+    res.json({ exito: true, mensaje: "Importacion completada. Reiniciando servicio..." });
+    setTimeout(() => process.exit(0), 1000);
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: "Error al importar bases de datos" });
+  }
 });
 
 // Servir frontend

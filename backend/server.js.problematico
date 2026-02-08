@@ -1,0 +1,937 @@
+import express from "express";
+import pkg from "sqlite3";
+const { Database } = pkg;
+import cors from "cors";
+import { WebSocketServer } from "ws";
+import http from "http";
+import path from "path";
+import { fileURLToPath } from "url";
+
+function convertirCantidad(cantidad, unidadOrigen, unidadDestino) {
+  if (!unidadOrigen || !unidadDestino) return cantidad;
+  const origen = unidadOrigen.toLowerCase();
+  const destino = unidadDestino.toLowerCase();
+  if (origen === destino) return cantidad;
+  if (origen === 'kg' && destino === 'g') return cantidad * 1000;
+  if (origen === 'g' && destino === 'kg') return cantidad / 1000;
+  if (origen === 'l' && destino === 'ml') return cantidad * 1000;
+  if (origen === 'ml' && destino === 'l') return cantidad / 1000;
+  return cantidad;
+}
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const frontendPath = path.join(__dirname, '../frontend');
+
+const app = express();
+const servidor = http.createServer(app);
+const wss = new WebSocketServer({ server: servidor });
+
+// Transmitir a todos los clientes conectados
+function transmitir(datos) {
+  wss.clients.forEach(cliente => {
+    if (cliente.readyState === 1) { // ABIERTO
+      cliente.send(JSON.stringify(datos));
+    }
+  });
+}
+
+wss.on('connection', (ws) => {
+  console.log('✅ Cliente WebSocket conectado');
+  
+  // Mantener la conexión viva con ping/pong
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+  
+  ws.on('close', () => console.log('❌ Cliente WebSocket desconectado'));
+  ws.on('error', (error) => console.log('⚠️ Error WebSocket:', error.message));
+});
+
+// Enviar ping cada 30 segundos para mantener la conexión viva
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+app.use(cors());
+app.use(express.json());
+
+// BASES DE DATOS INDEPENDIENTES
+const bdInventario = new Database("./inventario.db");
+const bdRecetas = new Database("./recetas.db");
+const bdProduccion = new Database("./produccion.db");
+const bdVentas = new Database("./ventas.db");
+
+// ===== BASE DE DATOS DE INVENTARIO =====
+bdInventario.serialize(() => {
+  bdInventario.run(`CREATE TABLE IF NOT EXISTS inventario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT UNIQUE,
+    nombre TEXT,
+    unidad TEXT,
+    cantidad_total REAL,
+    cantidad_disponible REAL,
+    costo_total REAL,
+    costo_por_unidad REAL
+  )`);
+
+  bdInventario.run(`CREATE TABLE IF NOT EXISTS historial_inventario (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_inventario INTEGER,
+    fecha_cambio TEXT,
+    cambio_cantidad REAL,
+    cambio_costo REAL
+  )`);
+
+  bdInventario.run(`CREATE TABLE IF NOT EXISTS cortes_diarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_corte TEXT UNIQUE,
+    inversion_diaria REAL,
+    inversion_acumulada REAL,
+    inversion_recuperada REAL,
+    inversion_neta REAL
+  )`);
+
+  bdInventario.run(`CREATE TABLE IF NOT EXISTS inversion_recuperada (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_venta TEXT,
+    costo_recuperado REAL
+  )`);
+  
+  console.log('✅ Base de datos de INVENTARIO creada');
+});
+
+// ===== BASE DE DATOS DE RECETAS =====
+bdRecetas.serialize(() => {
+  bdRecetas.run(`CREATE TABLE IF NOT EXISTS categorias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT UNIQUE
+  )`);
+
+  bdRecetas.run(`CREATE TABLE IF NOT EXISTS recetas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    id_categoria INTEGER,
+    gramaje REAL
+  )`);
+
+  bdRecetas.run(`CREATE TABLE IF NOT EXISTS ingredientes_receta (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_receta INTEGER,
+    id_insumo INTEGER,
+    cantidad REAL,
+    unidad TEXT
+  )`);
+  
+  // Asegurar que la columna gramaje existe (para bases de datos antiguas)
+  bdRecetas.all("PRAGMA table_info(recetas)", (err, columns) => {
+    const tieneGramaje = columns.some(col => col.name === 'gramaje');
+    if (!tieneGramaje) {
+      bdRecetas.run("ALTER TABLE recetas ADD COLUMN gramaje REAL DEFAULT 0", (err) => {
+        if (err) console.log('⚠️ La columna gramaje ya existe o hubo error:', err.message);
+        else console.log('✅ Columna gramaje agregada a recetas');
+      });
+    }
+  });
+  
+  console.log('✅ Base de datos de RECETAS creada');
+});
+
+// ===== BASE DE DATOS DE PRODUCCIÓN =====
+bdProduccion.serialize(() => {
+  bdProduccion.run(`CREATE TABLE IF NOT EXISTS produccion (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre_receta TEXT,
+    cantidad INTEGER,
+    fecha_produccion TEXT,
+    costo_produccion REAL,
+    precio_venta REAL
+  )`);
+  
+  console.log('✅ Base de datos de PRODUCCIÓN creada');
+});
+
+// ===== BASE DE DATOS DE VENTAS =====
+bdVentas.serialize(() => {
+  bdVentas.run(`CREATE TABLE IF NOT EXISTS ventas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre_receta TEXT,
+    cantidad INTEGER,
+    fecha_produccion TEXT,
+    fecha_venta TEXT,
+    costo_produccion REAL,
+    precio_venta REAL,
+    ganancia REAL
+  )`);
+  
+  bdVentas.run(`CREATE TABLE IF NOT EXISTS cortesias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre_receta TEXT,
+    cantidad INTEGER,
+    fecha_cortesia TEXT
+  )`);
+  
+  console.log('✅ Base de datos de VENTAS creada');
+});
+
+// ===== RUTAS DE INVENTARIO =====
+
+app.post("/inventario/agregar", (req, res) => {
+  const { codigo, nombre, unidad, cantidad, costo } = req.body;
+  bdInventario.run(
+    `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad) 
+     VALUES (?,?,?,?,?,?,?)`,
+    [codigo, nombre, unidad, cantidad, cantidad, costo, costo/cantidad],
+    function(err) {
+      if (err) return res.status(400).json({ error: "Código duplicado o error en los datos" });
+      
+      bdInventario.run(
+        `INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) 
+         VALUES (?,?,?,?)`,
+        [this.lastID, new Date().toISOString(), cantidad, costo]
+      );
+      
+      transmitir({ tipo: 'inventario_actualizado' });
+      res.json({ ok: true });
+    }
+  );
+});
+
+app.get("/inventario", (req, res) => {
+  const busqueda = req.query.busqueda || '';
+  if (busqueda) {
+    bdInventario.all(
+      "SELECT * FROM inventario WHERE nombre LIKE ? OR codigo LIKE ? ORDER BY nombre ASC",
+      [`%${busqueda}%`, `%${busqueda}%`],
+      (e, r) => res.json(r || [])
+    );
+  } else {
+    bdInventario.all("SELECT * FROM inventario ORDER BY nombre ASC", (e, r) => res.json(r || []));
+  }
+});
+
+app.get("/inventario/estadisticas", (_, res) => {
+  bdInventario.get(
+    `SELECT 
+      COUNT(*) as total_insumos,
+      COALESCE(SUM(costo_total), 0) as inversion_total,
+      COALESCE(SUM(costo_por_unidad * cantidad_disponible), 0) as valor_disponible
+     FROM inventario`,
+    (e, estadisticas) => {
+      bdInventario.get(
+        `SELECT COALESCE(SUM(costo_recuperado), 0) as recuperada FROM inversion_recuperada`,
+        (err, rec) => {
+          const resultado = estadisticas || { total_insumos: 0, inversion_total: 0, valor_disponible: 0 };
+          resultado.inversion_recuperada = rec.recuperada || 0;
+          resultado.inversion_neta = resultado.inversion_total - resultado.inversion_recuperada;
+          res.json(resultado);
+        }
+      );
+    }
+  );
+});
+
+app.get("/cortes-diarios", (_, res) => {
+  bdInventario.all(
+    `SELECT * FROM cortes_diarios ORDER BY fecha_corte DESC LIMIT 30`,
+    (e, r) => res.json(r || [])
+  );
+});
+
+app.patch("/inventario/:id", (req, res) => {
+  const { nombre, unidad, cantidad_total, costo_total } = req.body;
+  const id = req.params.id;
+  
+  bdInventario.get("SELECT * FROM inventario WHERE id=?", [id], (err, actual) => {
+    if (!actual) return res.status(404).json({ error: "Insumo no encontrado" });
+    
+    const cambio_cantidad = cantidad_total - actual.cantidad_total;
+    const cambio_costo = costo_total - actual.costo_total;
+    
+    bdInventario.run(
+      `UPDATE inventario SET nombre=?, unidad=?, cantidad_total=?, cantidad_disponible=cantidad_disponible+?, costo_total=?, costo_por_unidad=? WHERE id=?`,
+      [nombre, unidad, cantidad_total, cambio_cantidad, costo_total, costo_total/cantidad_total, id],
+      () => {
+        bdInventario.run(
+          `INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)`,
+          [id, new Date().toISOString(), cambio_cantidad, cambio_costo]
+        );
+        transmitir({ tipo: 'inventario_actualizado' });
+        res.json({ ok: true });
+      }
+    );
+  });
+});
+
+app.delete("/inventario/:id", (req, res) => {
+  bdInventario.run("DELETE FROM inventario WHERE id=?", [req.params.id], () => {
+    transmitir({ tipo: 'inventario_actualizado' });
+    res.json({ ok: true });
+  });
+});
+
+app.get("/inventario/:id", (req, res) => {
+  bdInventario.get(
+    "SELECT * FROM inventario WHERE id=?",
+    [req.params.id],
+    (err, insumo) => {
+      if (!insumo) {
+        return res.status(404).json({ error: "Insumo no encontrado" });
+      }
+      res.json(insumo);
+    }
+  );
+});
+
+app.get("/inventario/:id/historial", (req, res) => {
+  bdInventario.all(
+    "SELECT * FROM historial_inventario WHERE id_inventario=? ORDER BY fecha_cambio DESC",
+    [req.params.id],
+    (e, r) => res.json(r || [])
+  );
+});
+
+// Obtener historial de inversiones agrupado por fecha
+app.get("/inventario/historial/agrupar/fechas", (_, res) => {
+  bdInventario.all(
+    `SELECT 
+      hi.id,
+      hi.id_inventario,
+      hi.fecha_cambio,
+      hi.cambio_cantidad,
+      hi.cambio_costo,
+      i.codigo,
+      i.nombre,
+      i.unidad
+    FROM historial_inventario hi
+    JOIN inventario i ON hi.id_inventario = i.id
+    ORDER BY hi.fecha_cambio DESC`,
+    (err, rows) => {
+      if (err) {
+        res.status(500).json({ error: err.message });
+        return;
+      }
+      
+      // Agrupar por fecha (solo la parte de la fecha, sin hora)
+      const agrupado = {};
+      if (rows) {
+        rows.forEach(row => {
+          const fecha = row.fecha_cambio.split('T')[0]; // Obtener solo YYYY-MM-DD
+          if (!agrupado[fecha]) {
+            agrupado[fecha] = [];
+          }
+          agrupado[fecha].push({
+            id: row.id,
+            id_inventario: row.id_inventario,
+            hora: row.fecha_cambio.split('T')[1] || '00:00:00',
+            cambio_cantidad: row.cambio_cantidad,
+            cambio_costo: row.cambio_costo,
+            codigo: row.codigo,
+            nombre: row.nombre,
+            unidad: row.unidad
+          });
+        });
+      }
+      
+      // Convertir a array y ordenar por fecha descendente
+      const resultado = Object.keys(agrupado)
+        .sort((a, b) => new Date(b) - new Date(a))
+        .map(fecha => ({
+          fecha: fecha,
+          total_costo: agrupado[fecha].reduce((sum, item) => sum + (item.cambio_costo || 0), 0),
+          total_insumos: agrupado[fecha].length,
+          insumos: agrupado[fecha]
+        }));
+      
+      res.json(resultado);
+    }
+  );
+});
+
+// ===== RUTAS DE CATEGORÍAS =====
+
+app.post("/categorias", (req, res) => {
+  bdRecetas.run("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", [req.body.nombre], () => {
+    transmitir({ tipo: 'categorias_actualizado' });
+  });
+  res.json({ ok: true });
+});
+
+app.get("/categorias", (_, res) => {
+  bdRecetas.all("SELECT * FROM categorias", (e, r) => res.json(r || []));
+});
+
+// ===== RUTAS DE RECETAS =====
+
+app.post("/recetas", (req, res) => {
+  const { nombre, id_categoria, ingredientes, gramaje } = req.body;
+  console.log('📝 === CREAR RECETA ===');
+  console.log('Nombre:', nombre);
+  console.log('Categoría ID:', id_categoria);
+  console.log('Gramaje:', gramaje);
+  console.log('Ingredientes recibidos:', JSON.stringify(ingredientes, null, 2));
+  
+  bdRecetas.get("SELECT id FROM categorias WHERE id=?", [id_categoria], (e, categoria) => {
+    if (!categoria) return res.status(400).json({ error: "Categoría no existe" });
+    
+    bdRecetas.run(
+      "INSERT INTO recetas (nombre, id_categoria, gramaje) VALUES (?,?,?)",
+      [nombre, id_categoria, gramaje || 0],
+      function(err) {
+        if (err) {
+          console.log('❌ Error insertando receta:', err);
+          return res.status(500).json({ error: err.message });
+        }
+        
+        const idReceta = this.lastID;
+        console.log(`✅ Receta creada con ID: ${idReceta}`);
+        
+        if (ingredientes && ingredientes.length > 0) {
+          console.log(`📦 Insertando ${ingredientes.length} ingredientes...`);
+          const stmt = bdRecetas.prepare(
+            "INSERT INTO ingredientes_receta (id_receta, id_insumo, cantidad, unidad) VALUES (?,?,?,?)"
+          );
+          
+          ingredientes.forEach((ing, idx) => {
+            console.log(`   Ingrediente ${idx}: ID=${ing.id_insumo}, Cantidad=${ing.cantidad}${ing.unidad}`);
+            stmt.run(idReceta, ing.id_insumo, ing.cantidad, ing.unidad);
+          });
+          
+          stmt.finalize((err) => {
+            if (err) console.error('❌ Error guardando ingredientes:', err);
+            else console.log('✅ Ingredientes guardados correctamente');
+            transmitir({ tipo: 'recetas_actualizado' });
+            res.json({ ok: true, id: idReceta });
+          });
+        } else {
+          console.log('⚠️ Sin ingredientes para insertar');
+          transmitir({ tipo: 'recetas_actualizado' });
+          res.json({ ok: true, id: idReceta });
+        }
+      }
+    );
+  });
+});
+
+app.get("/recetas", (req, res) => {
+  const idCategoria = req.query.categoria || '';
+  if (idCategoria) {
+    bdRecetas.all(
+      `SELECT r.*, c.nombre as categoria 
+       FROM recetas r 
+       LEFT JOIN categorias c ON r.id_categoria = c.id 
+       WHERE r.id_categoria=? 
+       ORDER BY r.nombre ASC`,
+      [idCategoria],
+      (e, r) => res.json(r || [])
+    );
+  } else {
+    bdRecetas.all(
+      `SELECT r.*, c.nombre as categoria 
+       FROM recetas r 
+       LEFT JOIN categorias c ON r.id_categoria = c.id 
+       ORDER BY r.nombre ASC`,
+      (e, r) => res.json(r || [])
+    );
+  }
+});
+
+app.get("/recetas/:id", (req, res) => {
+  bdRecetas.get("SELECT * FROM recetas WHERE id=?", [req.params.id], (err, receta) => {
+    if (!receta) return res.status(404).json({ error: "Receta no encontrada" });
+    
+    bdRecetas.all(
+      `SELECT * FROM ingredientes_receta WHERE id_receta=?`,
+      [req.params.id],
+      (err, ingredientes) => {
+        if (ingredientes && ingredientes.length > 0) {
+          // Para cada ingrediente, obtener el nombre de inventario
+          let procesados = 0;
+          ingredientes.forEach((ing, idx) => {
+            bdInventario.get(
+              "SELECT nombre, codigo FROM inventario WHERE id=?",
+              [ing.id_insumo],
+              (err, insumo) => {
+                if (insumo) {
+                  ing.nombre = insumo.nombre;
+                  ing.codigo = insumo.codigo;
+                }
+                procesados++;
+                if (procesados === ingredientes.length) {
+                  receta.ingredientes = ingredientes;
+                  res.json(receta);
+                }
+              }
+            );
+          });
+        } else {
+          receta.ingredientes = [];
+          res.json(receta);
+        }
+      }
+    );
+  });
+});
+
+app.patch("/recetas/:id", (req, res) => {
+  const { nombre, id_categoria, ingredientes, gramaje } = req.body;
+  
+  bdRecetas.run(
+    "UPDATE recetas SET nombre=?, id_categoria=?, gramaje=? WHERE id=?",
+    [nombre, id_categoria, gramaje || 0, req.params.id],
+    () => {
+      if (ingredientes && ingredientes.length > 0) {
+        bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [req.params.id], () => {
+          const stmt = bdRecetas.prepare(
+            "INSERT INTO ingredientes_receta (id_receta, id_insumo, cantidad, unidad) VALUES (?,?,?,?)"
+          );
+          
+          ingredientes.forEach(ing => {
+            stmt.run(req.params.id, ing.id_insumo, ing.cantidad, ing.unidad);
+          });
+          
+          stmt.finalize(() => {
+            transmitir({ tipo: 'recetas_actualizado' });
+            res.json({ ok: true });
+          });
+        });
+      } else {
+        transmitir({ tipo: 'recetas_actualizado' });
+        res.json({ ok: true });
+      }
+    }
+  );
+});
+
+app.delete("/recetas/:id", (req, res) => {
+  bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [req.params.id], () => {
+    bdRecetas.run("DELETE FROM recetas WHERE id=?", [req.params.id], () => {
+      transmitir({ tipo: 'recetas_actualizado' });
+      res.json({ ok: true });
+    });
+  });
+});
+
+app.post("/recetas/calcular", (req, res) => {
+  const { id_receta } = req.body;
+  
+  bdRecetas.all(
+    "SELECT * FROM ingredientes_receta WHERE id_receta=?",
+    [id_receta],
+    (err, ingredientes) => {
+      if (!ingredientes || ingredientes.length === 0) {
+        return res.json({ piezas_maximas: 0, costo_por_pieza: 0 });
+      }
+      
+      let piezasMinimas = Infinity;
+      let costoTotal = 0;
+      
+      const promesas = ingredientes.map(ing =>
+        new Promise((resolver) => {
+          bdInventario.get(
+            "SELECT * FROM inventario WHERE id=?",
+            [ing.id_insumo],
+            (err, insumo) => {
+              if (insumo) {
+                let cantidad = ing.cantidad;
+                if (ing.unidad === 'kg') cantidad *= 1000;
+                if (ing.unidad === 'l') cantidad *= 1000;
+                
+                let disponible = insumo.cantidad_disponible;
+                if (insumo.unidad === 'kg') disponible *= 1000;
+                if (insumo.unidad === 'l') disponible *= 1000;
+                
+                const piezas = Math.floor(disponible / cantidad);
+                piezasMinimas = Math.min(piezasMinimas, piezas);
+                costoTotal += (insumo.costo_por_unidad * ing.cantidad);
+              }
+              resolver();
+            }
+          );
+        })
+      );
+      
+      Promise.all(promesas).then(() => {
+        res.json({
+          piezas_maximas: piezasMinimas === Infinity ? 0 : piezasMinimas,
+          costo_por_pieza: costoTotal
+        });
+      });
+    }
+  );
+});
+
+// ===== RUTAS DE PRODUCCIÓN =====
+
+app.post("/produccion", (req, res) => {
+  const { nombre_receta, cantidad, costo_produccion, precio_venta } = req.body;
+  const cantidadProduccion = Number(cantidad) || 0;
+  const fechaNow = new Date().toISOString();
+  
+  console.log(`📦 PRODUCCIÓN: ${nombre_receta} x${cantidad}`);
+  
+  // Insertar producción primero
+  bdProduccion.run(
+    `INSERT INTO produccion (nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta)
+     VALUES (?,?,?,?,?)`,
+    [nombre_receta, cantidad, fechaNow, costo_produccion, precio_venta],
+    (err) => {
+      if (err) {
+        console.error('❌ Error insertando producción:', err);
+        return res.status(500).json({ error: 'Error en producción' });
+      }
+      
+      console.log(`✅ Producción insertada. Buscando receta: "${nombre_receta}"`);
+      
+      // Buscar receta por nombre
+      bdRecetas.get("SELECT id FROM recetas WHERE nombre=?", [nombre_receta], (e, receta) => {
+        if (!receta) {
+          // Si no hay receta, solo registrar producción sin deducción
+          console.log(`⚠️ Receta "${nombre_receta}" no encontrada en BD`);
+          transmitir({ tipo: 'produccion_actualizado' });
+          return res.json({ ok: true, mensaje: 'Producción registrada (sin ingredientes para descontar)' });
+        }
+        
+        console.log(`✅ Receta encontrada con ID: ${receta.id}`);
+
+
+        // Obtener ingredientes de la receta
+        bdRecetas.all(
+          `SELECT * FROM ingredientes_receta WHERE id_receta=?`,
+          [receta.id],
+          (err, ingredientes) => {
+            if (err || !ingredientes || ingredientes.length === 0) {
+              console.log(`⚠️ Sin ingredientes encontrados. Error: ${err}`);
+              transmitir({ tipo: 'produccion_actualizado' });
+              return res.json({ ok: true });
+            }
+
+            console.log(`📋 Ingredientes encontrados: ${ingredientes.length}`);
+            
+            // Preparar descuentos
+            const descuentos = [];
+            let procesados = 0;
+            
+            ingredientes.forEach((ing, idx) => {
+              if (!ing.id_insumo) {
+                console.log(`  [${idx}] ⚠️ Sin ingrediente asignado`);
+                procesados++;
+                if (procesados === ingredientes.length) finalizarProduccion();
+                return;
+              }
+              
+              // Obtener insumo del inventario
+              bdInventario.get(
+                "SELECT * FROM inventario WHERE id=?",
+                [ing.id_insumo],
+                (errInv, insumo) => {
+                  if (!insumo) {
+                    console.log(`  [${idx}] ⚠️ Insumo ${ing.id_insumo} no encontrado`);
+                    procesados++;
+                    if (procesados === ingredientes.length) finalizarProduccion();
+                    return;
+                  }
+                  
+              // Convertir cantidad a la unidad del inventario
+              const requerido = convertirCantidad(
+                (Number(ing.cantidad) || 0) * cantidadProduccion,
+                ing.unidad,
+                ing.unidad_insumo
+              );
+              
+              console.log(`  [${idx}] ${ing.nombre}: ${ing.cantidad} ${ing.unidad} x${cantidadProduccion} = ${requerido} ${ing.unidad_insumo}`);
+              
+              if (!Number.isFinite(requerido) || requerido <= 0) {
+                console.log(`      ❌ Cantidad inválida`);
+                return;
+              }
+              
+              ingCount++;
+              
+              // Verificar disponibilidad
+              const disponible = Number(ing.cantidad_disponible) || 0;
+              const cantidadDescontar = Math.min(requerido, disponible);
+              
+              console.log(`      Disponible: ${disponible}, A descontar: ${cantidadDescontar}`);
+              
+              if (cantidadDescontar <= 0) {
+                console.log(`      ⚠️ No hay disponible`);
+                queriesCompletadas++;
+                return;
+              }
+              
+              // Actualizar inventario
+              bdInventario.run(
+                "UPDATE inventario SET cantidad_disponible = cantidad_disponible - ? WHERE id = ?",
+                [cantidadDescontar, ing.id_insumo],
+                (err) => {
+                  if (!err) {
+                    console.log(`      ✅ Descontado: ${cantidadDescontar} ${ing.unidad_insumo}`);
+                    // Registrar en historial
+                    const cambioCosto = -1 * (Number(ing.costo_por_unidad) || 0) * cantidadDescontar;
+                    bdInventario.run(
+                      "INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)",
+                      [ing.id_insumo, fechaNow, -cantidadDescontar, cambioCosto],
+                      () => {
+                        descuentos.push({
+                          insumo: ing.nombre,
+                          cantidad: cantidadDescontar,
+                          unidad: ing.unidad_insumo
+                        });
+                        queriesCompletadas++;
+                        
+                        // Cuando todas las queries estén completas
+                        if (queriesCompletadas === ingCount) {                          console.log(`✅ PRODUCCIÓN COMPLETADA CON DESCUENTOS: ${descuentos.length}`);                          transmitir({ tipo: 'inventario_actualizado' });
+                          transmitir({ tipo: 'produccion_actualizado' });
+                          transmitir({ tipo: 'produccion_descuento', receta: nombre_receta, cantidad: cantidadProduccion, descuentos });
+                          res.json({ ok: true, descuentos });
+                        }
+                      }
+                    );
+                  } else {
+                    console.log(`      ❌ Error actualizando inventario:`, err);
+                    queriesCompletadas++;
+                    if (queriesCompletadas === ingCount) {
+                      transmitir({ tipo: 'inventario_actualizado' });
+                      transmitir({ tipo: 'produccion_actualizado' });
+                      res.json({ ok: true });
+                    }
+                  }
+                }
+              );
+            });
+            
+            // Si no hay ingredientes para descontar
+            if (ingCount === 0) {
+              console.log(`⚠️ No hay ingredientes válidos para procesar`);
+              transmitir({ tipo: 'produccion_actualizado' });
+              res.json({ ok: true });
+            }
+          }
+        );
+      });
+    }
+  );
+});
+
+app.get("/produccion", (req, res) => {
+  bdProduccion.all(
+    "SELECT * FROM produccion ORDER BY fecha_produccion DESC",
+    (e, r) => res.json(r || [])
+  );
+});
+
+app.delete("/produccion/:id", (req, res) => {
+  bdProduccion.run("DELETE FROM produccion WHERE id=?", [req.params.id], () => {
+    transmitir({ tipo: 'produccion_actualizado' });
+    res.json({ ok: true });
+  });
+});
+
+// ===== RUTA DE CORTESÍA =====
+app.post("/cortesia/:id", (req, res) => {
+  const { nombre_receta, cantidad } = req.body;
+  const fechaNow = new Date().toISOString();
+  
+  // Registrar cortesía en la BD de ventas
+  bdVentas.run(
+    "INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia) VALUES (?,?,?)",
+    [nombre_receta, cantidad, fechaNow],
+    (err) => {
+      if (err) {
+        console.error('Error registrando cortesía:', err);
+        return res.status(500).json({ error: 'Error al registrar cortesía' });
+      }
+      
+      // Eliminar el producto del inventario de producción
+      bdProduccion.run("DELETE FROM produccion WHERE id=?", [req.params.id], () => {
+        transmitir({ tipo: 'produccion_actualizado' });
+        transmitir({ tipo: 'cortesias_actualizado' });
+        res.json({ ok: true });
+      });
+    }
+  );
+});
+
+app.get("/cortesias", (req, res) => {
+  bdVentas.all(
+    "SELECT * FROM cortesias ORDER BY fecha_cortesia DESC",
+    (err, cortesias) => {
+      res.json(cortesias || []);
+    }
+  );
+});
+
+// ===== RUTAS DE VENTAS =====
+
+app.post("/ventas", (req, res) => {
+  const { nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta, id_produccion } = req.body;
+  const ganancia = (precio_venta * cantidad) - costo_produccion;
+  const fechaNow = new Date().toISOString();
+  
+  bdVentas.run(
+    `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia)
+     VALUES (?,?,?,?,?,?,?)`,
+    [nombre_receta, cantidad, fecha_produccion, fechaNow, costo_produccion, precio_venta, ganancia],
+    (err) => {
+      if (err) {
+        console.error('Error en venta:', err);
+        return res.status(500).json({ error: 'Error al registrar venta' });
+      }
+      
+      // Eliminar de producción si se proporciona el ID
+      if (id_produccion) {
+        bdProduccion.run("DELETE FROM produccion WHERE id=?", [id_produccion], () => {
+          bdInventario.run(
+            `INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)`,
+            [fechaNow, costo_produccion],
+            () => {
+              transmitir({ tipo: 'ventas_actualizado' });
+              transmitir({ tipo: 'produccion_actualizado' });
+              res.json({ ok: true });
+            }
+          );
+        });
+      } else {
+        bdInventario.run(
+          `INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)`,
+          [fechaNow, costo_produccion],
+          () => {
+            transmitir({ tipo: 'ventas_actualizado' });
+            res.json({ ok: true });
+          }
+        );
+      }
+    }
+  );
+});
+
+app.get("/ventas", (req, res) => {
+  const idCategoria = req.query.categoria || '';
+  
+  // Necesitamos JOIN con recetas para obtener la categoría
+  bdVentas.all(
+    "SELECT * FROM ventas ORDER BY fecha_venta DESC",
+    (err, ventas) => {
+      if (!ventas || ventas.length === 0) {
+        return res.json([]);
+      }
+      
+      // Para cada venta, obtener la categoría de la receta
+      let procesados = 0;
+      ventas.forEach((venta, idx) => {
+        bdRecetas.get(
+          `SELECT r.id_categoria, c.nombre as categoria 
+           FROM recetas r 
+           LEFT JOIN categorias c ON r.id_categoria = c.id 
+           WHERE r.nombre = ?`,
+          [venta.nombre_receta],
+          (err, receta) => {
+            if (receta) {
+              venta.id_categoria = receta.id_categoria;
+              venta.categoria = receta.categoria;
+            }
+            procesados++;
+            if (procesados === ventas.length) {
+              // Filtrar si hay categoría seleccionada
+              if (idCategoria) {
+                const ventasFiltradas = ventas.filter(v => v.id_categoria == idCategoria);
+                res.json(ventasFiltradas);
+              } else {
+                res.json(ventas);
+              }
+            }
+          }
+        );
+      });
+    }
+  );
+});
+
+app.get("/ventas/estadisticas/:periodo", (req, res) => {
+  const periodo = req.params.periodo;
+  const idCategoria = req.query.categoria || '';
+  
+  let filtroFecha = '';
+  
+  if (periodo === 'dia' || periodo === 'hoy') {
+    const hoy = new Date().toISOString().split('T')[0];
+    filtroFecha = `WHERE DATE(fecha_venta) = '${hoy}'`;
+  } else if (periodo === 'semana') {
+    filtroFecha = `WHERE DATE(fecha_venta) >= DATE('now', '-7 days')`;
+  } else if (periodo === 'quincena') {
+    filtroFecha = `WHERE DATE(fecha_venta) >= DATE('now', '-15 days')`;
+  } else if (periodo === 'mes') {
+    filtroFecha = `WHERE DATE(fecha_venta) >= DATE('now', '-30 days')`;
+  }
+  
+  bdVentas.all(
+    `SELECT * FROM ventas ${filtroFecha}`,
+    (err, ventas) => {
+      if (!ventas || ventas.length === 0) {
+        return res.json({ total_sales: 0, total_units: 0, total_cost: 0, total_revenue: 0, total_profit: 0 });
+      }
+      
+      // Obtener categorías de cada venta si hay filtro
+      if (idCategoria) {
+        let procesados = 0;
+        let ventasFiltradas = [];
+        
+        ventas.forEach((venta, idx) => {
+          bdRecetas.get(
+            `SELECT id_categoria FROM recetas WHERE nombre = ?`,
+            [venta.nombre_receta],
+            (err, receta) => {
+              if (receta && receta.id_categoria == idCategoria) {
+                ventasFiltradas.push(venta);
+              }
+              procesados++;
+              if (procesados === ventas.length) {
+                calcularEstadisticas(ventasFiltradas, res);
+              }
+            }
+          );
+        });
+      } else {
+        calcularEstadisticas(ventas, res);
+      }
+    }
+  );
+});
+
+function calcularEstadisticas(ventas, res) {
+  const estadisticas = {
+    total_sales: ventas.length,
+    total_units: ventas.reduce((sum, v) => sum + (v.cantidad || 0), 0),
+    total_cost: ventas.reduce((sum, v) => sum + (v.costo_produccion || 0), 0),
+    total_revenue: ventas.reduce((sum, v) => sum + ((v.precio_venta || 0) * (v.cantidad || 0)), 0),
+    total_profit: ventas.reduce((sum, v) => sum + (v.ganancia || 0), 0)
+  };
+  res.json(estadisticas);
+}
+
+// Servir archivos estáticos DESPUÉS de las rutas API
+app.use(express.static(frontendPath));
+
+// Ruta catch-all para SPA client-side routing
+app.use((req, res) => {
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
+// ===== INICIAR SERVIDOR =====
+
+const PUERTO = 3001;
+servidor.listen(PUERTO, () => {
+  console.log(`\n🚀 Servidor Chipactli funcionando en puerto ${PUERTO}`);
+  console.log('📊 Bases de datos separadas:');
+  console.log('   - inventario.db (Insumos e inversión)');
+  console.log('   - recetas.db (Recetas e ingredientes)');
+  console.log('   - produccion.db (Producción)');
+  console.log('   - ventas.db (Ventas y ganancias)\n');
+});

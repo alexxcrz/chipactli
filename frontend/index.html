@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="pageTitle">Chipactli - Inicio</title>
+<link rel="icon" type="image/png" href="images/favicon.ico">
+<!-- Suprimir error de Chrome extensions -->
+<script>
+window.addEventListener('error', (e) => {
+  if (e.message && e.message.includes('message channel closed')) {
+    e.preventDefault();
+  }
+}, true);
+</script>
+<style>
+link[rel="icon"] { border-radius: 50%; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:linear-gradient(135deg,#2d2d2d 0%,#1a1a1a 100%); min-height:100vh; display:flex; }
+.barraLateral { width:280px; background:#1a1a1a; color:white; box-shadow:2px 0 10px rgba(0,0,0,0.5); display:flex; flex-direction:column; position:fixed; height:100vh; overflow-y:auto; left:-280px; transition:left 0.3s ease; }
+.barraLateral.mostrada { left:0; }
+.encabezadoBarraLateral { padding:20px 20px; background:#000000; border-bottom:2px solid #4a9b5e; color:white; display:flex; align-items:center; gap:15px; position:relative; }
+.logoBarraLateral { width:70px; height:70px; border-radius:50%; object-fit:cover; display:none; background:white; padding:3px; }
+.encabezadoBarraLateral h1 { font-size:18px; margin-bottom:2px; flex:1; }
+.encabezadoBarraLateral p { font-size:11px; opacity:0.9; }
+.menuBarraLateral { flex:1; padding:20px 0; }
+.elementoMenu { padding:15px 25px; cursor:pointer; transition:all 0.3s; border-left:4px solid transparent; display:flex; align-items:center; gap:12px; color:#f5f5f5; font-weight:500; text-decoration:none; }
+.elementoMenu:hover { background:#2d2d2d; border-left-color:#4a9b5e; }
+.elementoMenu.activo { background:#2d2d2d; border-left-color:#4a9b5e; color:#4a9b5e; }
+.iconoMenu { font-size:20px; width:24px; text-align:center; }
+.botonToggleMenu { position:fixed; top:20px; left:20px; z-index:2001; background:#000000; color:white; border:2px solid #4a9b5e; width:50px; height:50px; border-radius:50%; cursor:pointer; font-size:24px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 8px rgba(0,0,0,0.5); transition:all 0.3s; }
+.botonToggleMenu:hover { background:#1a1a1a; border-color:#4a9b5e; transform:scale(1.1); }
+.botonToggleMenu.oculto { opacity:0; pointer-events:none; transform:scale(0); }
+.cierreBarraLateral { position:absolute; top:15px; right:15px; background:#4a9b5e; color:white; border:none; width:35px; height:35px; border-radius:50%; cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; transition:all 0.3s; z-index:10; font-weight:bold; }
+.cierreBarraLateral:hover { background:#3a8b4e; transform:rotate(90deg); box-shadow:0 4px 8px rgba(58, 139, 78, 0.3); }
+.contenidoPrincipal { margin-left:0; flex:1; padding:20px; overflow-y:auto; max-height:100vh; transition:margin-left 0.3s; }
+header { background:#ffffff; padding:20px 30px 20px 90px; border-radius:15px; border:2px solid #1a1a1a; box-shadow:0 4px 6px rgba(0,0,0,0.3); margin-bottom:30px; display:flex; justify-content:space-between; align-items:center; }
+.tituloEncabezado { color:#1a1a1a; font-size:28px; }
+.iconoAlertas { position:relative; cursor:pointer; font-size:24px; padding:10px; background:#f5f5f5; border:2px solid #1a1a1a; border-radius:50%; width:50px; height:50px; display:flex; align-items:center; justify-content:center; transition:all 0.3s; }
+.iconoAlertas:hover { background:#4a9b5e; color:white; border-color:#4a9b5e; transform:scale(1.1); }
+.distintivo { position:absolute; top:-5px; right:-5px; background:#f44336; color:white; border-radius:50%; width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold; }
+.distintivo.oculto { display:none; }
+.desplegableAlertas { position:absolute; top:70px; right:20px; background:white; border-radius:10px; box-shadow:0 8px 16px rgba(0,0,0,0.2); width:350px; max-height:400px; overflow-y:auto; display:none; z-index:1000; }
+.desplegableAlertas.mostrado { display:block; }
+.tabsAlertas { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid #eee; }
+.tabAlerta { flex:1; padding:8px 10px; border:1px solid #ddd; background:#f5f5f5; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600; color:#333; }
+.tabAlerta.activa { background:#4a9b5e; color:white; border-color:#4a9b5e; }
+.contenidoAlertas { padding:0 0 8px 0; }
+.listaAlertas { max-height:300px; overflow-y:auto; }
+.listaAlertas.oculto { display:none; }
+.elementoAlerta { padding:12px 14px; border-bottom:1px solid #eee; cursor:pointer; }
+.elementoAlerta:last-child { border-bottom:none; }
+.fechaAlerta { font-size:11px; color:#777; margin-top:4px; }
+.elementoAlerta { padding:15px; border-bottom:1px solid #eee; }
+.elementoAlerta:last-child { border-bottom:none; }
+.elementoAlerta.advertencia { background:#fff9c4; border-left:4px solid #FBC02D; }
+.pestana { display:none; }
+.pestana.activo { display:block; animation:aparecer 0.3s; }
+@keyframes aparecer { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+.tarjeta { background:white; padding:25px; border-radius:15px; box-shadow:0 4px 6px rgba(0,0,0,0.1); margin-bottom:20px; }
+.tarjeta { overflow-x:auto; }
+.tarjeta h2 { color:#333; margin-bottom:20px; font-size:22px; }
+.encabezadoTarjeta { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+.boton { background:#1a1a1a; color:white; border:1px solid #4a9b5e; padding:8px 16px; border-radius:20px; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.3s; margin-right:5px; }
+.boton:hover { background:#4a9b5e; border-color:#4a9b5e; transform:translateY(-1px); box-shadow:0 3px 6px rgba(74,155,94,0.3); }
+.boton.activo { background:#4a9b5e; border-color:#4a9b5e; }
+.botonExito { background:#4a9b5e; border-color:#4a9b5e; }
+.botonExito:hover { background:#3a8b4e; border-color:#3a8b4e; }
+.botonDanger { background:#f44336; border-color:#f44336; }
+.botonDanger:hover { background:#d32f2f; border-color:#d32f2f; }
+.botonPequeno { padding:5px 12px; font-size:11px; background:#1a1a1a; color:white; border:1px solid #4a9b5e; border-radius:15px; cursor:pointer; transition:all 0.2s; }
+.botonPequeno:hover { background:#4a9b5e; color:white; transform:scale(1.05); }
+.botonPequeno.botonDanger { background:#f44336; border-color:#f44336; }
+.botonPequeno.botonDanger:hover { background:#d32f2f; }
+.btnCategoriaWrapper { position:relative; display:inline-block; }
+.btnEliminarCategoria { position:absolute; right:5px; top:50%; transform:translateY(-50%); padding:2px 6px; font-size:10px; background:#f44336; border:1px solid #f44336; color:white; border-radius:50%; cursor:pointer; transition:all 0.2s; opacity:0; pointer-events:none; z-index:10; width:20px; height:20px; display:flex; align-items:center; justify-content:center; }
+.btnCategoriaWrapper:hover .btnEliminarCategoria, .btnCategoriaWrapper .boton.activo + .btnEliminarCategoria { opacity:1; pointer-events:auto; }
+.btnEliminarCategoria:hover { background:#d32f2f; transform:translateY(-50%) scale(1.1); }
+.btnCategoriaWrapper .boton { padding-right:30px; }
+table { width:100%; border-collapse:collapse; margin-top:20px; }
+table thead { background:#f5f5f5; }
+table th { padding:12px; text-align:left; font-weight:600; color:#333; border-bottom:2px solid #ddd; }
+table td { padding:10px 12px; border-bottom:1px solid #eee; }
+table tr:hover { background:#f9f9f9; }
+.modal { display:none; position:fixed; z-index:999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.4); }
+.contenidoModal { background-color:#fefefe; margin:5% auto; padding:0; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); width:90%; max-width:600px; max-height:90vh; overflow:hidden; display:flex; flex-direction:column; }
+.encabezadoModal { background:#1a1a1a; color:white; padding:20px; border-radius:12px 12px 0 0; display:flex; justify-content:space-between; align-items:center; }
+.encabezadoModal h3 { margin:0; font-size:20px; }
+.cerrarModal { background:#4a9b5e; color:white; border:none; width:40px; height:40px; border-radius:50%; cursor:pointer; transition:all 0.3s; font-size:24px; display:flex; align-items:center; justify-content:center; padding:0; flex-shrink:0; }
+.cerrarModal:hover { background:#3a8b4e; transform:scale(1.1); box-shadow:0 4px 8px rgba(58, 139, 78, 0.3); }
+.cajaFormulario { margin:20px; overflow-y:auto; max-height:calc(90vh - 140px); }
+#detallesHistorialInv { overflow-y:auto; max-height:calc(90vh - 140px); }
+.grupoFormulario { margin-bottom:15px; position:relative; }
+.grupoFormulario label { display:block; margin-bottom:5px; font-weight:600; color:#333; }
+.grupoFormulario input, .grupoFormulario select { width:100%; padding:10px; border:2px solid #ddd; border-radius:6px; font-size:14px; transition:border-color 0.3s; }
+.grupoFormulario input:focus, .grupoFormulario select:focus { outline:none; border-color:#4a9b5e; box-shadow:0 0 5px rgba(74,155,94,0.3); }
+.filaFormulario { display:grid; gap:15px; margin-bottom:15px; }
+.filaFormulario-CodigoNombre { grid-template-columns:1fr 3fr; }
+.filaFormulario-UnidadCantidadCosto { grid-template-columns:1fr 1fr 1fr; }
+.filaFormulario-NombreCategoria { grid-template-columns:2fr 1fr; }
+.filaFormulario-UnidadCantidad { grid-template-columns:1fr 1fr; }
+.gridEstadisticas { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:15px; margin-bottom:20px; }
+.tarjetaEstadistica { background:linear-gradient(135deg,#f5f5f5 0%,#e8e8e8 100%); padding:20px; border-radius:10px; border-left:4px solid #4a9b5e; }
+.tarjetaEstadistica h3 { color:#4a9b5e; font-size:24px; margin-bottom:5px; }
+.tarjetaEstadistica p { color:#666; font-size:13px; margin:0; }
+.cuerpoInventario { }
+.cajaVacia { text-align:center; padding:30px; color:#999; }
+.cajaIngredientes { background:#f9f9f9; padding:15px; border-radius:8px; margin:15px 0; border:2px dashed #ddd; }
+.elementoIngrediente { background:white; padding:10px 15px; margin-bottom:8px; border-radius:6px; display:flex; justify-content:space-between; align-items:center; border-left:4px solid #4a9b5e; }
+.barraPorcentaje { position:relative; height:14px; background:#e0e0e0; border-radius:8px; overflow:hidden; min-width:60px; }
+.barraPorcentajeRelleno { height:100%; border-radius:8px; }
+.porcentajeAlto { background:#4a9b5e; }
+.porcentajeMedio { background:#fbc02d; }
+.porcentajeBajo { background:#f44336; }
+.textoPorcentaje { position:absolute; top:-2px; right:6px; font-size:10px; color:#1a1a1a; font-weight:600; }
+.desplegableSugerencias { position:absolute; background:white; border:2px solid #d0d0d0; border-radius:6px; max-height:200px; overflow-y:auto; width:calc(100% - 2px); z-index:1000; margin-top:2px; box-shadow:0 4px 6px rgba(0,0,0,0.2); display:none; }
+.elementoSugerencia { padding:10px 15px; cursor:pointer; border-bottom:1px solid #e0e0e0; transition:background 0.2s; }
+.elementoSugerencia:hover { background:#f5f5f5; }
+.elementoSugerencia:last-child { border-bottom:none; }
+.cajaBusqueda { width:300px; padding:10px 15px; border:2px solid #d0d0d0; border-radius:25px; font-size:14px; outline:none; transition:all 0.3s; }
+.cajaBusqueda:focus { border-color:#4a9b5e; box-shadow:0 0 8px rgba(74,155,94,0.3); }
+.cajaBusqueda::placeholder { color:#9E9E9E; }
+.gridRecetas { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:20px; margin-bottom:20px; }
+.tarjetaReceta { background:white; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); border:2px solid #ddd; transition:all 0.3s; }
+.tarjetaReceta:hover { transform:translateY(-4px); box-shadow:0 4px 12px rgba(74,155,94,0.2); border-color:#4a9b5e; }
+#cuerpoRecetas { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:20px; }
+.modalNotificacion { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.3); z-index:2000; min-width:300px; text-align:center; animation:slideIn 0.3s; }
+@keyframes slideIn { from { transform:translate(-50%, -60%); opacity:0; } to { transform:translate(-50%, -50%); opacity:1; } }
+.modalNotificacion.exito { border-left:4px solid #4a9b5e; }
+.modalNotificacion.error { border-left:4px solid #f44336; }
+.modalNotificacion.advertencia { border-left:4px solid #fbc02d; }
+.modalNotificacion h3 { margin-bottom:15px; }
+.modalNotificacion.exito h3 { color:#4a9b5e; }
+.modalNotificacion.error h3 { color:#f44336; }
+.modalNotificacion.advertencia h3 { color:#fbc02d; }
+.fondoNotificacion { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.3); z-index:1999; }
+.selectorPeriodo { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+.selectorPeriodo .boton { margin-right:0; margin-bottom:5px; }
+
+/* ===== RESPONSIVE DESIGN ===== */
+
+/* Tablets (768px - 1024px) */
+@media (max-width:1024px) {
+  .barraLateral { width:240px; }
+  .gridRecetas { grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); }
+  .gridEstadisticas { grid-template-columns:repeat(2, 1fr); }
+  .filaFormulario-CodigoNombre { grid-template-columns:1fr 2fr; }
+  table thead { font-size:12px; }
+  table td, table th { padding:8px 6px; }
+}
+
+/* Mobile devices (máx 768px) */
+@media (max-width:768px) {
+  /* Layout */
+  body { flex-direction:row; }
+  .barraLateral { width:65vw; height:100vh; position:fixed; left:-100%; transition:left 0.3s ease; top:0; z-index:1998; box-shadow:2px 0 10px rgba(0,0,0,0.5); }
+  .barraLateral.mostrada { left:0; }
+  .contenidoPrincipal { margin-left:0; padding:15px; max-height:100vh; overflow-y:auto; }
+  .botonToggleMenu { display:flex !important; z-index:2000; position:fixed; top:20px; left:20px; }
+  .cierreBarraLateral { display:flex !important; z-index:2001; }
+  
+  /* Header - Logo centrado con título debajo */
+  header { padding:80px 20px 15px 20px; flex-direction:column; gap:15px; margin-bottom:15px; justify-content:center; align-items:center; position:relative; }
+  header > div:first-child { flex-direction:column !important; align-items:center !important; text-align:center; }
+  #logoEncabezado { margin-bottom:10px !important; }
+  .tituloEncabezado { font-size:18px; flex:none; }
+  
+  /* Header alerts position - z-index menor que el botón de cerrar */
+  header .iconoAlertas { position:fixed; top:20px; right:20px; z-index:1999; }
+  
+  /* Menu */
+  .menuBarraLateral { padding:10px 0; }
+  .elementoMenu { padding:12px 20px; font-size:13px; gap:10px; }
+  .iconoMenu { font-size:18px; }
+  
+  /* Cards */
+  .tarjeta { padding:15px; margin-bottom:15px; }
+  .tarjeta h2 { font-size:16px; margin-bottom:15px; }
+  .encabezadoTarjeta { flex-direction:column; gap:10px; align-items:flex-start; flex-wrap:wrap; }
+  
+  /* Grids */
+  .gridEstadisticas { grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .tarjetaEstadistica { padding:10px 8px; }
+  .tarjetaEstadistica h3 { font-size:16px; }
+  .tarjetaEstadistica p { font-size:9px; }
+  
+  .gridRecetas { grid-template-columns:1fr; }
+  
+  /* Forms */
+  .filaFormulario { gap:10px; }
+  .filaFormulario-CodigoNombre { grid-template-columns:1fr; }
+  .filaFormulario-UnidadCantidadCosto { grid-template-columns:1fr; }
+  .filaFormulario-NombreCategoria { grid-template-columns:1fr; }
+  .filaFormulario-UnidadCantidad { grid-template-columns:1fr; }
+  .grupoFormulario input, .grupoFormulario select { font-size:16px; padding:12px; }
+  
+  /* Search */
+  .cajaBusqueda { width:100%; max-width:100%; }
+  
+  /* Tables */
+  table { font-size:11px; }
+  table th { padding:8px 4px; font-size:11px; }
+  table td { padding:8px 4px; }
+  table thead { font-size:10px; }
+  
+  /* Buttons */
+  .boton { padding:6px 12px; font-size:12px; margin-right:5px; margin-bottom:5px; }
+  .botonPequeno { padding:4px 8px; font-size:10px; }
+  
+  /* Botón eliminar categoría visible en móviles cuando está activa */
+  .btnCategoriaWrapper .boton.activo ~ .btnEliminarCategoria { opacity:1; pointer-events:auto; }
+  
+  /* Modal - Centrado correcto */
+  .modal { position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.4); display:none; z-index:999; }
+  .contenidoModal { 
+    position:fixed !important; 
+    top:50% !important; 
+    left:50% !important; 
+    transform:translate(-50%, -50%) !important; 
+    width:90% !important; 
+    max-width:90% !important; 
+    max-height:90vh !important; 
+    margin:0 !important;
+    padding:0;
+    border-radius:12px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.3);
+    background-color:#fefefe;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+    z-index:1000;
+  }
+  .encabezadoModal { padding:15px; }
+  .encabezadoModal h3 { font-size:16px; }
+  .cerrarModal { width:35px; height:35px; font-size:20px; }
+  .cajaFormulario { margin:15px; padding:0; overflow-y:auto; max-height:calc(90vh - 100px); }
+  
+  /* Asegurar que todos los tipos de modal estén bien centrados */
+  #modalInsumo .contenidoModal,
+  #modalAumentarInsumo .contenidoModal,
+  #modalUtensilio .contenidoModal,
+  #modalEditarUtensilio .contenidoModal,
+  #modalHistorialUtensilio .contenidoModal,
+  #modalHistorialAgregadoUtensilios .contenidoModal,
+  #modalReceta .contenidoModal,
+  #modalCategoria .contenidoModal,
+  #modalHistorialInv .contenidoModal,
+  #modalConfirmacion .contenidoModal {
+    position:fixed !important;
+    top:50% !important;
+    left:50% !important;
+    transform:translate(-50%, -50%) !important;
+    margin:0 !important;
+    width:90% !important;
+    max-width:90% !important;
+  }
+  
+  /* Alerts dropdown */
+  .desplegableAlertas { width:90vw; right:10px !important; left:auto !important; top:70px !important; max-height:50vh; }
+  
+  /* Notifications */
+  .modalNotificacion {
+    left:50%;
+    top:50%;
+    right:auto;
+    bottom:auto;
+    transform:translate(-50%, -50%);
+    width:90vw;
+    max-width:90vw;
+    max-height:80vh;
+    overflow:auto;
+  }
+  
+  /* Tabs */
+  .tabsAlertas { flex-wrap:wrap; }
+  .tabAlerta { flex:0 1 auto; }
+  
+  /* Icon alerts size */
+  .iconoAlertas { width:40px; height:40px; font-size:20px; }
+}
+
+/* Phones muy pequeños (máx 480px) */
+@media (max-width:480px) {
+  .barraLateral { width:75vw; }
+  .contenidoPrincipal { padding:10px; }
+  
+  header { padding:10px 15px; justify-content:space-between; }
+  .tituloEncabezado { font-size:14px; }
+  
+  .tarjeta { padding:10px; }
+  .tarjeta h2 { font-size:14px; margin-bottom:10px; }
+  
+  .gridEstadisticas { grid-template-columns:repeat(4, 1fr); gap:6px; }
+  .tarjetaEstadistica { padding:8px 6px; }
+  .tarjetaEstadistica h3 { font-size:14px; }
+  .tarjetaEstadistica p { font-size:8px; }
+  
+  .grupoFormulario { margin-bottom:10px; }
+  .grupoFormulario label { font-size:12px; margin-bottom:3px; }
+  .grupoFormulario input, .grupoFormulario select { font-size:14px; padding:10px; }
+  
+  table { font-size:9px; }
+  table th, table td { padding:5px 2px; }
+  
+  .boton { padding:5px 10px; font-size:11px; }
+  .botonPequeno { padding:3px 6px; font-size:8px; }
+  
+  /* Modal centrado en pantallas pequeñas */
+  .contenidoModal { 
+    width:95%; 
+    max-width:95%;
+    top:50% !important;
+    left:50% !important;
+    transform:translate(-50%, -50%) !important;
+    margin:0 !important;
+  }
+  .encabezadoModal h3 { font-size:14px; }
+  
+  .elementoIngrediente { flex-wrap:wrap; gap:5px; }
+  
+  /* Stack form rows */
+  .encabezadoTarjeta { flex-direction:column; gap:8px; }
+  
+  /* Alerts position for small phones */
+  .desplegableAlertas { width:95vw; right:5px !important; left:auto !important; }
+  
+  header .iconoAlertas { width:35px; height:35px; font-size:18px; }
+}
+
+/* Landscape orientation on phones */
+@media (max-height:500px) {
+  .barraLateral { min-height:auto; }
+  .contenidoPrincipal { max-height:calc(100vh - 10px); }
+  .tarjeta { margin-bottom:10px; }
+}
+
+</style>
+</head>
+<body>
+<button class="botonToggleMenu" onclick="alternarBarraLateral()">⋮</button>
+<div class="barraLateral">
+  <div class="encabezadoBarraLateral">
+    <button class="cierreBarraLateral" onclick="alternarBarraLateral()">×</button>
+    <img src="images/logo.png" alt="Chipactli" class="logoBarraLateral" id="logoBarraLateral">
+    <div>
+      <h1>Chipactli</h1>
+      <p>Control de Cosmética Sólida</p>
+    </div>
+  </div>
+  <div class="menuBarraLateral">
+    <a href="#/inventario-produccion" class="elementoMenu activo" onclick="return activarPestanaLink(event, 'produccion')"><span class="iconoMenu">🏭</span><span>Inventario de Producción</span></a>
+    <a href="#/inventario-insumos" class="elementoMenu" onclick="return activarPestanaLink(event, 'insumos')"><span class="iconoMenu">📦</span><span>Inventario de Insumos</span></a>
+    <a href="#/inventario-utensilios" class="elementoMenu" onclick="return activarPestanaLink(event, 'utensilios')"><span class="iconoMenu">🧰</span><span>Inventario de Utensilios</span></a>
+    <a href="#/recetas" class="elementoMenu" onclick="return activarPestanaLink(event, 'recetas')"><span class="iconoMenu">📋</span><span>Recetas</span></a>
+    <a href="#/ventas" class="elementoMenu" onclick="return activarPestanaLink(event, 'ventas')"><span class="iconoMenu">💰</span><span>Ventas Realizadas</span></a>
+  </div>
+</div>
+<div class="contenidoPrincipal">
+  <header>
+    <div style="display:flex;align-items:center;gap:15px;flex:1">
+      <img src="images/logo.png" alt="Chipactli" style="width:70px;height:70px;border-radius:50%;object-fit:cover;background:white;padding:2px" id="logoEncabezado">
+      <h1 class="tituloEncabezado" id="tituloUnitario">Control de Insumos</h1>
+    </div>
+    <div class="iconoAlertas" onclick="alternarAlertas()">🔔<span class="distintivo" id="conteoAlertas">0</span></div>
+  </header>
+  <div class="desplegableAlertas" id="desplegableAlertas">
+    <div style="padding:15px;border-bottom:1px solid #eee;font-weight:600">Alertas de Inventario</div>
+    <div class="tabsAlertas">
+      <button class="tabAlerta activa" id="tabAlertasActivas" onclick="cambiarPestanaAlertas('activas')">Alertas</button>
+      <button class="tabAlerta" id="tabAlertasHistorial" onclick="cambiarPestanaAlertas('historial')">Historial</button>
+    </div>
+    <div class="contenidoAlertas">
+      <div id="listaAlertas" class="listaAlertas"></div>
+      <div id="listaAlertasHistorial" class="listaAlertas oculto"></div>
+    </div>
+  </div>
+  
+  <div id="produccion" class="pestana activo">
+    <div class="tarjeta">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <h2>Inventario de Producción</h2>
+        <input type="text" class="cajaBusqueda" id="busquedaProduccion" placeholder="🔍 Buscar por receta..." oninput="filtrarProduccion(this.value)">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Receta</th><th>Cantidad</th><th>Costo</th><th>Precio Venta</th><th>Ganancia</th><th>Fecha Producción</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoProduccion"></tbody>
+      </table>
+    </div>
+  </div>
+  
+  <div id="insumos" class="pestana">
+    <div class="tarjeta">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <h2>Estadísticas de Inversión</h2>
+        <div>
+          <button class="boton" onclick="mostrarHistorialInversion()">📊 Historial de Inversiones</button>
+        </div>
+      </div>
+      <div class="gridEstadisticas">
+        <div class="tarjetaEstadistica"><h3 id="inversionTotal">$0.00</h3><p>Inversión Total</p></div>
+        <div class="tarjetaEstadistica"><h3 id="inversionRecuperada">$0.00</h3><p>Inversión Recuperada</p></div>
+        <div class="tarjetaEstadistica"><h3 id="inversionNeta">$0.00</h3><p>Inversión Neta</p></div>
+        <div class="tarjetaEstadistica"><h3 id="totalInsumos">0</h3><p>Total de Insumos</p></div>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <div class="encabezadoTarjeta">
+        <h2>Inventario de Insumos</h2>
+        <div style="display:flex;gap:10px">
+          <input type="text" class="cajaBusqueda" id="busquedaInventario" placeholder="🔍 Buscar insumo..." oninput="filtrarInventario(this.value)">
+          <button class="boton" onclick="abrirModal('modalInsumo')">➥ Agregar Insumo</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th><th>Nombre</th><th>Unidad</th><th>Cantidad Total</th><th>Disponible</th><th>Costo Total</th><th>Costo/Unidad</th><th>Porcentaje</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoInventario"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="utensilios" class="pestana">
+    <div class="tarjeta">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <h2>Estadísticas de Utensilios</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="boton" onclick="window.utensilios.mostrarHistorialAgregadoUtensilios()">📊 Historial Agrupado</button>
+        </div>
+      </div>
+      <div class="gridEstadisticas">
+        <div class="tarjetaEstadistica"><h3 id="inversionTotalUtensilios">$0.00</h3><p>Inversión Total</p></div>
+        <div class="tarjetaEstadistica"><h3 id="inversionRecuperadaUtensilios">$0.00</h3><p>Inversión Recuperada</p></div>
+        <div class="tarjetaEstadistica"><h3 id="inversionNetaUtensilios">$0.00</h3><p>Inversión Neta</p></div>
+        <div class="tarjetaEstadistica"><h3 id="totalUtensilios">0</h3><p>Total de Utensilios</p></div>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <div class="encabezadoTarjeta">
+        <h2>Inventario de Utensilios</h2>
+        <div style="display:flex;gap:10px">
+          <input type="text" class="cajaBusqueda" id="busquedaUtensilios" placeholder="🔍 Buscar utensilio..." oninput="filtrarUtensilios(this.value)">
+          <button class="boton" onclick="abrirModal('modalUtensilio')">➥ Agregar Utensilio</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th><th>Nombre</th><th>Unidad</th><th>Cantidad Total</th><th>Costo Total</th><th>Costo/Unidad</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoUtensilios"></tbody>
+      </table>
+    </div>
+  </div>
+  
+  <div id="recetas" class="pestana">
+    <div class="tarjeta">
+      <div class="encabezadoTarjeta">
+        <h2>Gestión de Recetas</h2>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap">
+          <button class="boton" onclick="abrirModal('modalCategoria')">➕ Nueva Categoría</button>
+          <button class="boton" onclick="abrirModal('modalReceta')">➥ Nueva Receta</button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:center;margin-bottom:15px">
+        <input type="text" class="cajaBusqueda" id="busquedaRecetas" placeholder="🔍 Buscar receta..." oninput="filtrarRecetas(this.value)" style="width:220px">
+      </div>
+      <div id="pestanasCategoriasRecetas" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:15px"></div>
+      <div id="cuerpoRecetas" class="gridRecetas"></div>
+    </div>
+  </div>
+  
+  <div id="ventas" class="pestana">
+    <div class="tarjeta">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap;gap:10px">
+        <h2>Análisis de Ventas</h2>
+        <div class="selectorPeriodo">
+          <button class="boton" onclick="cargarEstadisticasVentas('dia')">Hoy</button>
+          <button class="boton" onclick="cargarEstadisticasVentas('semana')">Esta Semana</button>
+          <button class="boton" onclick="cargarEstadisticasVentas('quincena')">Quincena</button>
+          <button class="boton" onclick="cargarEstadisticasVentas('mes')">Este Mes</button>
+        </div>
+      </div>
+      <div id="pestanasCategoriasVentas" style="display:flex;gap:5px;margin-bottom:15px;flex-wrap:wrap"></div>
+      <div class="gridEstadisticas">
+        <div class="tarjetaEstadistica"><h3 id="ingresosTotal">$0</h3><p>Ingresos</p></div>
+        <div class="tarjetaEstadistica"><h3 id="costosTotal">$0</h3><p>Costos</p></div>
+        <div class="tarjetaEstadistica"><h3 id="gananciaTotal">$0</h3><p>Ganancia</p></div>
+        <div class="tarjetaEstadistica"><h3 id="unidadesVendidas">0</h3><p>Unidades Vendidas</p></div>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <h2>Historial de Ventas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Receta</th><th>Categoría</th><th>Cantidad</th><th>Pedido</th><th>Fecha Producción</th><th>Fecha Venta</th><th>Costo</th><th>Venta</th><th>Ganancia</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoVentas"></tbody>
+      </table>
+    </div>
+    <div class="tarjeta">
+      <h2>Historial de Cortesías</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Receta</th><th>Cantidad</th><th>Pedido</th><th>Motivo</th><th>Para quién</th><th>Fecha y hora</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoCortesias"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- MODALES -->
+
+<div id="modalInsumo" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Agregar Insumo al Inventario</h3><button class="cerrarModal" onclick="cerrarModal('modalInsumo')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioInsumo" onsubmit="agregarInsumo(event)">
+        <div class="filaFormulario filaFormulario-CodigoNombre">
+          <div class="grupoFormulario"><label>Código *</label><input type="text" id="codigoInsumo" required></div>
+          <div class="grupoFormulario"><label>Nombre *</label><input type="text" id="nombreInsumo" required></div>
+        </div>
+        <div class="filaFormulario filaFormulario-UnidadCantidadCosto">
+          <div class="grupoFormulario"><label>Unidad *</label><select id="unidadInsumo" required>
+            <option value="">Seleccionar</option>
+            <option value="g">Gramos (g)</option>
+            <option value="ml">Mililitros (ml)</option>
+            <option value="kg">Kilogramos (kg)</option>
+            <option value="l">Litros (l)</option>
+            <option value="pz">Piezas (pz)</option>
+            <option value="cda">Cucharadas (cda)</option>
+            <option value="cdta">Cucharaditas (cdta)</option>
+            <option value="taza">Tazas</option>
+            <option value="oz">Onzas (oz)</option>
+          </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="cantidadInsumo" step="0.01" placeholder="0.00" required></div>
+          <div class="grupoFormulario"><label>Costo Total *</label><input type="number" id="costoInsumo" step="0.01" placeholder="$0.00" required></div>
+        </div>
+        <button type="submit" class="boton botonExito">Guardar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalInsumo')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalAumentarInsumo" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Aumentar Cantidad de Insumo</h3><button class="cerrarModal" onclick="cerrarModal('modalAumentarInsumo')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioAumentarInsumo" onsubmit="window.inventario.guardarAumentarInsumo(event)">
+        <input type="hidden" id="aumentarInsumoId">
+        <div class="grupoFormulario">
+          <label>Insumo</label>
+          <input type="text" id="aumentarInsumoNombre" readonly style="background:#f5f5f5;cursor:not-allowed">
+        </div>
+        <div class="filaFormulario">
+          <div class="grupoFormulario"><label>Cantidad a Agregar *</label><input type="number" id="aumentarCantidad" step="0.01" placeholder="0.00" required></div>
+          <div class="grupoFormulario"><label>Costo Total *</label><input type="number" id="aumentarCosto" step="0.01" placeholder="$0.00" required></div>
+        </div>
+        <button type="submit" class="boton botonExito">Guardar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalAumentarInsumo')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalUtensilio" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Agregar Utensilio</h3><button class="cerrarModal" onclick="cerrarModal('modalUtensilio')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioUtensilio" onsubmit="agregarUtensilio(event)">
+        <div class="filaFormulario filaFormulario-CodigoNombre">
+          <div class="grupoFormulario"><label>Código *</label><input type="text" id="codigoUtensilio" required></div>
+          <div class="grupoFormulario"><label>Nombre *</label><input type="text" id="nombreUtensilio" required></div>
+        </div>
+        <div class="filaFormulario filaFormulario-UnidadCantidadCosto">
+          <div class="grupoFormulario"><label>Unidad *</label><select id="unidadUtensilio" required>
+            <option value="">Seleccionar</option>
+            <option value="pz">Piezas (pz)</option>
+            <option value="jgo">Juego</option>
+            <option value="set">Set</option>
+          </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="cantidadUtensilio" step="0.01" placeholder="0.00" required></div>
+          <div class="grupoFormulario"><label>Costo Total *</label><input type="number" id="costoUtensilio" step="0.01" placeholder="$0.00" required></div>
+        </div>
+        <button type="submit" class="boton botonExito">Guardar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalUtensilio')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalEditarUtensilio" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Editar Utensilio</h3><button class="cerrarModal" onclick="cerrarModal('modalEditarUtensilio')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioEditarUtensilio" onsubmit="guardarEditarUtensilio(event)">
+        <input type="hidden" id="idEditUtensilio">
+        <div class="filaFormulario filaFormulario-CodigoNombre">
+          <div class="grupoFormulario"><label>Código *</label><input type="text" id="editCodigoUtensilio" disabled></div>
+          <div class="grupoFormulario"><label>Nombre *</label><input type="text" id="editNombreUtensilio" required></div>
+        </div>
+        <div class="filaFormulario filaFormulario-UnidadCantidadCosto">
+          <div class="grupoFormulario"><label>Unidad *</label><select id="editUnidadUtensilio" required>
+            <option value="">Seleccionar</option>
+            <option value="pz">Piezas (pz)</option>
+            <option value="jgo">Juego</option>
+            <option value="set">Set</option>
+          </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="editCantidadUtensilio" step="0.01" placeholder="0.00" required></div>
+          <div class="grupoFormulario"><label>Costo Total *</label><input type="number" id="editCostoUtensilio" step="0.01" placeholder="$0.00" required></div>
+        </div>
+        <button type="submit" class="boton botonExito">Guardar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalEditarUtensilio')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalHistorialUtensilio" class="modal">
+  <div class="contenidoModal" style="max-width:600px">
+    <div class="encabezadoModal">
+      <h3 id="tituloHistorialUtensilio">Historial de Utensilio</h3>
+      <button class="cerrarModal" onclick="cerrarModal('modalHistorialUtensilio')">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cantidad</th>
+            <th>Costo</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoHistorialUtensilio"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="modalHistorialAgregadoUtensilios" class="modal">
+  <div class="contenidoModal" style="max-width:800px;max-height:600px;overflow-y:auto">
+    <div class="encabezadoModal">
+      <h3>Historial Agrupado de Inversión en Utensilios</h3>
+      <button class="cerrarModal" onclick="cerrarModal('modalHistorialAgregadoUtensilios')">&times;</button>
+    </div>
+    <div style="padding:20px" id="listaHistorialAgregadoUtensilios"></div>
+  </div>
+</div>
+
+<div id="modalCategoria" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Nueva Categoría</h3><button class="cerrarModal" onclick="cerrarModal('modalCategoria')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioCategoria" onsubmit="agregarCategoria(event)">
+        <div class="grupoFormulario"><label>Nombre de la Categoría *</label><input type="text" id="nombreCategoria" required></div>
+        <button type="submit" class="boton botonExito">Guardar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalCategoria')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalReceta" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Nueva Receta</h3><button class="cerrarModal" onclick="cerrarModal('modalReceta')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioReceta" onsubmit="agregarReceta(event)">
+        <div class="filaFormulario filaFormulario-NombreCategoria">
+          <div class="grupoFormulario"><label>Nombre de la Receta *</label><input type="text" id="nombreReceta" required></div>
+          <div class="grupoFormulario"><label>Gramaje (g) *</label><input type="number" id="gramajeReceta" step="0.01" placeholder="0.00" required></div>
+        </div>
+        <div class="grupoFormulario"><label>Categoría *</label><select id="categoriaReceta" required></select></div>
+        <h4 style="margin-top:20px;margin-bottom:10px">Ingredientes</h4>
+        <div class="grupoFormulario"><label>Código o Nombre del Insumo</label><input type="text" id="insumoSeleccionado" placeholder="Buscar por código o nombre" autocomplete="off" oninput="buscarInsumoParaReceta(this.value)"><div id="listaBusquedaInsumos" class="desplegableSugerencias"></div><input type="hidden" id="idInsumoSeleccionado"></div>
+        <div class="filaFormulario filaFormulario-UnidadCantidad">
+          <div class="grupoFormulario"><label>Unidad</label><select id="unidadIngrediente" required disabled>
+              <option value="">Seleccionar</option>
+              <option value="g">Gramos (g)</option>
+              <option value="ml">Mililitros (ml)</option>
+              <option value="kg">Kilogramos (kg)</option>
+              <option value="l">Litros (l)</option>
+              <option value="pz">Piezas (pz)</option>
+              <option value="cda">Cucharadas (cda)</option>
+              <option value="cdta">Cucharaditas (cdta)</option>
+              <option value="taza">Tazas</option>
+              <option value="oz">Onzas (oz)</option>
+            </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="cantidadIngrediente" step="0.01" placeholder="0.00"></div>
+        </div>
+        <button type="button" class="boton" onclick="agregarIngrediente()">➕ Agregar Ingrediente</button>
+        <table style="margin-top:15px;border:1px solid #ddd;border-radius:8px;overflow:hidden">
+          <thead>
+            <tr style="background:#f5f5f5">
+              <th style="text-align:left">Insumo</th>
+              <th>Cantidad</th>
+              <th style="width:50px">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="tablaIngredientesTemporales"></tbody>
+        </table>
+        <div style="margin-top:20px"><button type="submit" class="boton botonExito">Guardar Receta</button><button type="button" class="boton" onclick="cerrarModal('modalReceta')">Cancelar</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalIngredientes" class="modal">
+  <div class="contenidoModal" style="max-width:550px;max-height:85vh">
+    <div class="encabezadoModal"><h3>Ingredientes de la Receta</h3><button class="cerrarModal" onclick="cerrarModal('modalIngredientes')">&times;</button></div>
+    <div id="detallesIngredientes" style="padding:15px;max-height:calc(85vh - 80px);overflow-y:auto"></div>
+  </div>
+</div>
+
+<div id="modalEscalarReceta" class="modal">
+  <div class="contenidoModal" style="max-width:450px">
+    <div class="encabezadoModal"><h3>Escalar Receta</h3><button class="cerrarModal" onclick="cerrarModal('modalEscalarReceta')">&times;</button></div>
+    <div style="padding:20px">
+      <input type="hidden" id="idRecetaEscalar">
+      <div class="grupoFormulario">
+        <label>Gramaje Original</label>
+        <input type="text" id="gramajeOriginal" readonly style="background:#f0f0f0">
+      </div>
+      <div class="grupoFormulario">
+        <label>Nuevo Gramaje (g) *</label>
+        <input type="number" id="nuevoGramaje" step="0.01" placeholder="Ej: 1000" required>
+      </div>
+      <div style="margin-top:20px">
+        <button class="boton botonExito" onclick="copiarRecetaEscalada()">Copiar Receta Escalada</button>
+        <button class="boton" onclick="cerrarModal('modalEscalarReceta')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalProduccionRapida" class="modal">
+  <div class="contenidoModal" style="max-width:500px">
+    <div class="encabezadoModal"><h3>Producir Receta</h3><button class="cerrarModal" onclick="cerrarModal('modalProduccionRapida')">&times;</button></div>
+    <div style="padding:20px">
+      <input type="hidden" id="idRecetaProducir">
+      <input type="hidden" id="costoPorPiezaProducir">
+      <div class="grupoFormulario">
+        <label>Receta</label>
+        <input type="text" id="nombreRecetaProducir" readonly style="background:#f0f0f0">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:15px">
+        <div class="grupoFormulario">
+          <label>Cantidad (piezas) *</label>
+          <input type="number" id="cantidadProducir" min="1" value="1" required oninput="actualizarCostoProduccion()">
+        </div>
+        <div class="grupoFormulario">
+          <label>Costo de Producción *</label>
+          <input type="number" id="costoProducir" step="0.01" readonly style="background:#f0f0f0">
+        </div>
+      </div>
+      <div class="grupoFormulario">
+        <label>Precio de Venta *</label>
+        <input type="number" id="precioVentaProducir" step="0.01" placeholder="0.00" required>
+      </div>
+      <div style="margin-top:20px">
+        <button class="boton botonExito" onclick="producirDesdeReceta()">Producir</button>
+        <button class="boton" onclick="cerrarModal('modalProduccionRapida')">Cancelar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalHistorialInsumo" class="modal">
+  <div class="contenidoModal" style="max-width:600px">
+    <div class="encabezadoModal">
+      <h3 id="tituloHistorialInsumo">Historial de Insumo</h3>
+      <button class="cerrarModal" onclick="cerrarModal('modalHistorialInsumo')">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Cantidad</th>
+            <th>Costo</th>
+          </tr>
+        </thead>
+        <tbody id="cuerpoHistorialInsumo"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="modalHistorialInv" class="modal">
+  <div class="contenidoModal" style="max-width:700px">
+    <div class="encabezadoModal">
+      <h3>Historial de Inversiones por Día</h3>
+      <button class="cerrarModal" onclick="cerrarModal('modalHistorialInv')">&times;</button>
+    </div>
+    <div id="detallesHistorialInv" style="padding:20px">
+      <div id="listaHistorialPorFecha"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalVentaPedido" class="modal">
+  <div class="contenidoModal" style="max-width:420px">
+    <div class="encabezadoModal"><h3>Registrar Venta</h3><button class="cerrarModal" onclick="cerrarModal('modalVentaPedido')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioVentaPedido" onsubmit="confirmarVentaPedido(event)">
+        <div class="grupoFormulario"><label>Número de pedido *</label><input type="text" id="numeroPedidoVenta" required></div>
+        <button type="submit" class="boton botonExito">Registrar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalVentaPedido')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalCortesia" class="modal">
+  <div class="contenidoModal" style="max-width:500px">
+    <div class="encabezadoModal"><h3>Registrar Cortesía</h3><button class="cerrarModal" onclick="cerrarModal('modalCortesia')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioCortesia" onsubmit="confirmarCortesia(event)">
+        <div class="grupoFormulario"><label>Número de pedido *</label><input type="text" id="numeroPedidoCortesia" required></div>
+        <div class="grupoFormulario"><label>Motivo *</label><input type="text" id="motivoCortesia" required></div>
+        <div class="grupoFormulario"><label>Para quién</label><input type="text" id="paraQuienCortesia" placeholder="Opcional"></div>
+        <button type="submit" class="boton botonExito">Registrar</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalCortesia')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalEditarInsumo" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Editar Insumo</h3><button class="cerrarModal" onclick="cerrarModal('modalEditarInsumo')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioEditarInsumo" onsubmit="guardarEditarInsumo(event)">
+        <input type="hidden" id="idEditInsumo">
+        <div class="filaFormulario filaFormulario-CodigoNombre">
+          <div class="grupoFormulario"><label>Código *</label><input type="text" id="editCodigoInsumo" disabled></div>
+          <div class="grupoFormulario"><label>Nombre *</label><input type="text" id="editNombreInsumo" required></div>
+        </div>
+        <div class="filaFormulario filaFormulario-UnidadCantidadCosto">
+          <div class="grupoFormulario"><label>Unidad *</label><select id="editUnidadInsumo" required>
+            <option value="">Seleccionar</option>
+            <option value="g">Gramos (g)</option>
+            <option value="ml">Mililitros (ml)</option>
+            <option value="kg">Kilogramos (kg)</option>
+            <option value="l">Litros (l)</option>
+            <option value="pz">Piezas (pz)</option>
+            <option value="cda">Cucharadas (cda)</option>
+            <option value="cdta">Cucharaditas (cdta)</option>
+            <option value="taza">Tazas</option>
+            <option value="oz">Onzas (oz)</option>
+          </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="editCantidadInsumo" step="0.01" placeholder="0.00" required></div>
+          <div class="grupoFormulario"><label>Costo Total *</label><input type="number" id="editCostoInsumo" step="0.01" placeholder="$0.00" required></div>
+        </div>
+        <button type="submit" class="boton botonExito">Guardar Cambios</button>
+        <button type="button" class="boton" onclick="cerrarModal('modalEditarInsumo')">Cancelar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalEditarReceta" class="modal">
+  <div class="contenidoModal">
+    <div class="encabezadoModal"><h3>Editar Receta</h3><button class="cerrarModal" onclick="cerrarModal('modalEditarReceta')">&times;</button></div>
+    <div class="cajaFormulario">
+      <form id="formularioEditarReceta" onsubmit="guardarEditarReceta(event)">
+        <input type="hidden" id="idEditReceta">
+        <div class="filaFormulario filaFormulario-NombreCategoria">
+          <div class="grupoFormulario"><label>Nombre de la Receta *</label><input type="text" id="editNombreReceta" required></div>
+          <div class="grupoFormulario"><label>Gramaje (g) *</label><input type="number" id="editGramajeReceta" step="0.01" placeholder="0.00" required></div>
+        </div>
+        <div class="grupoFormulario"><label>Categoría *</label><select id="editCategoriaReceta" required></select></div>
+        <h4 style="margin-top:20px;margin-bottom:10px">Ingredientes</h4>
+        <div class="grupoFormulario"><label>Código o Nombre del Insumo</label><input type="text" id="editInsumoSeleccionado" placeholder="Buscar por código o nombre" autocomplete="off" oninput="buscarInsumoParaReceta(this.value)"><div id="editListaBusquedaInsumos" class="desplegableSugerencias"></div><input type="hidden" id="editIdInsumoSeleccionado"></div>
+        <div class="filaFormulario filaFormulario-UnidadCantidad">
+          <div class="grupoFormulario"><label>Unidad</label><select id="editUnidadIngrediente" required disabled>
+              <option value="">Seleccionar</option>
+              <option value="g">Gramos (g)</option>
+              <option value="ml">Mililitros (ml)</option>
+              <option value="kg">Kilogramos (kg)</option>
+              <option value="l">Litros (l)</option>
+              <option value="pz">Piezas (pz)</option>
+              <option value="cda">Cucharadas (cda)</option>
+              <option value="cdta">Cucharaditas (cdta)</option>
+              <option value="taza">Tazas</option>
+              <option value="oz">Onzas (oz)</option>
+            </select></div>
+          <div class="grupoFormulario"><label>Cantidad *</label><input type="number" id="editCantidadIngrediente" step="0.01" placeholder="0.00"></div>
+        </div>
+        <button type="button" class="boton" onclick="agregarIngrediente(true)">➕ Agregar Ingrediente</button>
+        <table style="margin-top:15px;border:1px solid #ddd;border-radius:8px;overflow:hidden">
+          <thead>
+            <tr style="background:#f5f5f5">
+              <th style="text-align:left">Insumo</th>
+              <th>Cantidad</th>
+              <th style="width:50px">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="tablaIngredientesTemporales"></tbody>
+        </table>
+        <div style="margin-top:20px"><button type="submit" class="boton botonExito">Guardar Cambios</button><button type="button" class="boton" onclick="cerrarModal('modalEditarReceta')">Cancelar</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="modalConfirmacion" class="modal">
+  <div class="contenidoModal" style="max-width:420px">
+    <div class="encabezadoModal">
+      <h3 id="tituloConfirmacion">Confirmar</h3>
+      <button class="cerrarModal" onclick="document.getElementById('btnConfirmacionCancelar').click()">&times;</button>
+    </div>
+    <div class="cajaFormulario" style="padding:20px">
+      <p id="textoConfirmacion" style="margin-bottom:18px;color:#333"></p>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button id="btnConfirmacionCancelar" class="boton">Cancelar</button>
+        <button id="btnConfirmacionAceptar" class="boton botonExito">Aceptar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="fondoNotificacion" class="fondoNotificacion"></div>
+<div id="modalNotificacion" class="modalNotificacion">
+  <h3 id="tituloNotificacion">✓ Éxito</h3>
+  <p id="mensajeNotificacion">Operación completada</p>
+  <button class="boton botonExito" onclick="cerrarNotificacion()" style="margin-top:15px">Aceptar</button>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

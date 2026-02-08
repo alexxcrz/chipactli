@@ -1,0 +1,79 @@
+🎨 GUÍA DE PERSONALIZACIÓN - CHIPACTLI
+
+Tu aplicación ya está rebautizada como "CHIPACTLI" y está lista para recibir tu marca visual.
+
+═══════════════════════════════════════════════════════════════════
+
+📁 DÓNDE GUARDAR LAS IMÁGENES
+═══════════════════════════════════════════════════════════════════
+
+Ruta: frontend/images/
+
+Guarda tus imágenes en esta carpeta:
+📍 C:\Users\[TuUsuario]\Escritorio\control de insumos\frontend\images\
+
+═══════════════════════════════════════════════════════════════════
+
+🖼️ TIPOS DE IMÁGENES QUE PUEDES AGREGAR
+═══════════════════════════════════════════════════════════════════
+
+1️⃣ FAVICON (REQUERIDO)
+   Archivo: favicon.ico
+   Tamaño: 32x32 píxeles o 64x64 píxeles
+   Formato: .ico
+   Ubicación: Aparecerá en la pestaña del navegador
+   
+   ✅ Pasos:
+      - Convierte tu logo a .ico en https://convertio.co/es/png-ico/
+      - Guarda como "favicon.ico" en frontend/images/
+      - Recarga con Ctrl+F5
+      - Verás el ícono en la pestaña del navegador
+
+2️⃣ LOGO (OPCIONAL)
+   Archivo: logo.png
+   Tamaño: 50x50 píxeles (se escalará automáticamente)
+   Formato: .png (con fondo transparente recomendado)
+   Ubicación: Aparecerá al lado del título en el encabezado
+   
+   ✅ Pasos:
+      - Exporta tu logo como PNG
+      - Ajusta el tamaño a 50x50 píxeles
+      - Guarda como "logo.png" en frontend/images/
+      - Recarga con Ctrl+F5
+      - Verás el logo en el encabezado
+
+═══════════════════════════════════════════════════════════════════
+
+🎯 CAMBIOS YA REALIZADOS
+═══════════════════════════════════════════════════════════════════
+
+✅ Nombre: Cambié "Control de Cosmética Sólida" por "CHIPACTLI"
+✅ Título de pestaña: Ahora dice "Chipactli - Control de Cosmética Sólida"
+✅ Sidebar: Cambié el nombre del sistema por "Chipactli"
+✅ Logo placeholder: El header está listo para mostrar tu logo
+✅ Favicon: Ya está configurado para mostrar favicon.ico
+
+═══════════════════════════════════════════════════════════════════
+
+🚀 CÓMO ACTIVAR TUS IMÁGENES
+═══════════════════════════════════════════════════════════════════
+
+Después de guardar las imágenes:
+
+1. Abre la aplicación en el navegador
+2. Presiona Ctrl+F5 (recarga forzada)
+3. El favicon aparecerá en la pestaña
+4. El logo aparecerá en el encabezado (si existe logo.png)
+
+═══════════════════════════════════════════════════════════════════
+
+💡 CONSEJOS
+═══════════════════════════════════════════════════════════════════
+
+- Para favicon: Usa https://favicon.io/ para crear uno profesional
+- Para logo: Usa Canva, Illustrator, o Photoshop
+- El logo debe tener fondo transparente para verse mejor
+- Usa colores que combinen con el tema verde/natural de la app
+- Mantén logos simples y claros, se verán pequeños
+
+═══════════════════════════════════════════════════════════════════

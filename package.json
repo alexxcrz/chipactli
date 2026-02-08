@@ -1,0 +1,22 @@
+{
+  "type": "module",
+  "name": "control-de-insumos",
+  "version": "1.0.0",
+  "description": "Sistema de control de insumos para cosmética sólida",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"node open-browser.js\"",
+    "dev:backend": "cd backend && node server.js",
+    "start": "cd backend && node server.js",
+    "install:all": "npm install && cd backend && npm install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "serve": "^14.2.5"
+  },
+  "dependencies": {
+    "open": "^11.0.0"
+  }
+}

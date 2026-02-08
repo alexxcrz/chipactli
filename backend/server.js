@@ -61,7 +61,7 @@ app.use((req, res) => {
 });
 
 // Iniciar servidor
-const PUERTO = 3001;
+const PUERTO = process.env.PORT || 3001;
 servidor.listen(PUERTO, "0.0.0.0", () => {
   const interfaces = os.networkInterfaces();
   let ipLocal = "localhost";
@@ -78,7 +78,11 @@ servidor.listen(PUERTO, "0.0.0.0", () => {
   }
   
   console.log(`\n✅ Servidor ejecutándose en puerto ${PUERTO}`);
-  console.log(`📱 Acceso local: http://localhost:${PUERTO}`);
-  console.log(`🌐 Acceso remoto: http://${ipLocal}:${PUERTO}`);
-  console.log(`\nPara conectarte desde otro dispositivo en la red, usa la IP: ${ipLocal}\n`);
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`🌍 Aplicación en producción`);
+  } else {
+    console.log(`📱 Acceso local: http://localhost:${PUERTO}`);
+    console.log(`🌐 Acceso remoto: http://${ipLocal}:${PUERTO}`);
+    console.log(`\nPara conectarte desde otro dispositivo en la red, usa la IP: ${ipLocal}\n`);
+  }
 });

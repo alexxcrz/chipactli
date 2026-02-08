@@ -1,16 +1,20 @@
 {
   "type": "module",
-  "name": "control-de-insumos",
+  "name": "chipactli",
   "version": "1.0.0",
-  "description": "Sistema de control de insumos para cosmética sólida",
+  "description": "Sistema de control de insumos para cosmética sólida - Chipactli",
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"node open-browser.js\"",
     "dev:backend": "cd backend && node server.js",
     "start": "cd backend && node server.js",
-    "install:all": "npm install && cd backend && npm install"
+    "install:all": "npm install && cd backend && npm install",
+    "build": "cd backend && npm install"
   },
-  "keywords": [],
-  "author": "",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["chipactli", "inventario", "control-insumos"],
+  "author": "alexxcrz",
   "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.2.2",

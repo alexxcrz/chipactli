@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Sistema de control de insumos para cosmética sólida - Chipactli",
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"node open-browser.js\"",
+    "dev": "cd backend && node server.js",
     "dev:backend": "cd backend && node server.js",
     "start": "cd backend && node server.js",
     "install:all": "npm install && cd backend && npm install",

@@ -165,7 +165,7 @@ app.post("/api/backup/importar", upload.fields([
 
 // Exportar datos de inventario
 app.get("/api/exportar/inventario", (req, res) => {
-  bdInventario.all("SELECT * FROM insumos", [], (err, rows) => {
+  bdInventario.all("SELECT * FROM inventario", [], (err, rows) => {
     if (err) {
       return res.status(500).json({ exito: false, mensaje: "Error al exportar inventario" });
     }
@@ -253,7 +253,7 @@ app.post("/api/importar/inventario", async (req, res) => {
     for (const item of datos) {
       await new Promise((resolve, reject) => {
         bdInventario.run(
-          `INSERT INTO insumos (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad)
+          `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad)
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(codigo) DO UPDATE SET
            nombre=excluded.nombre, unidad=excluded.unidad, cantidad_total=excluded.cantidad_total,

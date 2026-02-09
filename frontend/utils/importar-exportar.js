@@ -3,12 +3,40 @@
 // ========================================
 
 /**
+ * Obtener la URL base de la API
+ */
+function obtenerURLAPI() {
+  // Si ya está definida globalmente, usarla
+  if (window.API_URL) return window.API_URL;
+  if (typeof API !== 'undefined') return API;
+  
+  // Detectar automáticamente
+  const host = window.location.hostname;
+  const protocol = window.location.protocol;
+  const port = window.location.port;
+  
+  // Si es localhost, usar puerto 3001
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:3001';
+  }
+  
+  // Si es una IP local, usar puerto 3001
+  if (host.match(/^\d+\.\d+\.\d+\.\d+$/)) {
+    return `http://${host}:3001`;
+  }
+  
+  // Si tiene un dominio, usar el mismo origen
+  return `${protocol}//${host}${port ? ':' + port : ''}`;
+}
+
+/**
  * Exportar datos de una sección específica
  * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas'
  */
 async function exportarDatos(tipo) {
   try {
-    const  response = await fetch(`${window.API_URL}/api/exportar/${tipo}`);
+    const apiURL = obtenerURLAPI();
+    const response = await fetch(`${apiURL}/api/exportar/${tipo}`);
     
     if (!response.ok) {
       throw new Error(`Error al exportar ${tipo}: ${response.statusText}`);
@@ -66,7 +94,8 @@ async function importarDatos(tipo, input) {
     }
     
     // Enviar al servidor
-    const response = await fetch(`${window.API_URL}/api/importar/${tipo}`, {
+    const apiURL = obtenerURLAPI();
+    const response = await fetch(`${apiURL}/api/importar/${tipo}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(datos)
@@ -126,3 +155,7 @@ function recargarSeccion(tipo) {
       break;
   }
 }
+
+// Exponer funciones globalmente para uso en onclick handlers
+window.exportarDatos = exportarDatos;
+window.importarDatos = importarDatos;

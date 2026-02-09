@@ -199,7 +199,7 @@ app.get("/api/exportar/recetas", (req, res) => {
       }
       exportData.recetas = recetas;
       
-      bdRecetas.all("SELECT * FROM ingredientes", [], (err, ingredientes) => {
+      bdRecetas.all("SELECT * FROM ingredientes_receta", [], (err, ingredientes) => {
         if (err) {
           return res.status(500).json({ exito: false, mensaje: "Error al exportar ingredientes" });
         }
@@ -221,7 +221,7 @@ app.get("/api/exportar/recetas", (req, res) => {
 
 // Exportar datos de producción
 app.get("/api/exportar/produccion", (req, res) => {
-  bdProduccion.all("SELECT * FROM ordenes_produccion", [], (err, rows) => {
+  bdProduccion.all("SELECT * FROM produccion", [], (err, rows) => {
     if (err) {
       return res.status(500).json({ exito: false, mensaje: "Error al exportar producción" });
     }
@@ -365,9 +365,9 @@ app.post("/api/importar/recetas", async (req, res) => {
       for (const ing of datos.ingredientes) {
         await new Promise((resolve, reject) => {
           bdRecetas.run(
-            `INSERT INTO ingredientes (id, id_receta, codigo_insumo, cantidad_requerida) VALUES (?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET id_receta=excluded.id_receta, codigo_insumo=excluded.codigo_insumo, cantidad_requerida=excluded.cantidad_requerida`,
-            [ing.id, ing.id_receta, ing.codigo_insumo, ing.cantidad_requerida],
+            `INSERT INTO ingredientes_receta (id, id_receta, id_insumo, cantidad, unidad) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET id_receta=excluded.id_receta, id_insumo=excluded.id_insumo, cantidad=excluded.cantidad, unidad=excluded.unidad`,
+            [ing.id, ing.id_receta, ing.id_insumo, ing.cantidad, ing.unidad],
             (err) => {
               if (err) reject(err);
               else {
@@ -400,12 +400,12 @@ app.post("/api/importar/produccion", async (req, res) => {
     for (const item of datos) {
       await new Promise((resolve, reject) => {
         bdProduccion.run(
-          `INSERT INTO ordenes_produccion (id, id_receta, cantidad, costo_total, precio_venta, ganancia, fecha_produccion)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO produccion (id, nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-           id_receta=excluded.id_receta, cantidad=excluded.cantidad, costo_total=excluded.costo_total,
-           precio_venta=excluded.precio_venta, ganancia=excluded.ganancia, fecha_produccion=excluded.fecha_produccion`,
-          [item.id, item.id_receta, item.cantidad, item.costo_total, item.precio_venta, item.ganancia, item.fecha_produccion],
+           nombre_receta=excluded.nombre_receta, cantidad=excluded.cantidad, fecha_produccion=excluded.fecha_produccion,
+           costo_produccion=excluded.costo_produccion, precio_venta=excluded.precio_venta`,
+          [item.id, item.nombre_receta, item.cantidad, item.fecha_produccion, item.costo_produccion, item.precio_venta],
           (err) => {
             if (err) reject(err);
             else {

@@ -8,6 +8,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
 import { promises as fs } from "fs";
+import multer from "multer";
 
 // Importar utilidades
 import { inicializarWss } from "./utils/transmitir.js";
@@ -37,6 +38,12 @@ inicializarWss(wss);
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+
+// Configurar multer para uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB por archivo
+});
 
 // Inicializar bases de datos
 const bdInventario = new Database("./inventario.db");
@@ -92,10 +99,14 @@ app.post("/api/backup/restaurar", async (req, res) => {
   res.json({ exito: resultado, mensaje: resultado ? "Backup restaurado exitosamente" : "Error al restaurar backup" });
 });
 
-app.post("/api/backup/importar", async (req, res) => {
+app.post("/api/backup/importar", upload.fields([
+  { name: 'inventario', maxCount: 1 },
+  { name: 'recetas', maxCount: 1 },
+  { name: 'produccion', maxCount: 1 },
+  { name: 'ventas', maxCount: 1 }
+]), async (req, res) => {
   if (!validarAdmin(req, res)) return;
 
-  const { archivos } = req.body;
   const mapaArchivos = {
     inventario: "inventario.db",
     recetas: "recetas.db",
@@ -103,8 +114,8 @@ app.post("/api/backup/importar", async (req, res) => {
     ventas: "ventas.db"
   };
 
-  if (!archivos || typeof archivos !== "object") {
-    res.status(400).json({ exito: false, mensaje: "Archivos invalidos" });
+  if (!req.files || Object.keys(req.files).length === 0) {
+    res.status(400).json({ exito: false, mensaje: "No se enviaron archivos" });
     return;
   }
 
@@ -115,11 +126,10 @@ app.post("/api/backup/importar", async (req, res) => {
     await cerrarBase(bdVentas);
 
     for (const [clave, nombreArchivo] of Object.entries(mapaArchivos)) {
-      if (!archivos[clave]) continue;
-      const datosBase64 = archivos[clave];
-      const buffer = Buffer.from(datosBase64, "base64");
+      if (!req.files[clave]) continue;
+      const archivo = req.files[clave][0];
       const destino = path.join(__dirname, nombreArchivo);
-      await fs.writeFile(destino, buffer);
+      await fs.writeFile(destino, archivo.buffer);
     }
 
     res.json({ exito: true, mensaje: "Importacion completada. Reiniciando servicio..." });

@@ -1,0 +1,20 @@
+{
+  "name": "Chipactli insumos",
+  "shortName": "Chipactli",
+  "packageName": "com.alexxcrz.chipactli",
+  "themeColor": "#4CAF50",
+  "backgroundColor": "#FFFFFF",
+  "startUrl": "https://chipactli.onrender.com/",
+  "iconUrl": "https://chipactli.onrender.com/images/logo.png",
+  "launcherName": "Chipactli",
+  "display": "standalone",
+  "orientation": "default",
+  "enableNotifications": true,
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "splashScreenFadeOutDuration": 300,
+  "signing": {},
+  "generatorApp": "manual"
+}

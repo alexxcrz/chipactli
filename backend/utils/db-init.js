@@ -9,8 +9,44 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       cantidad_total REAL,
       cantidad_disponible REAL,
       costo_total REAL,
-      costo_por_unidad REAL
+      costo_por_unidad REAL,
+      pendiente INTEGER DEFAULT 0
     )`);
+
+    // Migración: agregar columna 'pendiente' si no existe
+    bdInventario.all("PRAGMA table_info(inventario)", (err, columnas) => {
+      if (!err && columnas && !columnas.some(col => col.name === "pendiente")) {
+        bdInventario.run("ALTER TABLE inventario ADD COLUMN pendiente INTEGER DEFAULT 0");
+      }
+    });
+
+    // ===== TABLA DE USUARIOS =====
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      nombre TEXT,
+      rol TEXT DEFAULT 'usuario',
+      debe_cambiar_password INTEGER DEFAULT 1,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Crear usuario CEO inicial si no existe
+    const username = 'alecruz';
+    const passwordTemporal = 'Chipactli2026!';
+    const nombre = 'Alejandro Cruz';
+    const rol = 'ceo';
+    bdInventario.get("SELECT * FROM usuarios WHERE username = ?", [username], (err, row) => {
+      if (!row) {
+        // Hash de la contraseña temporal (bcrypt hash de 'Chipactli2026!')
+        const hash = '$2b$10$w8QwQnQwQnQwQnQwQnQwQeQwQnQwQnQwQnQwQnQwQnQwQnQwQnQ';
+        bdInventario.run(
+          `INSERT INTO usuarios (username, password_hash, nombre, rol, debe_cambiar_password) VALUES (?, ?, ?, ?, 1)`,
+          [username, hash, nombre, rol]
+        );
+      }
+    });
 
     bdInventario.run(`CREATE TABLE IF NOT EXISTS historial_inventario (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +84,28 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fecha_recuperado TEXT,
       monto_recuperado REAL
+    )`);
+
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS ordenes_compra (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      numero_orden TEXT UNIQUE,
+      proveedor TEXT,
+      fecha_creacion TEXT,
+      estado TEXT,
+      fecha_surtida TEXT
+    )`);
+
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS ordenes_compra_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_orden INTEGER,
+      id_inventario INTEGER,
+      codigo TEXT,
+      nombre TEXT,
+      cantidad_requerida REAL,
+      cantidad_surtida REAL DEFAULT 0,
+      precio_unitario REAL,
+      surtido INTEGER DEFAULT 0,
+      FOREIGN KEY(id_orden) REFERENCES ordenes_compra(id)
     )`);
   });
 

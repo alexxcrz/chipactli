@@ -1,3 +1,4 @@
+let cargandoRecetas = false;
 // Módulo de Recetas
 
 import { mostrarNotificacion } from '../utils/notificaciones.js';
@@ -95,48 +96,252 @@ export async function eliminarCategoria(id, nombre) {
 
 export async function cargarPestanasCategorias() {
   try {
-    const respuesta = await fetch(`${API}/categorias`);
-    const categorias = await respuesta.json();
-    
+    // Obtener categorías y recetas
+    const [respCategorias, respRecetas] = await Promise.all([
+      fetch(`${API}/categorias`),
+      fetch(`${API}/recetas`)
+    ]);
+    const categorias = await respCategorias.json();
+    const recetas = await respRecetas.json();
+
+    // Calcular conteos por categoría
+    const conteoPorCategoria = {};
+    let totalRecetas = 0;
+    recetas.forEach(r => {
+      if (r.id_categoria != null) {
+        conteoPorCategoria[r.id_categoria] = (conteoPorCategoria[r.id_categoria] || 0) + 1;
+      }
+      totalRecetas++;
+    });
+
     const contenedorRecetas = document.getElementById('pestanasCategoriasRecetas');
     if (contenedorRecetas) {
       contenedorRecetas.innerHTML = '';
-      
+
+      // Botón "Todas" con total
       const btnTodas = document.createElement('button');
       btnTodas.className = 'boton ' + (categoriaRecetaActual === null ? 'activo' : '');
-      btnTodas.textContent = '📚 Todas';
+      btnTodas.textContent = `📚 Todas (${totalRecetas})`;
       btnTodas.onclick = () => {
+        // Si hay edición abierta, no recargar
+        if (contenedorRecetas.querySelector('.inputCategoriaEditWrapper')) return;
         categoriaRecetaActual = null;
         cargarListadoRecetas();
         cargarPestanasCategorias();
       };
       contenedorRecetas.appendChild(btnTodas);
-      
+
       categorias.forEach(cat => {
         const wrapper = document.createElement('div');
         wrapper.className = 'btnCategoriaWrapper';
-        
+
         const btn = document.createElement('button');
         btn.className = 'boton ' + (categoriaRecetaActual === cat.id ? 'activo' : '');
-        btn.textContent = `📁 ${cat.nombre}`;
+        const count = conteoPorCategoria[cat.id] || 0;
+        btn.textContent = `📁 ${cat.nombre} (${count})`;
         btn.onclick = () => {
+          // Si hay edición abierta, no recargar
+          if (contenedorRecetas.querySelector('.inputCategoriaEditWrapper')) return;
           categoriaRecetaActual = cat.id;
           cargarListadoRecetas();
           cargarPestanasCategorias();
         };
-        
+
+        // Menú contextual (click derecho)
+        btn.oncontextmenu = (e) => {
+          e.preventDefault();
+          // Eliminar menú anterior si existe
+          const oldMenu = document.getElementById('menuCategoriaContextual');
+          if (oldMenu) oldMenu.remove();
+
+          // Crear menú contextual
+          const menu = document.createElement('div');
+          menu.id = 'menuCategoriaContextual';
+          menu.style.position = 'fixed';
+          menu.style.zIndex = '9999';
+          menu.style.background = '#fff';
+          menu.style.border = '1px solid #aaa';
+          menu.style.borderRadius = '8px';
+          menu.style.boxShadow = '0 2px 12px rgba(0,0,0,0.15)';
+          menu.style.padding = '6px 0';
+          menu.style.minWidth = '120px';
+          menu.style.fontSize = '13px';
+          menu.style.left = `${e.clientX}px`;
+          menu.style.top = `${e.clientY}px`;
+
+          // Opción editar
+          const itemEditar = document.createElement('div');
+          itemEditar.textContent = '✏️ Editar nombre';
+          itemEditar.style.padding = '6px 16px';
+          itemEditar.style.cursor = 'pointer';
+          itemEditar.onmouseover = () => itemEditar.style.background = '#f0f0f0';
+          itemEditar.onmouseout = () => itemEditar.style.background = '';
+          itemEditar.onclick = () => {
+            menu.remove();
+            // Mostrar input editable
+            if (wrapper.querySelector('.inputCategoriaEditWrapper')) return;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = cat.nombre;
+            input.className = 'inputCategoriaEdit';
+            input.style.width = (cat.nombre.length + 6) + 'ch';
+            input.style.fontSize = '11px';
+            input.style.padding = '2px 28px 2px 6px';
+            input.style.borderRadius = '10px';
+            input.style.border = '1px solid #aaa';
+            input.style.marginRight = '3px';
+            input.style.outline = 'none';
+            input.autocomplete = 'off';
+            let original = cat.nombre;
+
+            // Contenedor relativo para superponer botones
+            const contenedorEdicion = document.createElement('span');
+            contenedorEdicion.className = 'inputCategoriaEditWrapper';
+            contenedorEdicion.style.position = 'relative';
+            contenedorEdicion.style.display = 'inline-block';
+            contenedorEdicion.appendChild(input);
+
+            // Botón guardar (solo texto, sin fondo)
+            const btnGuardar = document.createElement('button');
+            btnGuardar.innerHTML = '✔️';
+            btnGuardar.title = 'Guardar';
+            btnGuardar.style.position = 'absolute';
+            btnGuardar.style.right = '22px';
+            btnGuardar.style.top = '50%';
+            btnGuardar.style.transform = 'translateY(-50%)';
+            btnGuardar.style.fontSize = '13px';
+            btnGuardar.style.background = 'none';
+            btnGuardar.style.color = '#4a9b5e';
+            btnGuardar.style.border = 'none';
+            btnGuardar.style.padding = '0';
+            btnGuardar.style.cursor = 'pointer';
+            btnGuardar.style.lineHeight = '1';
+            btnGuardar.onclick = async (ev) => {
+              ev.preventDefault();
+              if (input.value.trim() && input.value.trim() !== original.trim()) {
+                await guardarEdicionCategoria(cat.id, input.value, wrapper, btn, count);
+                // Actualizar el texto del botón
+                btn.textContent = `📁 ${input.value.trim()} (${count})`;
+              }
+              // Volver a la pestaña normal
+              wrapper.replaceChild(btn, contenedorEdicion);
+            };
+
+            // Botón cancelar (solo texto, sin fondo)
+            const btnCancelar = document.createElement('button');
+            btnCancelar.innerHTML = '✖️';
+            btnCancelar.title = 'Cancelar';
+            btnCancelar.style.position = 'absolute';
+            btnCancelar.style.right = '2px';
+            btnCancelar.style.top = '50%';
+            btnCancelar.style.transform = 'translateY(-50%)';
+            btnCancelar.style.fontSize = '13px';
+            btnCancelar.style.background = 'none';
+            btnCancelar.style.color = '#d32f2f';
+            btnCancelar.style.border = 'none';
+            btnCancelar.style.padding = '0';
+            btnCancelar.style.cursor = 'pointer';
+            btnCancelar.style.lineHeight = '1';
+            btnCancelar.onclick = (ev) => {
+              ev.preventDefault();
+              wrapper.replaceChild(btn, contenedorEdicion);
+            };
+
+            contenedorEdicion.appendChild(btnGuardar);
+            contenedorEdicion.appendChild(btnCancelar);
+
+            wrapper.replaceChild(contenedorEdicion, btn);
+            setTimeout(() => {
+              input.focus();
+              input.select();
+            }, 0);
+          };
+
+          // Opción eliminar
+          const itemEliminar = document.createElement('div');
+          itemEliminar.textContent = '🗑️ Eliminar categoría';
+          itemEliminar.style.padding = '6px 16px';
+          itemEliminar.style.cursor = 'pointer';
+          itemEliminar.onmouseover = () => itemEliminar.style.background = '#f0f0f0';
+          itemEliminar.onmouseout = () => itemEliminar.style.background = '';
+          itemEliminar.onclick = () => {
+            menu.remove();
+            eliminarCategoria(cat.id, cat.nombre);
+          };
+
+          menu.appendChild(itemEditar);
+          menu.appendChild(itemEliminar);
+          document.body.appendChild(menu);
+
+          // Cerrar menú contextual al hacer click fuera
+          document.addEventListener('mousedown', function cerrarMenu(ev) {
+            if (!menu.contains(ev.target)) {
+              menu.remove();
+              document.removeEventListener('mousedown', cerrarMenu);
+            }
+          });
+        };
+
+        // Botón eliminar más pequeño y mejor posicionado
         const btnEliminar = document.createElement('button');
         btnEliminar.className = 'btnEliminarCategoria';
         btnEliminar.textContent = '🗑️';
+        btnEliminar.style.fontSize = '10px';
+        btnEliminar.style.width = '16px';
+        btnEliminar.style.height = '16px';
+        btnEliminar.style.padding = '0 2px';
+        btnEliminar.style.position = 'absolute';
+        btnEliminar.style.right = '4px';
+        btnEliminar.style.top = '50%';
+        btnEliminar.style.transform = 'translateY(-50%)';
+        btnEliminar.style.background = '#d32f2f';
+        btnEliminar.style.color = 'white';
+        btnEliminar.style.border = 'none';
+        btnEliminar.style.display = 'flex';
+        btnEliminar.style.alignItems = 'center';
+        btnEliminar.style.justifyContent = 'center';
+        btnEliminar.style.zIndex = '2';
         btnEliminar.onclick = (e) => {
           e.stopPropagation();
           eliminarCategoria(cat.id, cat.nombre);
         };
-        
+
         wrapper.appendChild(btn);
-        wrapper.appendChild(btnEliminar);
+        // Eliminar botón eliminar de la pestaña
+        wrapper.style.position = 'relative';
         contenedorRecetas.appendChild(wrapper);
       });
+    // Función auxiliar para guardar edición de nombre de categoría
+    async function guardarEdicionCategoria(idCategoria, nuevoNombre, wrapper, btn, count) {
+      const nombreLimpio = (nuevoNombre || '').trim();
+      if (!nombreLimpio) {
+        window.mostrarNotificacion('El nombre no puede estar vacío', 'error');
+        return;
+      }
+      try {
+        const resp = await fetch(`${API}/categorias/${idCategoria}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre: nombreLimpio })
+        });
+        if (resp.ok) {
+          // Actualizar el placeholder y valor del input, pero NO reemplazar el input por el botón
+          const input = wrapper.querySelector('input');
+          if (input) {
+            input.value = nombreLimpio;
+            input.placeholder = nombreLimpio;
+            // Opcional: feedback visual
+            input.style.background = '#eaffea';
+            setTimeout(() => { input.style.background = ''; }, 600);
+          }
+          window.mostrarNotificacion('Nombre de categoría actualizado', 'exito');
+        } else {
+          window.mostrarNotificacion('Error al actualizar la categoría', 'error');
+        }
+      } catch (e) {
+        window.mostrarNotificacion('Error de conexión', 'error');
+      }
+    }
     }
   } catch (error) {
     console.error('Error cargando pestañas de categorías:', error);
@@ -144,52 +349,58 @@ export async function cargarPestanasCategorias() {
 }
 
 export async function cargarListadoRecetas() {
+  if (cargandoRecetas) {
+    // Evitar duplicación silenciosamente
+    return;
+  }
+  cargandoRecetas = true;
   try {
     let url = `${API}/recetas`;
     if (categoriaRecetaActual !== null) {
       url += `?categoria=${categoriaRecetaActual}`;
     }
-    
     const respuesta = await fetch(url);
     const recetas = await respuesta.json();
-    
     const cuerpo = document.getElementById('cuerpoRecetas');
-    cuerpo.innerHTML = '';
-    
-    if (recetas.length === 0) {
-      cuerpo.innerHTML = '<div style="text-align:center;padding:30px;color:#999">No hay recetas</div>';
+    if (!cuerpo) {
+      console.error('❌ No se encontró elemento #cuerpoRecetas');
+      cargandoRecetas = false;
       return;
     }
-    
+    cuerpo.innerHTML = '';
+    if (recetas.length === 0) {
+      cuerpo.innerHTML = '<div style="text-align:center;padding:30px;color:#999">No hay recetas</div>';
+      cargandoRecetas = false;
+      return;
+    }
     for (const receta of recetas) {
       try {
         const respIngredientes = await fetch(`${API}/recetas/${receta.id}`);
         const detalleReceta = await respIngredientes.json();
-        
         const respCapacidad = await fetch(`${API}/recetas/calcular`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id_receta: receta.id })
         });
         const capacidad = await respCapacidad.json();
-        
         const totalIngredientes = (detalleReceta.ingredientes || []).length;
-        
         let totalGramos = 0;
         let totalMililitros = 0;
         (detalleReceta.ingredientes || []).forEach(ing => {
           let cantidad = ing.cantidad || 0;
           const unidad = (ing.unidad || '').toLowerCase();
-          
           if (unidad === 'kg') {
             totalGramos += cantidad * 1000;
           } else if (unidad === 'g') {
             totalGramos += cantidad;
-          }
-          else if (unidad === 'l') {
+          } else if (unidad === 'l') {
             totalMililitros += cantidad * 1000;
           } else if (unidad === 'ml') {
             totalMililitros += cantidad;
+          } else if (unidad === 'gotas') {
+            // Cada 10 Gotas = 0.5 ml y 0.5 g
+            totalMililitros += (cantidad / 10) * 0.5;
+            totalGramos += (cantidad / 10) * 0.5;
           }
         });
         
@@ -203,11 +414,16 @@ export async function cargarListadoRecetas() {
         } else {
           textoTotal = 'N/A';
         }
-        
+        // Detectar pendientes
+        let hayPendientes = false;
+        (detalleReceta.ingredientes || []).forEach(ing => {
+          if (ing.pendiente === true || ing.pendiente === 1) hayPendientes = true;
+        });
         const tarjeta = document.createElement('div');
         tarjeta.className = 'tarjetaReceta';
         tarjeta.innerHTML = `
           <div style="padding:18px">
+            ${hayPendientes ? '<div style="color:#d32f2f;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:4px"><span style="font-size:15px">⚠️</span> Faltan ingredientes por comprar</div>' : ''}
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px">
               <div style="flex:1">
                 <h3 style="margin:0 0 5px 0;color:#1a1a1a;font-size:16px">${receta.nombre}</h3>
@@ -265,8 +481,9 @@ export async function cargarListadoRecetas() {
       }
     }
   } catch (error) {
-    console.error('Error cargando recetas:', error);
+    console.error('❌ Error en cargarListadoRecetas:', error);
   }
+  cargandoRecetas = false;
 }
 
 export async function agregarReceta(event) {
@@ -288,7 +505,6 @@ export async function agregarReceta(event) {
     unidad: ing.unidad
   }));
   
-  console.log('📝 Creando receta con ingredientes:', JSON.stringify(ingredientes, null, 2));
   
   try {
     const respuesta = await fetch(`${API}/recetas`, {
@@ -304,13 +520,30 @@ export async function agregarReceta(event) {
     
     if (respuesta.ok) {
       const resultado = await respuesta.json();
-      console.log('✅ Receta creada:', resultado);
-      
+      // Limpiar formulario y todos los campos del modal
       document.getElementById('formularioReceta').reset();
       ingredientesTemporales = [];
       actualizarTablaIngredientes();
+      // Limpiar campos de insumo manualmente por si quedan residuos
+      const campos = [
+        'insumoSeleccionado',
+        'idInsumoSeleccionado',
+        'cantidadIngrediente',
+        'unidadIngrediente',
+        'listaBusquedaInsumos'
+      ];
+      campos.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          if (el.tagName === 'INPUT' || el.tagName === 'SELECT') el.value = '';
+          if (el.tagName === 'SELECT') el.disabled = true;
+          if (el.tagName === 'DIV') el.innerHTML = '';
+        }
+      });
       cerrarModal('modalReceta');
       mostrarNotificacion('Receta creada correctamente', 'exito');
+      // Recargar la lista de recetas al instante, sin duplicar
+      await cargarListadoRecetas();
     } else {
       const error = await respuesta.json();
       mostrarNotificacion('Error: ' + error.error, 'error');
@@ -323,17 +556,31 @@ export async function agregarReceta(event) {
 export async function buscarInsumoParaReceta(termino) {
   const crearModal = document.getElementById('modalReceta');
   const editarModal = document.getElementById('modalEditarReceta');
-  
   const esEdicion = editarModal && editarModal.style.display === 'block';
-  
   const idListaBusqueda = esEdicion ? 'editListaBusquedaInsumos' : 'listaBusquedaInsumos';
   const idInsumoInput = esEdicion ? 'editInsumoSeleccionado' : 'insumoSeleccionado';
   const idInsumoId = esEdicion ? 'editIdInsumoSeleccionado' : 'idInsumoSeleccionado';
-  
   const listaBusqueda = document.getElementById(idListaBusqueda);
   if (termino.length < 1) {
     listaBusqueda.innerHTML = '';
     listaBusqueda.style.display = 'none';
+    // Forzar regeneración de opciones de unidad en edición
+    if (esEdicion) {
+      const unidadSelect = document.getElementById('editUnidadIngrediente');
+      unidadSelect.innerHTML = `
+        <option value="">Seleccionar</option>
+        <option value="g">Gramos (g)</option>
+        <option value="ml">Mililitros (ml)</option>
+        <option value="kg">Kilogramos (kg)</option>
+        <option value="l">Litros (l)</option>
+        <option value="pz">Piezas (pz)</option>
+        <option value="cda">Cucharadas (cda)</option>
+        <option value="cdta">Cucharaditas (cdta)</option>
+        <option value="taza">Tazas</option>
+        <option value="oz">Onzas (oz)</option>
+        <option value="Gotas">Gotas</option>
+      `;
+    }
     return;
   }
   
@@ -342,28 +589,95 @@ export async function buscarInsumoParaReceta(termino) {
     const insumos = await respuesta.json();
     listaBusqueda.innerHTML = '';
     listaBusqueda.style.display = 'block';
-    
+
+    let encontrado = false;
     insumos.forEach(insumo => {
+      encontrado = true;
       const opcion = document.createElement('div');
       opcion.className = 'elementoSugerencia';
-      opcion.textContent = `${insumo.nombre} (${insumo.codigo})`;
+      // Mostrar la unidad abreviada en la sugerencia
+      let unidadMostrar = '';
+      if (insumo.unidad) {
+        const u = insumo.unidad.toLowerCase();
+        if (u === 'gotas') unidadMostrar = 'go';
+        else if (u === 'ml') unidadMostrar = 'ml';
+        else if (u === 'g') unidadMostrar = 'g';
+        else if (u === 'kg') unidadMostrar = 'kg';
+        else if (u === 'l') unidadMostrar = 'l';
+        else if (u === 'pz') unidadMostrar = 'pz';
+        else if (u === 'cda') unidadMostrar = 'cda';
+        else if (u === 'cdta') unidadMostrar = 'cdta';
+        else if (u === 'taza') unidadMostrar = 'taza';
+        else if (u === 'oz') unidadMostrar = 'oz';
+        else unidadMostrar = u;
+      }
+      opcion.textContent = `${insumo.nombre} (${insumo.codigo}${unidadMostrar ? ' • ' + unidadMostrar : ''})`;
       opcion.onclick = () => {
         document.getElementById(idInsumoInput).value = insumo.nombre;
         document.getElementById(idInsumoId).value = insumo.id;
-        
         const idUnidadField = esEdicion ? 'editUnidadIngrediente' : 'unidadIngrediente';
         const unidadSelect = document.getElementById(idUnidadField);
-        unidadSelect.value = insumo.unidad || '';
+        // Seleccionar correctamente la opción de gotas (go)
+        if (insumo.unidad && insumo.unidad.toLowerCase() === 'gotas') {
+          // Buscar la opción que contenga 'Gotas' y seleccionarla
+          let found = false;
+          for (let i = 0; i < unidadSelect.options.length; i++) {
+            if (unidadSelect.options[i].value.toLowerCase() === 'gotas' || unidadSelect.options[i].textContent.toLowerCase().includes('gotas')) {
+              unidadSelect.selectedIndex = i;
+              found = true;
+              break;
+            }
+          }
+          if (!found) unidadSelect.value = 'gotas';
+        } else {
+          unidadSelect.value = insumo.unidad || '';
+        }
         unidadSelect.disabled = true;
-        
         listaBusqueda.innerHTML = '';
         listaBusqueda.style.display = 'none';
+        // Foco automático a cantidad solo en modal de nueva receta
+        if (!esEdicion) {
+          setTimeout(() => {
+            const cantidadInput = document.getElementById('cantidadIngrediente');
+            if (cantidadInput) cantidadInput.focus();
+          }, 50);
+        }
       };
       listaBusqueda.appendChild(opcion);
     });
 
-    if (!insumos.length) {
-      listaBusqueda.style.display = 'none';
+    if (!encontrado) {
+      // Si no existe, mostrar opción para agregar como pendiente
+      const opcionPendiente = document.createElement('div');
+      opcionPendiente.className = 'elementoSugerencia elementoPendiente';
+      opcionPendiente.style.color = 'red';
+      opcionPendiente.textContent = `➕ Agregar "${termino}" como insumo pendiente`;
+      opcionPendiente.onclick = async () => {
+        // Crear insumo pendiente en inventario
+        const resp = await fetch(`${API}/inventario/agregar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre: termino, pendiente: true })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          document.getElementById(idInsumoInput).value = termino;
+          document.getElementById(idInsumoId).value = data.id;
+          const idUnidadField = esEdicion ? 'editUnidadIngrediente' : 'unidadIngrediente';
+          const unidadSelect = document.getElementById(idUnidadField);
+          unidadSelect.value = '';
+          unidadSelect.disabled = false;
+          listaBusqueda.innerHTML = '';
+          listaBusqueda.style.display = 'none';
+          // Notificación persistente en campanita
+          if (window.agregarAlerta) {
+            window.agregarAlerta(`pendiente:${data.id}`, `Insumo pendiente: ${termino}`, 'advertencia');
+          }
+        } else {
+          mostrarNotificacion('Error al crear insumo pendiente', 'error');
+        }
+      };
+      listaBusqueda.appendChild(opcionPendiente);
     }
   } catch (error) {
     console.error('Error buscando insumo:', error);
@@ -392,15 +706,21 @@ export function agregarIngrediente(esEdicion = false) {
     return;
   }
   
+  // Buscar si el insumo es pendiente en el inventario global (si existe en DOM)
+  let pendiente = false;
+  const inventario = window.inventario && window.inventario.ultimoInventario;
+  if (inventario && Array.isArray(inventario)) {
+    const ins = inventario.find(i => i.id === idInsumo);
+    if (ins && (ins.pendiente === true || ins.pendiente === 1)) pendiente = true;
+  }
   ingredientesTemporales.push({
     id_insumo: idInsumo,
     nombre: nombreInsumo,
     cantidad,
-    unidad
+    unidad,
+    pendiente
   });
   
-  console.log('✅ Ingrediente agregado:', { id_insumo: idInsumo, cantidad, unidad });
-  console.log('📋 Total ingredientes:', ingredientesTemporales);
   
   document.getElementById(idFieldId).value = '';
   document.getElementById(nombreFieldId).value = '';
@@ -409,6 +729,66 @@ export function agregarIngrediente(esEdicion = false) {
   document.getElementById(unidadFieldId).disabled = true;
   
   actualizarTablaIngredientes();
+  // Después de agregar, enfocar de nuevo a código/ingrediente solo en modal de nueva receta
+  if (!esEdicion) {
+    setTimeout(() => {
+      const insumoInput = document.getElementById('insumoSeleccionado');
+      if (insumoInput) insumoInput.focus();
+    }, 50);
+  }
+// --- Eventos para foco y enter en modal de nueva receta ---
+if (typeof window !== 'undefined') {
+  function setearEventosIngredienteModal() {
+    const cantidadInput = document.getElementById('cantidadIngrediente');
+    if (cantidadInput) {
+      cantidadInput.onkeydown = null;
+      cantidadInput.addEventListener('keydown', function handlerCantidad(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          window.agregarIngrediente();
+        }
+      }, { once: false });
+    }
+    const insumoInput = document.getElementById('insumoSeleccionado');
+    if (insumoInput) {
+      insumoInput.onkeydown = null;
+      insumoInput.addEventListener('keydown', function handlerInsumo(e) {
+        if (e.key === 'Enter') {
+          const lista = document.getElementById('listaBusquedaInsumos');
+          if (lista && lista.firstChild) {
+            lista.firstChild.click();
+            e.preventDefault();
+          }
+        }
+      }, { once: false });
+    }
+    // Prevenir submit por Enter en cualquier campo del modal
+    const form = document.getElementById('formularioReceta');
+    if (form) {
+      form.onkeydown = function(e) {
+        // Si el foco está en cantidad y se presiona Enter, ya lo maneja el handler de cantidad
+        // Si el foco está en otro campo y se presiona Enter, prevenir submit
+        if (e.key === 'Enter') {
+          const active = document.activeElement;
+          if (active && active.id !== 'cantidadIngrediente') {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      };
+    }
+  }
+  window.addEventListener('DOMContentLoaded', setearEventosIngredienteModal);
+  // También al abrir el modal de receta, para asegurar que los campos existen
+  if (window.abrirModal) {
+    const originalAbrirModal = window.abrirModal;
+    window.abrirModal = function(id) {
+      originalAbrirModal.apply(this, arguments);
+      if (id === 'modalReceta') setTimeout(setearEventosIngredienteModal, 50);
+    };
+  }
+}
 }
 
 export function eliminarIngrediente(indice) {
@@ -418,18 +798,50 @@ export function eliminarIngrediente(indice) {
 
 export function actualizarTablaIngredientes() {
   const tabla = document.getElementById('tablaIngredientesTemporales');
-  if (!tabla) return;
-  tabla.innerHTML = '';
-  
-  ingredientesTemporales.forEach((ing, idx) => {
-    const fila = document.createElement('tr');
-    fila.innerHTML = `
-      <td>${ing.nombre}</td>
-      <td>${parseFloat(ing.cantidad).toFixed(2)} ${ing.unidad}</td>
-      <td><button onclick="window.recetas.eliminarIngrediente(${idx})" class="botonPequeno botonDanger">×</button></td>
-    `;
-    tabla.appendChild(fila);
-  });
+  const editTabla = document.getElementById('editTablaIngredientesTemporales');
+  function getAbrev(unidad) {
+    if (!unidad) return '';
+    const u = unidad.toLowerCase();
+    if (u === 'gotas') return 'go';
+    if (u === 'ml') return 'ml';
+    if (u === 'g') return 'g';
+    if (u === 'kg') return 'kg';
+    if (u === 'l') return 'l';
+    if (u === 'pz') return 'pz';
+    if (u === 'cda') return 'cda';
+    if (u === 'cdta') return 'cdta';
+    if (u === 'taza') return 'taza';
+    if (u === 'oz') return 'oz';
+    return u;
+  }
+  if (tabla) {
+    tabla.innerHTML = '';
+    ingredientesTemporales.forEach((ing, idx) => {
+      const fila = document.createElement('tr');
+      const pendiente = ing.pendiente === true || ing.pendiente === 1;
+      if (pendiente) fila.style.color = '#d32f2f';
+      fila.innerHTML = `
+        <td>${ing.nombre}</td>
+        <td>${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}</td>
+        <td><button onclick="window.recetas.eliminarIngrediente(${idx})" class="botonPequeno botonDanger">×</button></td>
+      `;
+      tabla.appendChild(fila);
+    });
+  }
+  if (editTabla) {
+    editTabla.innerHTML = '';
+    ingredientesTemporales.forEach((ing, idx) => {
+      const fila = document.createElement('tr');
+      const pendiente = ing.pendiente === true || ing.pendiente === 1;
+      if (pendiente) fila.style.color = '#d32f2f';
+      fila.innerHTML = `
+        <td>${ing.nombre}</td>
+        <td>${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}</td>
+        <td><button onclick="window.recetas.eliminarIngrediente(${idx})" class="botonPequeno botonDanger">×</button></td>
+      `;
+      editTabla.appendChild(fila);
+    });
+  }
 }
 
 export async function mostrarIngredientes(idReceta) {
@@ -442,24 +854,41 @@ export async function mostrarIngredientes(idReceta) {
     const receta = await respuesta.json();
     
     let html = `<h3 style="margin-bottom:12px;color:#1a1a1a;font-size:16px">${receta.nombre}</h3><ul style="list-style:none;padding:0" id="listaIngredientesModal">`;
-    
+    let hayPendientes = false;
     if (!receta.ingredientes || receta.ingredientes.length === 0) {
       html += '<li style="padding:10px;color:#999">Sin ingredientes agregados</li>';
     } else {
       receta.ingredientes.forEach((ing, idx) => {
-        html += `<li style="padding:8px;background:#f5f5f5;margin-bottom:6px;border-radius:6px;border-left:4px solid #4a9b5e;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        let abrev = '';
+        if (ing.unidad) {
+          const u = ing.unidad.toLowerCase();
+          if (u === 'gota' || u === 'gotas') abrev = 'go';
+          else if (u === 'ml') abrev = 'ml';
+          else if (u === 'g') abrev = 'g';
+          else if (u === 'kg') abrev = 'kg';
+          else if (u === 'l') abrev = 'l';
+          else if (u === 'pz') abrev = 'pz';
+          else if (u === 'cda') abrev = 'cda';
+          else if (u === 'cdta') abrev = 'cdta';
+          else if (u === 'taza') abrev = 'taza';
+          else if (u === 'oz') abrev = 'oz';
+          else abrev = u;
+        }
+        // Resaltar en rojo si es pendiente
+        const pendiente = ing.pendiente === true || ing.pendiente === 1;
+        if (pendiente) hayPendientes = true;
+        html += `<li style="padding:8px;background:#f5f5f5;margin-bottom:6px;border-radius:6px;border-left:4px solid ${pendiente ? '#d32f2f' : '#4a9b5e'};display:flex;justify-content:space-between;align-items:center;gap:8px${pendiente ? ';color:#d32f2f;font-weight:bold' : ''}">
           <span style="flex:1;font-size:13px">${ing.nombre}</span>
           <input type="number" id="cantidad_${ing.id}" value="${parseFloat(ing.cantidad).toFixed(2)}" step="0.01" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px">
-          <span style="min-width:35px;font-size:12px">${ing.unidad}</span>
+          <span style="min-width:35px;font-size:12px">${abrev}</span>
           <div style="display:flex;gap:4px">
             <button onclick="window.recetas.guardarCantidadIngrediente(${idReceta}, ${ing.id})" class="botonPequeno" style="background:#4a9b5e;padding:4px 10px">💾</button>
-            <button onclick="window.recetas.eliminarIngredienteDeReceta(${idReceta}, ${ing.id}, '${ing.nombre.replace(/'/g, "\\'")}')" class="botonPequeno botonDanger" style="padding:4px 10px">×</button>
+            <button onclick="window.recetas.eliminarIngredienteDeReceta(${idReceta}, ${ing.id}, '${ing.nombre.replace(/'/g, "\\'")}")" class="botonPequeno botonDanger" style="padding:4px 10px">×</button>
           </div>
         </li>`;
       });
     }
     html += '</ul>';
-    
     const detalles = document.getElementById('detallesIngredientes');
     detalles.innerHTML = html;
     abrirModal('modalIngredientes');
@@ -566,7 +995,8 @@ export async function editarReceta(id) {
       id_insumo: ing.id_insumo,
       nombre: ing.nombre,
       cantidad: ing.cantidad,
-      unidad: ing.unidad
+      unidad: ing.unidad,
+      pendiente: ing.pendiente === true || ing.pendiente === 1
     }));
     actualizarTablaIngredientes();
     

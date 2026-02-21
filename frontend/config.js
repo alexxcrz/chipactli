@@ -29,5 +29,3 @@ export function obtenerURLAPI() {
 export const API = obtenerURLAPI();
 
 // Mostrar en consola para debugging
-console.log('🔗 API URL:', API);
-console.log('🌍 Hostname:', window.location.hostname);

@@ -23,6 +23,8 @@ import { registrarRutasProduccion } from "./routes/produccion.js";
 import { registrarRutasCortesias } from "./routes/cortesias.js";
 import { registrarRutasVentas } from "./routes/ventas.js";
 import { registrarRutasUtensilios } from "./routes/utensilios.js";
+import { registrarRutasAuth } from "./routes/auth.js";
+import { registrarRutasUsuarios } from "./routes/usuarios.js";
 
 // Configuración básica
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,13 +47,23 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 } // 100MB por archivo
 });
 
+// Configuración de directorios para las bases de datos
+// En Render, usar el volumen persistente. En local, usar el directorio actual
+const dbDir = process.env.NODE_ENV === 'production' 
+  ? '/app/backend'
+  : __dirname;
+
 // Inicializar bases de datos
-const bdInventario = new Database("./inventario.db");
-const bdRecetas = new Database("./recetas.db");
-const bdProduccion = new Database("./produccion.db");
-const bdVentas = new Database("./ventas.db");
+const bdInventario = new Database(path.join(dbDir, "inventario.db"));
+const bdRecetas = new Database(path.join(dbDir, "recetas.db"));
+const bdProduccion = new Database(path.join(dbDir, "produccion.db"));
+const bdVentas = new Database(path.join(dbDir, "ventas.db"));
 
 inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas);
+
+// Registrar rutas de autenticación
+registrarRutasAuth(app, bdInventario);
+registrarRutasUsuarios(app, bdInventario);
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -110,7 +122,7 @@ app.get("/api/backup/descargar/:nombre", async (req, res) => {
     return res.status(400).json({ exito: false, mensaje: "Base de datos no válida" });
   }
   
-  const rutaArchivo = path.join(__dirname, `${nombre}.db`);
+  const rutaArchivo = path.join(dbDir, `${nombre}.db`);
   
   if (!await fs.access(rutaArchivo).then(() => true).catch(() => false)) {
     return res.status(404).json({ exito: false, mensaje: "Archivo no encontrado" });
@@ -128,10 +140,10 @@ app.post("/api/backup/importar", upload.fields([
   if (!validarAdmin(req, res)) return;
 
   const mapaArchivos = {
-    inventario: "inventario.db",
-    recetas: "recetas.db",
-    produccion: "produccion.db",
-    ventas: "ventas.db"
+    inventario: path.join(dbDir, "inventario.db"),
+    recetas: path.join(dbDir, "recetas.db"),
+    produccion: path.join(dbDir, "produccion.db"),
+    ventas: path.join(dbDir, "ventas.db")
   };
 
   if (!req.files || Object.keys(req.files).length === 0) {
@@ -145,11 +157,10 @@ app.post("/api/backup/importar", upload.fields([
     await cerrarBase(bdProduccion);
     await cerrarBase(bdVentas);
 
-    for (const [clave, nombreArchivo] of Object.entries(mapaArchivos)) {
+    for (const [clave, rutaArchivo] of Object.entries(mapaArchivos)) {
       if (!req.files[clave]) continue;
       const archivo = req.files[clave][0];
-      const destino = path.join(__dirname, nombreArchivo);
-      await fs.writeFile(destino, archivo.buffer);
+      await fs.writeFile(rutaArchivo, archivo.buffer);
     }
 
     res.json({ exito: true, mensaje: "Importacion completada. Reiniciando servicio..." });
@@ -346,9 +357,9 @@ app.post("/api/importar/recetas", async (req, res) => {
     for (const rec of datos.recetas) {
       await new Promise((resolve, reject) => {
         bdRecetas.run(
-          `INSERT INTO recetas (id, nombre, precio_venta, id_categoria) VALUES (?, ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET nombre=excluded.nombre, precio_venta=excluded.precio_venta, id_categoria=excluded.id_categoria`,
-          [rec.id, rec.nombre, rec.precio_venta, rec.id_categoria],
+          `INSERT INTO recetas (id, nombre, id_categoria, gramaje) VALUES (?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET nombre=excluded.nombre, id_categoria=excluded.id_categoria, gramaje=excluded.gramaje`,
+          [rec.id, rec.nombre, rec.id_categoria, rec.gramaje || 0],
           (err) => {
             if (err) reject(err);
             else {

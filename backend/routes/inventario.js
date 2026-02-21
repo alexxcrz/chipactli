@@ -3,16 +3,17 @@ import { transmitir } from "../utils/transmitir.js";
 export function registrarRutasInventario(app, bdInventario) {
   app.get("/inventario", (req, res) => {
     const termino = (req.query.busqueda || "").trim();
+    const select = "id, codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente";
     if (termino) {
       const like = `%${termino}%`;
       bdInventario.all(
-        "SELECT * FROM inventario WHERE nombre LIKE ? OR codigo LIKE ? ORDER BY nombre",
+        `SELECT ${select} FROM inventario WHERE nombre LIKE ? OR codigo LIKE ? ORDER BY nombre`,
         [like, like],
         (e, r) => res.json(r || [])
       );
     } else {
       bdInventario.all(
-        "SELECT * FROM inventario ORDER BY nombre",
+        `SELECT ${select} FROM inventario ORDER BY nombre`,
         (e, r) => res.json(r || [])
       );
     }
@@ -41,7 +42,24 @@ export function registrarRutasInventario(app, bdInventario) {
   });
 
   app.post("/inventario/agregar", (req, res) => {
-    const { codigo, nombre, unidad, cantidad, costo } = req.body;
+    // Permitir crear insumo pendiente con solo nombre (desde receta)
+    const { codigo, nombre, unidad, cantidad, costo, pendiente } = req.body;
+    if (pendiente === true || pendiente === 1) {
+      // Crear insumo pendiente: solo nombre, los demás campos por default
+      if (!nombre) return res.status(400).json({ error: "Falta el nombre" });
+      const codigoPendiente = codigo || ("PEND-" + Date.now());
+      bdInventario.run(
+        `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
+         VALUES (?,?,?,?,?,?,?,1)` ,
+        [codigoPendiente, nombre, unidad || '', 0, 0, 0, 0],
+        function () {
+          transmitir({ tipo: "inventario_actualizado" });
+          res.json({ ok: true, id: this.lastID });
+        }
+      );
+      return;
+    }
+    // ...comportamiento normal...
     if (!codigo || !nombre || !unidad || !Number.isFinite(cantidad) || !Number.isFinite(costo)) {
       return res.status(400).json({ error: "Datos incompletos" });
     }
@@ -50,8 +68,8 @@ export function registrarRutasInventario(app, bdInventario) {
       if (!insumo) {
         const costoPorUnidad = cantidad > 0 ? costo / cantidad : 0;
         bdInventario.run(
-          `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad)
-           VALUES (?,?,?,?,?,?,?)`,
+          `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
+           VALUES (?,?,?,?,?,?,?,0)`,
           [codigo, nombre, unidad, cantidad, cantidad, costo, costoPorUnidad],
           function () {
             const idInv = this.lastID;
@@ -123,14 +141,14 @@ export function registrarRutasInventario(app, bdInventario) {
   });
 
   app.get("/inventario/:id", (req, res) => {
-    bdInventario.get("SELECT * FROM inventario WHERE id=?", [req.params.id], (e, r) => {
+    bdInventario.get("SELECT id, codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente FROM inventario WHERE id=?", [req.params.id], (e, r) => {
       if (!r) return res.status(404).json({ error: "No encontrado" });
       res.json(r);
     });
   });
 
   app.patch("/inventario/:id", (req, res) => {
-    const { nombre, unidad, cantidad_total, costo_total } = req.body;
+    const { nombre, unidad, cantidad_total, costo_total, codigo } = req.body;
     const id = req.params.id;
 
     bdInventario.get("SELECT * FROM inventario WHERE id=?", [id], (e, insumo) => {
@@ -143,9 +161,19 @@ export function registrarRutasInventario(app, bdInventario) {
       const nuevaDisponible = Math.max(0, (insumo.cantidad_disponible || 0) + deltaCantidad);
       const costoPorUnidad = nuevaCantidadTotal > 0 ? nuevoCostoTotal / nuevaCantidadTotal : 0;
 
+      // Si es pendiente y se edita el código, quitar pendiente
+      let updateQuery, updateParams;
+      if (insumo.pendiente && codigo && codigo !== insumo.codigo) {
+        updateQuery = "UPDATE inventario SET codigo=?, nombre=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=?, pendiente=0 WHERE id=?";
+        updateParams = [codigo, nombre, unidad, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, id];
+      } else {
+        updateQuery = "UPDATE inventario SET nombre=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=? WHERE id=?";
+        updateParams = [nombre, unidad, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, id];
+      }
+
       bdInventario.run(
-        "UPDATE inventario SET nombre=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=? WHERE id=?",
-        [nombre, unidad, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, id],
+        updateQuery,
+        updateParams,
         () => {
           if (deltaCantidad !== 0 || deltaCosto !== 0) {
             bdInventario.run(

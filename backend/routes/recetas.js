@@ -22,15 +22,15 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
             receta.ingredientes = [];
             return res.json(receta);
           }
-          
-          // Obtener nombres de insumos desde la otra BD
+          // Obtener nombres y pendiente de insumos desde la otra BD
           let pendientes = ingredientes.length;
           ingredientes.forEach(ing => {
             bdInventario.get(
-              "SELECT nombre FROM inventario WHERE id=?",
+              "SELECT nombre, pendiente FROM inventario WHERE id=?",
               [ing.id_insumo],
               (errInv, insumo) => {
                 ing.nombre = insumo ? insumo.nombre : "Desconocido";
+                ing.pendiente = insumo ? (insumo.pendiente === 1 || insumo.pendiente === true) : false;
                 pendientes--;
                 if (pendientes === 0) {
                   receta.ingredientes = ingredientes;

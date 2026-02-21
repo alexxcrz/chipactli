@@ -1,3 +1,14 @@
+// Cerrar sesión: limpia token y usuario y recarga
+window.cerrarSesion = function() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('usuario');
+  window.location.reload();
+};
+import { crearPanelAdminUsuarios } from './modules/admin-usuarios.js';
+// Acceso rápido al panel de administración si es CEO/admin
+window.irPanelAdminUsuarios = function() {
+  crearPanelAdminUsuarios();
+};
 // main.js - Módulo principal de routing e inicialización
 
 // Importar utilidades
@@ -12,6 +23,7 @@ import * as recetas from './modules/recetas.js';
 import * as produccion from './modules/produccion.js';
 import * as ventas from './modules/ventas.js';
 import * as utensilios from './modules/utensilios.js';
+import { crearPantallaLogin } from './modules/login.js';
 
 // Exportar módulos a window para acceso desde HTML inline event handlers
 window.inventario = inventario;
@@ -38,12 +50,28 @@ window.filtrarProduccion = produccion.filtrarProduccion;
 window.filtrarVentas = ventas.filtrarVentas;
 window.filtrarUtensilios = utensilios.filtrarUtensilios;
 // Funciones de agregar
+
+// Mostrar login si no hay token
+if (!localStorage.getItem('token')) {
+  crearPantallaLogin();
+}
 window.agregarInsumo = inventario.agregarInsumo;
 window.guardarEditarInsumo = inventario.guardarEditarInsumo;
 window.agregarCategoria = recetas.agregarCategoria;
 window.eliminarCategoria = recetas.eliminarCategoria;
 window.agregarReceta = recetas.agregarReceta;
 window.guardarEditarReceta = recetas.guardarEditarReceta;
+window.cargarListadoRecetas = recetas.cargarListadoRecetas;
+window.cargarCategorias = recetas.cargarCategorias;
+window.cargarPestanasCategorias = recetas.cargarPestanasCategorias;
+// Funciones de carga del inventario
+window.cargarInventario = inventario.cargarInventario;
+window.cargarEstadisticasInventario = inventario.cargarEstadisticasInventario;
+// Funciones de carga de producción
+window.cargarProduccion = produccion.cargarProduccion;
+// Funciones de carga de ventas
+window.cargarVentas = ventas.cargarVentas;
+window.cargarCortesias = ventas.cargarCortesias;
 window.buscarInsumoParaReceta = recetas.buscarInsumoParaReceta;
 window.agregarIngrediente = recetas.agregarIngrediente;
 window.eliminarIngrediente = recetas.eliminarIngrediente;
@@ -61,6 +89,8 @@ window.confirmarVentaPedido = produccion.confirmarVentaPedido;
 window.confirmarCortesia = produccion.confirmarCortesia;
 // Funciones de historial
 window.toggleHistorialFecha = ventas.toggleHistorialFecha;
+
+// Log para confirmar que main.js se cargó correctamente
 
 // ===== SISTEMA DE ROUTING =====
 const rutasNombres = {
@@ -101,6 +131,7 @@ export function activarPestanaLink(event, id) {
 }
 
 export function activarPestana(id, opciones = {}) {
+  
   const urlObjetivo = rutasUrls[id] || '#/inventario-produccion';
   if (!opciones.skipHash) {
     if (window.location.hash !== urlObjetivo) {
@@ -119,6 +150,10 @@ export function activarPestana(id, opciones = {}) {
   const pestanaActual = document.getElementById(id);
   if (pestanaActual) {
     pestanaActual.classList.add('activo');
+    // Si es la pestaña de insumos, insertar el botón de pendientes
+    if (id === 'insumos' && window.inventario && typeof window.inventario.insertarBotonPendientesInsumos === 'function') {
+      setTimeout(() => window.inventario.insertarBotonPendientesInsumos(), 200);
+    }
   }
   
   const elementosMenu = document.querySelectorAll('.elementoMenu');
@@ -130,27 +165,42 @@ export function activarPestana(id, opciones = {}) {
   
   const barra = document.querySelector('.barraLateral');
   const botonToggle = document.querySelector('.botonToggleMenu');
-  barra.classList.remove('mostrada');
-  botonToggle.classList.remove('oculto');
+  if (barra) barra.classList.remove('mostrada');
+  if (botonToggle) botonToggle.classList.remove('oculto');
   
+  // Cargar datos según la pestaña activa
   if (id === 'insumos') {
-    inventario.cargarInventario();
-    inventario.cargarEstadisticasInventario();
-  } else if (id === 'utensilios') {
-    utensilios.cargarUtensilios();
-    utensilios.cargarEstadisticasUtensilios();
+    if (inventario) {
+      inventario.cargarInventario();
+      inventario.cargarEstadisticasInventario();
+    }
   } else if (id === 'recetas') {
-    recetas.cargarCategorias();
-    recetas.cargarPestanasCategorias();
-    recetas.cargarListadoRecetas();
+    if (recetas) {
+      recetas.cargarCategorias();
+      recetas.cargarPestanasCategorias();
+      recetas.cargarListadoRecetas();
+    } else {
+      console.error('❌ Módulo recetas no disponible');
+    }
   } else if (id === 'produccion') {
-    produccion.cargarProduccion();
+    if (produccion) {
+      produccion.cargarProduccion();
+    }
   } else if (id === 'ventas') {
-    recetas.cargarCategorias();
-    recetas.cargarPestanasCategorias();
-    ventas.cargarEstadisticasVentas('mes');
-    ventas.cargarVentas();
-    ventas.cargarCortesias();
+    if (recetas) {
+      recetas.cargarCategorias();
+      recetas.cargarPestanasCategorias();
+    }
+    if (ventas) {
+      ventas.cargarEstadisticasVentas('mes');
+      ventas.cargarVentas();
+      ventas.cargarCortesias();
+    }
+  } else if (id === 'utensilios') {
+    if (utensilios) {
+      utensilios.cargarUtensilios();
+      utensilios.cargarEstadisticasUtensilios();
+    }
   }
 }
 
@@ -184,7 +234,6 @@ export function mostrarLogoSiExiste() {
 
 // ===== MANEJADOR DE WEBSOCKET =====
 export function manejarMensajeWebSocket(datos) {
-  console.log('Actualización en tiempo real:', datos.tipo);
   
   // Recargar datos según el tipo de evento
   if (datos.tipo === 'inventario_actualizado') {
@@ -283,7 +332,6 @@ export function verificarCambioDia() {
   const ahora = new Date().toDateString();
   if (ahora !== diaActual) {
     diaActual = ahora;
-    console.log('📅 Nuevo día detectado. Iniciando corte automático...');
   }
 }
 

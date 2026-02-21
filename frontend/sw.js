@@ -60,8 +60,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // No cachear peticiones a la API ni WebSocket
-  if (event.request.url.includes('/api/') || event.request.url.includes('ws://') || event.request.url.includes('wss://')) {
+  // No cachear peticiones a la API, WebSocket, ni extensiones
+  if (event.request.url.includes('/api/') || event.request.url.includes('ws://') || event.request.url.includes('wss://') || !event.request.url.startsWith('http')) {
     return;
   }
 

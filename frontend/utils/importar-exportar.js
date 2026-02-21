@@ -132,8 +132,8 @@ async function importarDatos(tipo, input) {
 function recargarSeccion(tipo) {
   switch (tipo) {
     case 'inventario':
-      if (typeof cargarInventario === 'function') cargarInventario();
-      if (typeof actualizarEstadisticas === 'function') actualizarEstadisticas();
+      if (window.inventario?.cargarInventario) window.inventario.cargarInventario();
+      if (window.inventario?.cargarEstadisticasInventario) window.inventario.cargarEstadisticasInventario();
       break;
     case 'utensilios':
       if (typeof window.utensilios?.cargarUtensilios === 'function') {
@@ -141,16 +141,16 @@ function recargarSeccion(tipo) {
       }
       break;
     case 'recetas':
-      if (typeof cargarRecetas === 'function') cargarRecetas();
-      if (typeof cargarCategorias === 'function') cargarCategorias();
+      if (window.recetas?.cargarListadoRecetas) window.recetas.cargarListadoRecetas();
+      if (window.recetas?.cargarCategorias) window.recetas.cargarCategorias();
       break;
     case 'produccion':
-      if (typeof cargarProduccion === 'function') cargarProduccion();
+      if (window.produccion?.cargarProduccion) window.produccion.cargarProduccion();
       break;
     case 'ventas':
-      if (typeof cargarVentas === 'function') cargarVentas();
-      if (typeof cargarEstadisticasVentas === 'function') {
-        cargarEstadisticasVentas('mes');
+      if (window.ventas?.cargarVentas) window.ventas.cargarVentas();
+      if (window.ventas?.cargarEstadisticasVentas) {
+        window.ventas.cargarEstadisticasVentas('mes');
       }
       break;
   }

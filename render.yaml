@@ -2,13 +2,13 @@ services:
   - type: web
     name: chipactli
     env: node
-    buildCommand: npm run build
-    startCommand: npm start
+    buildCommand: npm install && cd backend && npm install
+    startCommand: cd backend && node server.js
     envVars:
       - key: NODE_ENV
         value: production
     # Disco persistente para que las bases de datos no se borren
     disk:
       name: chipactli-data
-      mountPath: /opt/render/project/src/backend
+      mountPath: /app/backend
       sizeGB: 1

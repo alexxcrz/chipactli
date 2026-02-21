@@ -1,0 +1,138 @@
+.barraLateral {
+  width: 280px;
+  background: linear-gradient(180deg, #f5f1e8 0%, #f0ebe0 100%);
+  color: #3a3a3a;
+  box-shadow: 6px 0 20px rgba(0,0,0,0.12);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  overflow-y: auto;
+  left: -280px;
+  transition: left 0.3s ease;
+  border-right: 3px solid #2a2a2a;
+  z-index: 1998;
+  border-radius: 0 30px 30px 0;
+}
+.barraLateral.mostrada { left: 0; }
+.barraLateral.mostrada::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 280px;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.3);
+  z-index: -1;
+}
+.encabezadoBarraLateral {
+  padding: 20px 22px;
+  background: linear-gradient(135deg, #4a7c59 0%, #8b7355 100%);
+  border-bottom: 3px solid #2a2a2a;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  border-radius: 0 0 30px 0;
+}
+.logoBarraLateral {
+  width: 65px;
+  height: 65px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 6px 16px rgba(74,124,89,0.3);
+  border: 3px solid #2a2a2a;
+}
+.menuBarraLateral {
+  flex: 1;
+  padding: 10px 0;
+}
+.elementoMenu {
+  padding: 11px 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border-left: 4px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #6b6b6b;
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 12px;
+  border-radius: 0 20px 20px 0;
+}
+.elementoMenu:hover {
+  background: rgba(74,124,89,0.15);
+  border-left-color: #4a7c59;
+  color: #4a7c59;
+}
+.elementoMenu.activo {
+  background: rgba(74,124,89,0.2);
+  border-left-color: #4a7c59;
+  color: #4a7c59;
+  border-left-width: 5px;
+}
+.iconoMenu {
+  font-size: 16px;
+  width: 22px;
+  text-align: center;
+}
+.botonToggleMenu {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 2001;
+  background: #fff;
+  color: #4a7c59;
+  border: 2px solid #2a2a2a;
+  width: 45px;
+  height: 45px;
+  border-radius: 18px;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(74,124,89,0.25);
+  transition: all 0.3s;
+}
+.botonToggleMenu:hover {
+  background: #4a7c59;
+  color: white;
+  transform: scale(1.08);
+  border-color: #4a7c59;
+}
+.botonToggleMenu.oculto {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0);
+}
+.cierreBarraLateral {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: rgba(42,42,42,0.2);
+  color: #2a2a2a;
+  border: 2px solid #2a2a2a;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  z-index: 10;
+  font-weight: bold;
+}
+.cierreBarraLateral:hover {
+  background: #2a2a2a;
+  color: white;
+  transform: rotate(90deg);
+}

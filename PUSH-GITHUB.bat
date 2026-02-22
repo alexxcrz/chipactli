@@ -9,7 +9,8 @@ echo ========================================
 echo.
 
 git add -A
-git commit -m "Add: Sistema de descarga de datos y endpoints de backup"
+set /p COMMIT_MSG="Escribe el comentario para el commit: "
+git commit -m "%COMMIT_MSG%"
 git push origin main
 
 if errorlevel 1 (

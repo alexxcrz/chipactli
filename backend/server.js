@@ -52,7 +52,7 @@ const upload = multer({
 const dbDir = process.env.NODE_ENV === 'production' ? '/app/backend' : __dirname;
 
 // Crear directorio de bases de datos si no existe
-import { promises as fs } from "fs";
+// ...existing code...
 await fs.mkdir(dbDir, { recursive: true });
 
 // Inicializar bases de datos

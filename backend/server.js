@@ -49,9 +49,7 @@ const upload = multer({
 
 // Configuración de directorios para las bases de datos
 // En Render, usar el volumen persistente. En local, usar el directorio actual
-const dbDir = process.env.NODE_ENV === 'production' 
-  ? '/app/backend'
-  : __dirname;
+const dbDir = process.env.NODE_ENV === 'production' ? '/app/backend' : __dirname;
 
 // Inicializar bases de datos
 const bdInventario = new Database(path.join(dbDir, "inventario.db"));

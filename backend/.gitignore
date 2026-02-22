@@ -1,0 +1,13 @@
+# Ignore node_modules and logs
+node_modules/
+*.log
+
+# Ignore backups in production, but keep .gitkeep
+backups/*
+!backups/.gitkeep
+
+# Ignore database files if not needed in repo
+inventario.db
+recetas.db
+produccion.db
+ventas.db

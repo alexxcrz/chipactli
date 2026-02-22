@@ -51,6 +51,10 @@ const upload = multer({
 // En Render, usar el volumen persistente. En local, usar el directorio actual
 const dbDir = process.env.NODE_ENV === 'production' ? '/app/backend' : __dirname;
 
+// Crear directorio de bases de datos si no existe
+import { promises as fs } from "fs";
+await fs.mkdir(dbDir, { recursive: true });
+
 // Inicializar bases de datos
 const bdInventario = new Database(path.join(dbDir, "inventario.db"));
 const bdRecetas = new Database(path.join(dbDir, "recetas.db"));

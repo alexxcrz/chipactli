@@ -11,7 +11,7 @@
     "dev:all": "npm run guard:local && npm run free:dev-ports && concurrently \"cd frontend && npm run dev\" \"cd backend && node server.js\"",
     "start": "npm run guard:local && cd backend && node server.js",
     "install:all": "npm run guard:local && npm install && npm --prefix frontend install && npm --prefix frontend run prepare-assets && cd backend && npm install",
-    "build": "npm run guard:local && cd backend && npm install"
+    "build": "npm run guard:local && npm --prefix frontend install && npm --prefix frontend run prepare-assets && npm --prefix frontend run build && npm --prefix backend install"
   },
   "engines": {
     "node": ">=18.0.0"

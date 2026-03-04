@@ -2,7 +2,7 @@ services:
   - type: web
     name: chipactli
     env: node
-    buildCommand: npm install && cd backend && npm install
+    buildCommand: npm install && npm --prefix frontend install && npm --prefix frontend run prepare-assets && npm --prefix frontend run build && npm --prefix backend install
     startCommand: cd backend && node server.js
     envVars:
       - key: NODE_ENV

@@ -75,7 +75,8 @@ try {
 }
 const forzarBuildReact = process.env.SERVE_REACT_BUILD === '1';
 const enRender = Boolean(process.env.RENDER) || Boolean(process.env.RENDER_EXTERNAL_URL);
-const usarBuildReact = hasReactBuild && (forzarBuildReact || enRender);
+const esProduccion = process.env.NODE_ENV === 'production';
+const usarBuildReact = hasReactBuild && (forzarBuildReact || enRender || esProduccion);
 
 const app = express();
 const servidor = http.createServer(app);

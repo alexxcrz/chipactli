@@ -5,9 +5,10 @@
   "description": "Sistema de control de insumos para cosmética sólida - Chipactli",
   "scripts": {
     "guard:local": "node scripts/ensure-local-path.mjs",
-    "dev": "npm run guard:local && concurrently \"cd frontend && npm run dev\" \"cd backend && node server.js\"",
+    "free:dev-ports": "node scripts/free-dev-ports.mjs",
+    "dev": "npm run guard:local && npm run free:dev-ports && concurrently \"cd frontend && npm run dev\" \"cd backend && node server.js\"",
     "dev:backend": "npm run guard:local && cd backend && node server.js",
-    "dev:all": "npm run guard:local && concurrently \"cd frontend && npm run dev\" \"cd backend && node server.js\"",
+    "dev:all": "npm run guard:local && npm run free:dev-ports && concurrently \"cd frontend && npm run dev\" \"cd backend && node server.js\"",
     "start": "npm run guard:local && cd backend && node server.js",
     "install:all": "npm run guard:local && npm install && npm --prefix frontend install && npm --prefix frontend run prepare-assets && cd backend && npm install",
     "build": "npm run guard:local && cd backend && npm install"

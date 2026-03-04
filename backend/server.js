@@ -688,8 +688,8 @@ if (usarBuildReact && frontendPath) {
 } else {
   // No hay build de React: intentar proxy a Vite dev server (http://localhost:5173)
   // Esto permite trabajar en modo desarrollo sin generar la build.
-  const VITE_HOST = '127.0.0.1';
-  const VITE_PORT = 3000;
+  const VITE_HOST = process.env.VITE_DEV_HOST || 'localhost';
+  const VITE_PORT = Number(process.env.VITE_DEV_PORT || 3000);
 
   function proxyToVite(req, res) {
     // No proxyar rutas de API

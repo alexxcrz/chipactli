@@ -7,7 +7,9 @@ const BACKEND_TARGET = 'http://127.0.0.1:3001'
 export default defineConfig(({ command, mode }) => ({
   plugins: [react()],
   server: {
+    host: true,
     port: 3000,
+    strictPort: true,
     proxy: {
       // Proxy API and inventory routes to backend (default port 3001)
       '^/inventario': {

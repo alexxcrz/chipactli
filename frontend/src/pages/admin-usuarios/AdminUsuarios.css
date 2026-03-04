@@ -1,0 +1,343 @@
+.contenidoAdmin {
+  background: #fff;
+  padding: 22px;
+  border-radius: 30px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  margin-bottom: 18px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #2a2a2a;
+  transition: all 0.3s;
+}
+.contenidoAdmin:hover {
+  border-color: #4a7c59;
+  box-shadow: 0 12px 28px rgba(74,124,89,0.18);
+  transform: translateY(-4px);
+}
+.contenidoAdmin h2 {
+  color: #4a7c59;
+  margin-bottom: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.adminUsuariosCard {
+  background: rgba(245, 241, 232, 0.95);
+}
+
+.adminUsuariosCard:hover {
+  transform: none;
+}
+
+.adminActualInfo {
+  margin: 8px 0 14px;
+  font-weight: 600;
+  color: #2f4f3c;
+}
+
+.tablaUsuariosAdmin th,
+.tablaUsuariosAdmin td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #d4ccc0;
+  vertical-align: top;
+}
+
+.bloquePermisos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.bloquePermisosFila {
+  max-width: 420px;
+}
+
+.filaPerfilPermisos {
+  margin-bottom: 8px;
+}
+
+.filaPerfilPermisos select {
+  border: 1px solid #d4ccc0;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fff;
+}
+
+.permisoCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  border: 1px solid #d4ccc0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #fff;
+}
+
+.permisoCheckFila {
+  font-size: 12px;
+}
+
+.modalAdminUsuarios {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.contenidoModalAdminUsuarios {
+  width: min(700px, 92vw);
+  max-height: 82vh;
+  overflow: hidden;
+  background: var(--card-bg);
+  border: 2px solid #2a2a2a;
+  border-radius: 22px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  display: flex;
+  flex-direction: column;
+}
+
+.encabezadoModalAdminUsuarios {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 2px solid #2a2a2a;
+}
+
+.encabezadoModalAdminUsuarios h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.tabsModalAdminUsuarios {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #d4ccc0;
+  background: rgba(74, 124, 89, 0.06);
+  flex-wrap: wrap;
+}
+
+.tabsModalAdminUsuarios button {
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  background: #f6f2eb;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.tabsModalAdminUsuarios .tabActiva {
+  background: #4a7c59;
+  color: #fff;
+}
+
+.tabPanelAdminUsuarios {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  max-height: calc(82vh - 126px);
+}
+
+.tabPanelAdminUsuarios label {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 12px;
+}
+
+.tabPanelAdminUsuarios input {
+  border: 2px solid #2a2a2a;
+  border-radius: 14px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.tabPanelAdminUsuarios > input,
+.tabPanelAdminUsuarios > select {
+  width: min(100%, 420px);
+}
+
+.tabPanelAdminUsuarios .cardPermisoPestana input,
+.tabPanelAdminUsuarios .cardPermisoPestana select {
+  width: 100%;
+}
+
+.buscadorPermisosInput {
+  margin-bottom: 6px;
+}
+
+.resaltadoBusquedaPermisos {
+  background: #ffe28a;
+  color: #2a2a2a;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+.cardPermisoPestana {
+  border: 2px solid #d4ccc0;
+  border-radius: 16px;
+  padding: 10px;
+  margin-bottom: 6px;
+  background: #fff;
+}
+
+.filaPestanaPermiso {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.filaPestanaPermisoClickable {
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 4px 6px;
+}
+
+.filaPestanaPermisoClickable:hover {
+  background: rgba(74, 124, 89, 0.08);
+}
+
+.tituloPestanaPermiso {
+  flex: 1;
+  min-width: 120px;
+}
+
+.switchPermiso {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.switchPermisoFila {
+  width: auto;
+  margin-left: auto;
+}
+
+.switchEtiqueta {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4f3c;
+}
+
+.switchControl {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.switchControl input {
+  position: absolute;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none;
+  appearance: none;
+}
+
+.switchSlider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #c75550;
+  border: 1px solid #a43f3a;
+  display: block;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+  transition: all 0.2s ease;
+}
+
+.switchSlider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.switchControl input:checked + .switchSlider {
+  background: #4a7c59;
+  border-color: #3d6649;
+}
+
+.switchControl input:checked + .switchSlider::before {
+  transform: translateX(20px);
+}
+
+.switchControl input:disabled + .switchSlider {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.listaAccionesPermiso {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px;
+}
+
+.accionPermiso {
+  border: 2px solid #d4ccc0;
+  border-radius: 12px;
+  padding: 6px 8px;
+  background: #faf8f4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.textoAyudaReset {
+  font-size: 12px;
+  color: #5f5f5f;
+}
+
+@media (max-width: 768px) {
+  .modalAdminUsuarios {
+    padding: 8px;
+  }
+
+  .contenidoModalAdminUsuarios {
+    width: 94vw;
+    max-height: 88vh;
+    border-radius: 18px;
+  }
+
+  .encabezadoModalAdminUsuarios {
+    padding: 12px;
+  }
+
+  .tabsModalAdminUsuarios {
+    padding: 8px 10px 6px;
+    gap: 6px;
+  }
+
+  .tabPanelAdminUsuarios {
+    padding: 10px;
+    max-height: calc(88vh - 118px);
+  }
+}

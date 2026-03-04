@@ -1,0 +1,350 @@
+.contenidoRecetas {
+  background: #fff;
+  padding: 22px;
+  border-radius: 30px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  margin-bottom: 18px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #2a2a2a;
+  transition: all 0.3s;
+}
+.contenidoRecetas:hover {
+  border-color: #4a7c59;
+  box-shadow: 0 12px 28px rgba(74,124,89,0.18);
+  transform: translateY(-4px);
+}
+.contenidoRecetas h2 {
+  color: #4a7c59;
+  margin-bottom: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.menuCategoriaRecetas {
+  position: absolute;
+  display: none;
+  flex-direction: column;
+  min-width: 210px;
+  background: #fff;
+  border: 2px solid #2a2a2a;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.2);
+  z-index: 5000;
+  overflow: hidden;
+}
+
+.menuCategoriaBtn {
+  border: none;
+  background: #fff;
+  text-align: left;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #2a2a2a;
+}
+
+.menuCategoriaBtn:hover {
+  background: rgba(74,124,89,0.1);
+}
+
+.menuCategoriaBtnDanger {
+  color: #c75550;
+}
+
+.categoriaMenuActiva {
+  outline: 2px solid #d4a574;
+  box-shadow: 0 0 0 3px rgba(212,165,116,0.24);
+}
+
+.chipCategoriaEditor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chipCategoriaInput {
+  border: 2px solid #2a2a2a;
+  border-radius: 999px;
+  min-width: 210px;
+  padding: 8px 64px 8px 12px;
+  font-size: 13px;
+  background: #fff;
+  color: #2a2a2a;
+}
+
+.chipCategoriaInput:focus {
+  outline: none;
+  border-color: #4a7c59;
+  box-shadow: 0 0 0 3px rgba(74,124,89,0.18);
+}
+
+.chipCategoriaAccion {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  color: #fff;
+}
+
+.chipCategoriaAccionOk {
+  right: 34px;
+  background: #4a7c59;
+}
+
+.chipCategoriaAccionCancel {
+  right: 8px;
+  background: #c75550;
+}
+
+.listaRecetasEscaladoCategoria {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 2px solid #d4ccc0;
+  border-radius: 14px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fff;
+}
+
+.itemRecetaEscalado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid #e5ded3;
+  border-radius: 10px;
+}
+
+.itemRecetaEscalado:hover {
+  background: rgba(74,124,89,0.06);
+}
+
+.selectorTodasEscalado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  width: min(280px, 100%);
+}
+
+.tabsArchivadoRecetas {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tabsArchivadoRecetas .boton {
+  min-width: 120px;
+}
+
+.tabsArchivadoRecetas .boton.activo {
+  background: #4a7c59;
+  color: #fff;
+}
+
+.filtrosArchivadoRecetas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tabsSubseccionRecetas {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.bloqueOrdenCompraRecetas {
+  border: 2px solid #d4ccc0;
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.bloqueOrdenCompraRecetas h3 {
+  margin: 0 0 10px 0;
+  color: #4a7c59;
+}
+
+.filaOrdenCompraRecetas {
+  display: grid;
+  grid-template-columns: 1.2fr 1.3fr .8fr .7fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.listaOrdenesCompraRecetas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.itemOrdenCompraRecetas {
+  border: 1px solid #e5ded3;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.itemOrdenCompraRecetasHeader {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.itemOrdenCompraRecetas ul {
+  margin: 0;
+  padding-left: 16px;
+  color: #444;
+  font-size: 12px;
+}
+
+.listaPreciosProveedor {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.listaPreciosProveedor li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.listaPreciosProveedor li:last-child {
+  border-bottom: none;
+}
+
+@media (max-width: 760px) {
+  .filtrosArchivadoRecetas {
+    grid-template-columns: 1fr;
+  }
+
+  .filaOrdenCompraRecetas {
+    grid-template-columns: 1fr;
+  }
+
+  .itemOrdenCompraRecetasHeader {
+    grid-template-columns: 1fr;
+  }
+}
+
+.switchMini {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+
+.switchMini input {
+  position: absolute;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none;
+  appearance: none;
+}
+
+.switchMiniSlider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1px solid #a43f3a !important;
+  background: #c75550 !important;
+  display: block;
+  opacity: 1 !important;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+  transition: all 0.2s ease;
+}
+
+.switchMiniSlider::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: #fff !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease;
+}
+
+.switchMini input:checked + .switchMiniSlider {
+  background: #4a7c59 !important;
+  border-color: #3d6649 !important;
+}
+
+.switchMini input:checked + .switchMiniSlider::before {
+  transform: translateX(16px);
+}
+
+.mensajeSinRecetasEscalado {
+  text-align: center;
+  color: #666;
+  padding: 10px;
+}
+
+.fichaTiendaPreviewPrincipal {
+  border: 1px dashed #cfc7ba;
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+.fichaTiendaPreviewPrincipal img {
+  max-width: 100%;
+  max-height: 150px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.fichaTiendaGaleria {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.fichaTiendaGaleriaItem {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.fichaTiendaGaleriaItem img {
+  width: 100%;
+  height: 74px;
+  object-fit: cover;
+  border-radius: 6px;
+}

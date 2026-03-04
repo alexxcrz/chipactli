@@ -1,7 +1,31 @@
 {
-  "name": "frontend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.html",
-  "type": "module"
+  "name": "chipactli-react",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "guard:local": "node ../scripts/ensure-local-path.mjs",
+    "dev": "npm run guard:local && vite",
+    "build": "npm run guard:local && vite build",
+    "preview": "npm run guard:local && vite preview",
+    "prepare-assets": "node scripts/copy-assets.js",
+    "start": "npm run guard:local && npm run dev",
+    "test": "npm run guard:local && vitest",
+    "test:run": "npm run guard:local && vitest run",
+    "test:coverage": "npm run guard:local && vitest run --coverage"
+  },
+  "husky": {},
+  "dependencies": {
+    "chipactli": "file:..",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^15.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^22.0.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
 }

@@ -1,0 +1,10 @@
+export { registrarRutasInventario } from './inventario/index.js';
+export { registrarRutasCategorias } from './categorias/index.js';
+export { registrarRutasRecetas } from './recetas/index.js';
+export { registrarRutasProduccion } from './produccion/index.js';
+export { registrarRutasCortesias } from './cortesias/index.js';
+export { registrarRutasVentas } from './ventas/index.js';
+export { registrarRutasUtensilios } from './utensilios/index.js';
+export { registrarRutasAuth } from './auth/index.js';
+export { registrarRutasUsuarios } from './usuarios/index.js';
+export { registrarRutasTienda } from './tienda/index.js';

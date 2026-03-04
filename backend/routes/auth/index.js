@@ -1,8 +1,12 @@
-export * from "./auth/index.js";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import { normalizarPermisosUsuario } from "../../utils/permisos/index.js";
+
+export function registrarRutasAuth(app, bdAdmin) {
   // Login
   app.post("/api/auth/login", (req, res) => {
     const { username, password } = req.body;
-    bdInventario.get(
+    bdAdmin.get(
       "SELECT * FROM usuarios WHERE username = ?",
       [username],
       async (err, user) => {
@@ -13,13 +17,14 @@ export * from "./auth/index.js";
         if (!match) {
           return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
         }
+        const permisos = normalizarPermisosUsuario(user.permisos, user.rol);
         // Generar JWT
         const token = jwt.sign(
-          { id: user.id, username: user.username, rol: user.rol },
+          { id: user.id, username: user.username, rol: user.rol, permisos },
           process.env.JWT_SECRET || "chipactli_jwt_secret",
           { expiresIn: "12h" }
         );
-        res.json({ exito: true, token, debe_cambiar_password: !!user.debe_cambiar_password, rol: user.rol, nombre: user.nombre });
+        res.json({ exito: true, token, debe_cambiar_password: !!user.debe_cambiar_password, rol: user.rol, nombre: user.nombre, permisos });
       }
     );
   });
@@ -27,7 +32,7 @@ export * from "./auth/index.js";
   // Cambiar contraseña (requiere login)
   app.post("/api/auth/cambiar-password", (req, res) => {
     const { username, password_actual, password_nueva } = req.body;
-    bdInventario.get(
+    bdAdmin.get(
       "SELECT * FROM usuarios WHERE username = ?",
       [username],
       async (err, user) => {
@@ -39,7 +44,7 @@ export * from "./auth/index.js";
           return res.status(401).json({ exito: false, mensaje: "Contraseña actual incorrecta" });
         }
         const hash = await bcrypt.hash(password_nueva, 10);
-        bdInventario.run(
+        bdAdmin.run(
           "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
           [hash, username],
           (err2) => {
@@ -62,7 +67,8 @@ export * from "./auth/index.js";
       const decoded = jwt.verify(token, process.env.JWT_SECRET || "chipactli_jwt_secret");
       req.usuario = decoded;
       next();
-    } catch {
+    } catch (err) {
       return res.status(401).json({ exito: false, mensaje: "Token inválido" });
     }
-});
+  });
+}

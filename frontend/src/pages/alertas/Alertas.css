@@ -1,0 +1,41 @@
+.listaAlertas {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.elementoAlerta {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.elementoAlerta.advertencia {
+  border-left: 4px solid #f39c12;
+}
+
+.elementoAlerta.error {
+  border-left: 4px solid #d32f2f;
+}
+
+.elementoAlerta.exito {
+  border-left: 4px solid #2e7d32;
+}
+
+.fechaAlerta {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+.oculto {
+  display: none !important;
+}
+
+#tabAlertasActivas.activa,
+#tabAlertasHistorial.activa {
+  outline: 2px solid var(--primary);
+}

@@ -1,0 +1,34 @@
+.contenidoUtensilios {
+  background: #fff;
+  padding: 22px;
+  border-radius: 30px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  margin-bottom: 18px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #2a2a2a;
+  transition: all 0.3s;
+}
+.contenidoUtensilios:hover {
+  border-color: #4a7c59;
+  box-shadow: 0 12px 28px rgba(74,124,89,0.18);
+  transform: translateY(-4px);
+}
+.contenidoUtensilios h2 {
+  color: #4a7c59;
+  margin-bottom: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.filaGrupoProveedorUtensilios td {
+  background: #edf2ee;
+  color: #2f5f3e;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  border-top: 2px solid #d4ccc0;
+  border-bottom: 1px solid #d4ccc0;
+  padding: 10px 12px !important;
+}

@@ -1,0 +1,170 @@
+.contenidoInventario {
+  background: #fff;
+  padding: 22px;
+  border-radius: 30px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  margin-bottom: 18px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #2a2a2a;
+  transition: all 0.3s;
+}
+.contenidoInventario:hover {
+  border-color: #4a7c59;
+  box-shadow: 0 12px 28px rgba(74,124,89,0.18);
+  transform: translateY(-4px);
+}
+.contenidoInventario h2 {
+  color: #4a7c59;
+  margin-bottom: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.tabsSubseccionInventario {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.tabsSubseccionInventario .boton.activo {
+  background: #4a7c59;
+  color: #fff;
+}
+
+.tarjeta input:not([type="file"]):not([type="hidden"]),
+.tarjeta select,
+.tarjeta textarea {
+  padding: 10px 14px;
+  border: 2px solid #2a2a2a;
+  border-radius: 18px;
+  font-size: 12px;
+  outline: none;
+  transition: all 0.3s;
+  background: #ffffff;
+  color: var(--text-primary);
+  font-weight: 500;
+  box-sizing: border-box;
+}
+
+.tarjeta input:not([type="file"]):not([type="hidden"]):focus,
+.tarjeta select:focus,
+.tarjeta textarea:focus {
+  border-color: #4a7c59;
+  box-shadow: 0 0 16px rgba(74,124,89,0.25);
+  background: #f9fcfb;
+}
+
+.tarjeta input::placeholder,
+.tarjeta textarea::placeholder {
+  color: #6b6b6b;
+}
+
+.bloqueOrdenCompraInventario {
+  border: 2px solid #d4ccc0;
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.bloqueOrdenCompraInventario h3 {
+  margin: 0 0 10px 0;
+  color: #4a7c59;
+}
+
+.filaOrdenCompraInventario {
+  display: grid;
+  grid-template-columns: 1.2fr 1.3fr .8fr .7fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.controlProveedorInventario {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.controlProveedorItemInventario {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.selectProveedorItemOrdenCompraInventario {
+  width: 100%;
+}
+
+.listaOrdenesCompraInventario {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.itemOrdenCompraInventario {
+  border: 1px solid #e5ded3;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.itemOrdenCompraInventarioHeader {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.itemOrdenCompraInventario ul {
+  margin: 0;
+  padding-left: 16px;
+  color: #444;
+  font-size: 12px;
+}
+
+.listaPreciosProveedorInventario {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.listaPreciosProveedorInventario li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.listaPreciosProveedorInventario li:last-child {
+  border-bottom: none;
+}
+
+.filaGrupoProveedorInventario td {
+  background: #edf2ee;
+  color: #2f5f3e;
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+  border-top: 2px solid #d4ccc0;
+  border-bottom: 1px solid #d4ccc0;
+  padding: 10px 12px !important;
+}
+
+@media (max-width: 760px) {
+  .filaOrdenCompraInventario {
+    grid-template-columns: 1fr;
+  }
+
+  .itemOrdenCompraInventarioHeader {
+    grid-template-columns: 1fr;
+  }
+
+  #modalInsumo .filaFormulario {
+    grid-template-columns: 1fr !important;
+  }
+}

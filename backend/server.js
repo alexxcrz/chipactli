@@ -8,27 +8,72 @@ import path from "path";
 import { fileURLToPath } from "url";
 import os from "os";
 import { promises as fs } from "fs";
+import { existsSync, readFileSync } from "fs";
 import multer from "multer";
+import jwt from "jsonwebtoken";
 
-// Importar utilidades
-import { inicializarWss } from "./utils/transmitir.js";
-import { inicializarBds } from "./utils/db-init.js";
-import { programarBackupsAutomaticos, crearBackup, listarBackups, restaurarBackup } from "./utils/backup.js";
+function cargarDotEnvLocal() {
+  try {
+    const rutaEnv = path.join(path.dirname(fileURLToPath(import.meta.url)), '.env');
+    if (!existsSync(rutaEnv)) return;
+    const contenido = readFileSync(rutaEnv, 'utf8');
+    const lineas = String(contenido || '').split(/\r?\n/);
+    for (const lineaRaw of lineas) {
+      const linea = String(lineaRaw || '').trim();
+      if (!linea || linea.startsWith('#')) continue;
+      const idx = linea.indexOf('=');
+      if (idx <= 0) continue;
+      const clave = linea.slice(0, idx).trim();
+      if (!clave) continue;
+      let valor = linea.slice(idx + 1).trim();
+      if ((valor.startsWith('"') && valor.endsWith('"')) || (valor.startsWith("'") && valor.endsWith("'"))) {
+        valor = valor.slice(1, -1);
+      }
+      if (process.env[clave] === undefined) {
+        process.env[clave] = valor;
+      }
+    }
+  } catch {
+    // Ignorar errores de lectura para no bloquear el arranque.
+  }
+}
 
-// Importar rutas
-import { registrarRutasInventario } from "./routes/inventario.js";
-import { registrarRutasCategorias } from "./routes/categorias.js";
-import { registrarRutasRecetas } from "./routes/recetas.js";
-import { registrarRutasProduccion } from "./routes/produccion.js";
-import { registrarRutasCortesias } from "./routes/cortesias.js";
-import { registrarRutasVentas } from "./routes/ventas.js";
-import { registrarRutasUtensilios } from "./routes/utensilios.js";
-import { registrarRutasAuth } from "./routes/auth.js";
-import { registrarRutasUsuarios } from "./routes/usuarios.js";
+cargarDotEnvLocal();
+
+// Importar utilidades centralizadas
+import { inicializarWss, inicializarBds, inicializarBdAdmin, programarBackupsAutomaticos, crearBackup, listarBackups, restaurarBackup, configurarBackup, tienePermisoAccion } from "./utils/index.js";
+
+// Importar rutas centralizadas
+import {
+  registrarRutasInventario,
+  registrarRutasCategorias,
+  registrarRutasRecetas,
+  registrarRutasProduccion,
+  registrarRutasCortesias,
+  registrarRutasVentas,
+  registrarRutasUtensilios,
+  registrarRutasAuth,
+  registrarRutasUsuarios,
+  registrarRutasTienda
+} from "./routes/index.js";
 
 // Configuración básica
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const frontendPath = path.join(__dirname, "../frontend");
+// Preferir el build de React en production si existe
+const reactDist = path.join(__dirname, "../frontend/dist");
+let frontendPath = null;
+let hasReactBuild = false;
+try {
+  // Si el build de React existe, usarlo como carpeta frontend
+  await fs.access(reactDist);
+  frontendPath = reactDist;
+  hasReactBuild = true;
+  console.log('Usando build de React en:', reactDist);
+} catch (e) {
+  // No hay build de React. No serviremos el frontend legacy.
+  console.log('No se encontró build de React. El servidor no servirá el frontend estático.');
+}
+const usarBuildReact = process.env.NODE_ENV === 'production' && hasReactBuild;
 
 const app = express();
 const servidor = http.createServer(app);
@@ -50,22 +95,162 @@ const upload = multer({
 // Configuración de directorios para las bases de datos
 // En Render, usar el volumen persistente. En local, usar el directorio actual
 const dbDir = process.env.NODE_ENV === 'production' ? '/opt/render/data/backend' : __dirname;
+const uploadsDir = path.join(dbDir, 'uploads');
+
+configurarBackup({
+  dbDir,
+  backupDir: path.join(dbDir, 'backups'),
+  maxBackups: 5,
+});
 
 // Crear directorio de bases de datos si no existe
 // ...existing code...
 await fs.mkdir(dbDir, { recursive: true });
+await fs.mkdir(path.join(uploadsDir, 'tienda'), { recursive: true });
+
+app.use('/uploads', express.static(uploadsDir));
 
 // Inicializar bases de datos
 const bdInventario = new Database(path.join(dbDir, "inventario.db"));
 const bdRecetas = new Database(path.join(dbDir, "recetas.db"));
 const bdProduccion = new Database(path.join(dbDir, "produccion.db"));
 const bdVentas = new Database(path.join(dbDir, "ventas.db"));
+const bdAdmin = new Database(path.join(dbDir, "admin.db"));
 
 inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas);
+inicializarBdAdmin(bdAdmin, bdInventario);
 
 // Registrar rutas de autenticación
-registrarRutasAuth(app, bdInventario);
-registrarRutasUsuarios(app, bdInventario);
+registrarRutasAuth(app, bdAdmin);
+
+const reglasPermisos = [
+  { metodos: ['GET'], exacto: '/inventario/estadisticas', pestana: 'inventario', accion: 'ver_estadisticas' },
+  { metodos: ['GET'], prefijo: '/inventario', pestana: 'inventario', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/inventario/agregar', pestana: 'inventario', accion: 'crear' },
+  { metodos: ['POST'], exacto: '/inventario/aumentar', pestana: 'inventario', accion: 'aumentar' },
+  { metodos: ['POST'], prefijo: '/inventario/proveedores', pestana: 'inventario', accion: 'editar' },
+  { metodos: ['PATCH'], prefijo: '/inventario/proveedores', pestana: 'inventario', accion: 'editar' },
+  { metodos: ['PATCH'], prefijo: '/inventario', pestana: 'inventario', accion: 'editar' },
+  { metodos: ['DELETE'], prefijo: '/inventario', pestana: 'inventario', accion: 'eliminar' },
+
+  { metodos: ['GET'], exacto: '/categorias', pestana: 'recetas', accion: 'categorias_ver' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/categorias', pestana: 'recetas', accion: 'categorias_gestionar' },
+  { metodos: ['POST'], exacto: '/recetas/calcular', pestana: 'recetas', accion: 'calcular' },
+  { metodos: ['GET'], prefijo: '/recetas', pestana: 'recetas', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/recetas', pestana: 'recetas', accion: 'crear' },
+  { metodos: ['POST'], exacto: '/recetas/ordenes-compra', pestana: 'recetas', accion: 'crear' },
+  { metodos: ['POST'], prefijo: '/recetas/ordenes-compra/items', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['PATCH'], prefijo: '/recetas/ordenes-compra/items', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['POST'], exacto: '/recetas/archivar', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['POST'], exacto: '/recetas/desarchivar', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['POST'], exacto: '/api/uploads/tienda-imagen', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['PATCH'], prefijo: '/recetas', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['DELETE'], prefijo: '/recetas', pestana: 'recetas', accion: 'eliminar' },
+
+  { metodos: ['GET'], prefijo: '/produccion', pestana: 'produccion', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/produccion', pestana: 'produccion', accion: 'crear' },
+  { metodos: ['DELETE'], prefijo: '/produccion', pestana: 'produccion', accion: 'eliminar' },
+
+  { metodos: ['GET'], prefijo: '/ventas/estadisticas', pestana: 'ventas', accion: 'ver_estadisticas' },
+  { metodos: ['GET'], exacto: '/ventas', pestana: 'ventas', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/ventas', pestana: 'ventas', accion: 'crear' },
+  { metodos: ['DELETE'], prefijo: '/ventas', pestana: 'ventas', accion: 'eliminar' },
+  { metodos: ['POST'], prefijo: '/cortesia', pestana: 'ventas', accion: 'cortesia_crear' },
+  { metodos: ['GET'], exacto: '/cortesias', pestana: 'ventas', accion: 'cortesia_ver' },
+  { metodos: ['POST'], exacto: '/cortesias/limpiar-pruebas', pestana: 'ventas', accion: 'cortesia_limpiar' },
+  { metodos: ['DELETE'], prefijo: '/cortesias', pestana: 'ventas', accion: 'cortesia_eliminar' },
+
+  { metodos: ['GET'], exacto: '/utensilios/estadisticas', pestana: 'utensilios', accion: 'ver_estadisticas' },
+  { metodos: ['GET'], exacto: '/utensilios/historial/agrupar/fechas', pestana: 'utensilios', accion: 'ver_historial' },
+  { metodos: ['GET'], prefijo: '/utensilios', pestana: 'utensilios', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/utensilios/agregar', pestana: 'utensilios', accion: 'crear' },
+  { metodos: ['POST'], exacto: '/utensilios/recuperado', pestana: 'utensilios', accion: 'recuperar' },
+  { metodos: ['PATCH'], prefijo: '/utensilios', pestana: 'utensilios', accion: 'editar' },
+  { metodos: ['DELETE'], prefijo: '/utensilios', pestana: 'utensilios', accion: 'eliminar' },
+
+  { metodos: ['GET'], exacto: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'crear' },
+  { metodos: ['PATCH'], prefijo: '/api/privado/usuarios', contiene: '/permisos', pestana: 'admin_usuarios', accion: 'editar_permisos' },
+  { metodos: ['PATCH'], prefijo: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'editar_usuario' },
+  { metodos: ['POST'], exacto: '/api/privado/usuarios/reset-password', pestana: 'admin_usuarios', accion: 'reset_password' },
+  { metodos: ['DELETE'], prefijo: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'eliminar' },
+
+  { metodos: ['GET'], exacto: '/api/exportar/inventario', pestana: 'inventario', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/inventario', pestana: 'inventario', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/utensilios', pestana: 'utensilios', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/utensilios', pestana: 'utensilios', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/recetas', pestana: 'recetas', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/recetas', pestana: 'recetas', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/produccion', pestana: 'produccion', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/produccion', pestana: 'produccion', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/ventas', pestana: 'ventas', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/ventas', pestana: 'ventas', accion: 'importar' },
+  { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', pestana: 'ventas', accion: 'editar' },
+  { metodos: ['GET'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'ver' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'editar' }
+];
+
+function rutaCoincide(pathname, regla) {
+  const matchMetodo = !regla.metodos || regla.metodos.includes('*') || regla.metodos.includes(pathname.metodo);
+  if (!matchMetodo) return false;
+
+  if (regla.exacto && pathname.ruta !== regla.exacto) return false;
+  if (regla.prefijo && !(pathname.ruta === regla.prefijo || pathname.ruta.startsWith(`${regla.prefijo}/`))) return false;
+  if (regla.contiene && !pathname.ruta.includes(regla.contiene)) return false;
+
+  return true;
+}
+
+app.use((req, res, next) => {
+  const ruta = req.path || req.originalUrl || '';
+  const match = reglasPermisos.find((regla) => rutaCoincide({ ruta, metodo: req.method }, regla));
+
+  if (!match) return next();
+
+  const auth = req.get('Authorization');
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ exito: false, mensaje: 'No autenticado' });
+  }
+
+  const token = auth.replace('Bearer ', '');
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'chipactli_jwt_secret');
+    req.usuario = decoded;
+  } catch {
+    return res.status(401).json({ exito: false, mensaje: 'Token inválido' });
+  }
+
+  if (!tienePermisoAccion(req.usuario, match.pestana, match.accion)) {
+    return res.status(403).json({ exito: false, mensaje: 'Sin permiso para esta acción' });
+  }
+
+  next();
+});
+
+app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar una imagen' });
+    }
+
+    const mime = String(req.file.mimetype || '').toLowerCase();
+    if (!mime.startsWith('image/')) {
+      return res.status(400).json({ exito: false, mensaje: 'El archivo debe ser una imagen' });
+    }
+
+    const extOriginal = path.extname(String(req.file.originalname || '')).toLowerCase();
+    const ext = extOriginal || (mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg');
+    const nombre = `tienda-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destino = path.join(uploadsDir, 'tienda', nombre);
+
+    await fs.writeFile(destino, req.file.buffer);
+
+    const base = `${req.protocol}://${req.get('host')}`;
+    return res.json({ ok: true, url: `${base}/uploads/tienda/${nombre}` });
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo subir la imagen' });
+  }
+});
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 
@@ -85,6 +270,7 @@ function cerrarBase(db) {
 }
 
 // Registrar rutas
+registrarRutasUsuarios(app, bdAdmin);
 registrarRutasInventario(app, bdInventario);
 registrarRutasUtensilios(app, bdInventario);
 registrarRutasCategorias(app, bdRecetas);
@@ -92,6 +278,7 @@ registrarRutasRecetas(app, bdRecetas, bdInventario);
 registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventario);
 registrarRutasCortesias(app, bdVentas, bdProduccion);
 registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas);
+registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario);
 
 // Rutas de backup
 app.post("/api/backup/crear", async (req, res) => {
@@ -118,7 +305,7 @@ app.get("/api/backup/descargar/:nombre", async (req, res) => {
   if (!validarAdmin(req, res)) return;
   
   const { nombre } = req.params;
-  const archivosPermitidos = ['inventario', 'recetas', 'produccion', 'ventas'];
+  const archivosPermitidos = ['inventario', 'recetas', 'produccion', 'ventas', 'admin'];
   
   if (!archivosPermitidos.includes(nombre)) {
     return res.status(400).json({ exito: false, mensaje: "Base de datos no válida" });
@@ -137,7 +324,8 @@ app.post("/api/backup/importar", upload.fields([
   { name: 'inventario', maxCount: 1 },
   { name: 'recetas', maxCount: 1 },
   { name: 'produccion', maxCount: 1 },
-  { name: 'ventas', maxCount: 1 }
+  { name: 'ventas', maxCount: 1 },
+  { name: 'admin', maxCount: 1 }
 ]), async (req, res) => {
   if (!validarAdmin(req, res)) return;
 
@@ -145,7 +333,8 @@ app.post("/api/backup/importar", upload.fields([
     inventario: path.join(dbDir, "inventario.db"),
     recetas: path.join(dbDir, "recetas.db"),
     produccion: path.join(dbDir, "produccion.db"),
-    ventas: path.join(dbDir, "ventas.db")
+    ventas: path.join(dbDir, "ventas.db"),
+    admin: path.join(dbDir, "admin.db")
   };
 
   if (!req.files || Object.keys(req.files).length === 0) {
@@ -158,6 +347,7 @@ app.post("/api/backup/importar", upload.fields([
     await cerrarBase(bdRecetas);
     await cerrarBase(bdProduccion);
     await cerrarBase(bdVentas);
+    await cerrarBase(bdAdmin);
 
     for (const [clave, rutaArchivo] of Object.entries(mapaArchivos)) {
       if (!req.files[clave]) continue;
@@ -475,11 +665,71 @@ app.post("/api/importar/ventas", async (req, res) => {
 });
 
 // Servir frontend
-app.use(express.static(frontendPath));
+if (usarBuildReact && frontendPath) {
+  // Manejar explícitamente las rutas raíz y /index.html
+  app.get(['/', '/index.html'], async (req, res) => {
+    const indexHtml = path.join(frontendPath, "index.html");
+    try {
+      await fs.access(indexHtml);
+      return res.sendFile(indexHtml);
+    } catch (err) {
+      return res.status(500).send('Error interno: index.html no accesible en la build de React.');
+    }
+  });
 
-app.use((req, res) => {
-  res.sendFile(path.join(frontendPath, "index.html"));
-});
+  // Servir archivos estáticos de la build
+  app.use(express.static(frontendPath));
+
+  // Fallback SPA: cualquier otra ruta devuelve index.html de la build
+  app.use((req, res) => {
+    const indexHtml = path.join(frontendPath, "index.html");
+    res.sendFile(indexHtml);
+  });
+} else {
+  // No hay build de React: intentar proxy a Vite dev server (http://localhost:5173)
+  // Esto permite trabajar en modo desarrollo sin generar la build.
+  const VITE_HOST = '127.0.0.1';
+  const VITE_PORT = 3000;
+
+  function proxyToVite(req, res) {
+    // No proxyar rutas de API
+    if (req.path && req.path.startsWith('/api')) {
+      res.status(404).send('Ruta API no encontrada');
+      return;
+    }
+
+    const options = {
+      hostname: VITE_HOST,
+      port: VITE_PORT,
+      path: req.originalUrl || req.url,
+      method: req.method,
+      headers: req.headers
+    };
+
+    const proxyReq = http.request(options, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res, { end: true });
+    });
+
+    proxyReq.on('error', () => {
+      res.status(503).send(
+        'Vite dev server no disponible. Inicie el dev server para desarrollo:\n' +
+        '`cd frontend && npm install && npm run dev`'
+      );
+    });
+
+    req.pipe(proxyReq, { end: true });
+  }
+
+  // Root and index: proxy to vite
+  app.get(['/', '/index.html'], (req, res) => proxyToVite(req, res));
+
+  // Proxy todas las demás rutas que no comiencen con /api
+  app.use((req, res, next) => {
+    if (req.path && req.path.startsWith('/api')) return next();
+    proxyToVite(req, res);
+  });
+}
 
 // Iniciar servidor
 const PUERTO = process.env.PORT || 3001;

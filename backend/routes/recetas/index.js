@@ -1,0 +1,570 @@
+import { transmitir, convertirCantidad } from "../../utils/index.js";
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import pkg from "sqlite3";
+
+const { Database, OPEN_READONLY } = pkg;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const backupDir = process.env.NODE_ENV === 'production'
+  ? '/opt/render/data/backend/backups'
+  : path.join(__dirname, '../../backups');
+
+function buscarNombreEnBackup(idInsumo, callback) {
+  fs.readdir(backupDir)
+    .then((files) => {
+      const candidatos = (files || [])
+        .filter((f) => /^inventario\.db\..+\.backup$/i.test(f))
+        .sort()
+        .reverse();
+
+      if (!candidatos.length) {
+        callback('');
+        return;
+      }
+
+      const rutaBackup = path.join(backupDir, candidatos[0]);
+      const dbBackup = new Database(rutaBackup, OPEN_READONLY, (errOpen) => {
+        if (errOpen) {
+          callback('');
+          return;
+        }
+
+        dbBackup.get("SELECT nombre FROM inventario WHERE id=?", [idInsumo], (errGet, row) => {
+          const nombre = !errGet && row && row.nombre ? String(row.nombre).trim() : '';
+          dbBackup.close(() => callback(nombre));
+        });
+      });
+    })
+    .catch(() => callback(''));
+}
+
+function resolverNombreInsumoEliminado(bdInventario, idInsumo, callback) {
+  bdInventario.get("SELECT nombre FROM insumos_eliminados WHERE id_inventario=?", [idInsumo], (err, row) => {
+    const nombre = !err && row && row.nombre ? String(row.nombre).trim() : '';
+    if (nombre) {
+      callback(nombre);
+      return;
+    }
+
+    buscarNombreEnBackup(idInsumo, (nombreBackup) => {
+      const limpio = String(nombreBackup || '').trim();
+      if (limpio) {
+        bdInventario.run(
+          "INSERT OR REPLACE INTO insumos_eliminados (id_inventario, codigo, nombre, unidad, eliminado_en) VALUES (?,?,?,?,?)",
+          [idInsumo, '', limpio, '', new Date().toISOString()],
+          () => callback(limpio)
+        );
+        return;
+      }
+      callback('');
+    });
+  });
+}
+
+export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
+  const textoPlano = (valor) => String(valor || '').trim();
+
+  const cerrarOrdenSiCompleta = (idOrden) => {
+    bdInventario.get(
+      "SELECT COUNT(*) AS pendientes FROM ordenes_compra_items WHERE id_orden=? AND surtido=0",
+      [idOrden],
+      (err, row) => {
+        if (err || !row) return;
+        if (Number(row.pendientes) > 0) return;
+        bdInventario.run(
+          "UPDATE ordenes_compra SET estado='surtida', fecha_surtida=? WHERE id=?",
+          [new Date().toISOString(), idOrden],
+          () => transmitir({ tipo: "inventario_actualizado" })
+        );
+      }
+    );
+  };
+
+  app.get("/recetas", (req, res) => {
+    const idCategoria = req.query.categoria || "";
+    const archivadas = req.query.archivadas === "1";
+    const where = ["r.archivada = ?"];
+    const params = [archivadas ? 1 : 0];
+    if (idCategoria) {
+      where.push("r.id_categoria = ?");
+      params.push(idCategoria);
+    }
+    const sql = `SELECT r.*, c.nombre as categoria FROM recetas r LEFT JOIN categorias c ON r.id_categoria = c.id WHERE ${where.join(" AND ")} ORDER BY r.nombre`;
+    bdRecetas.all(sql, params, (e, r) => res.json(r || []));
+  });
+
+  app.post("/recetas/ordenes-compra", (req, res) => {
+    const proveedor = String(req.body?.proveedor || '').trim();
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: "Debes enviar al menos un insumo" });
+
+    const numeroOrden = `OC-${Date.now()}`;
+    const fechaCreacion = new Date().toISOString();
+
+    bdInventario.run(
+      "INSERT INTO ordenes_compra (numero_orden, proveedor, fecha_creacion, estado, fecha_surtida) VALUES (?,?,?,?,NULL)",
+      [numeroOrden, proveedor, fechaCreacion, 'pendiente'],
+      function () {
+        const idOrden = this.lastID;
+        let pendientes = items.length;
+        if (!pendientes) return res.json({ ok: true, id: idOrden, numero_orden: numeroOrden });
+
+        items.forEach((item) => {
+          const tipoItem = String(item?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+          const idInventario = tipoItem === 'insumo' ? Number(item.id_inventario) : null;
+          const idUtensilio = tipoItem === 'utensilio' ? Number(item.id_utensilio || item.id_inventario) : null;
+          const cantidad = Number(item.cantidad_requerida) || 0;
+          const precioSolicitado = Number(item.precio_unitario) || 0;
+          const codigo = String(item.codigo || '').trim();
+          const nombre = String(item.nombre || '').trim();
+
+          const resolverPrecio = (callback) => {
+            if (precioSolicitado > 0) return callback(precioSolicitado);
+            if (tipoItem === 'utensilio' && Number.isFinite(idUtensilio)) {
+              return bdInventario.get("SELECT costo_por_unidad FROM utensilios WHERE id=?", [idUtensilio], (errU, rowU) => {
+                callback(!errU && rowU ? Number(rowU.costo_por_unidad) || 0 : 0);
+              });
+            }
+            if (tipoItem === 'insumo' && Number.isFinite(idInventario)) {
+              return bdInventario.get("SELECT costo_por_unidad FROM inventario WHERE id=?", [idInventario], (errI, rowI) => {
+                callback(!errI && rowI ? Number(rowI.costo_por_unidad) || 0 : 0);
+              });
+            }
+            callback(0);
+          };
+
+          resolverPrecio((precioUnitarioFinal) => {
+            bdInventario.run(
+              `INSERT INTO ordenes_compra_items
+               (id_orden, tipo_item, id_inventario, id_utensilio, codigo, nombre, cantidad_requerida, cantidad_surtida, precio_unitario, costo_total_surtido, surtido)
+               VALUES (?,?,?,?,?,?,?,?,?,?,0)`,
+              [
+                idOrden,
+                tipoItem,
+                Number.isFinite(idInventario) ? idInventario : null,
+                Number.isFinite(idUtensilio) ? idUtensilio : null,
+                codigo,
+                nombre,
+                cantidad,
+                0,
+                Number(precioUnitarioFinal) || 0,
+                0
+              ],
+              () => {
+                pendientes -= 1;
+                if (pendientes === 0) {
+                  res.json({ ok: true, id: idOrden, numero_orden: numeroOrden });
+                }
+              }
+            );
+          });
+        });
+      }
+    );
+  });
+
+  app.get("/recetas/ordenes-compra", (req, res) => {
+    bdInventario.all(
+      "SELECT id, numero_orden, proveedor, fecha_creacion, estado, fecha_surtida FROM ordenes_compra ORDER BY fecha_creacion DESC",
+      (errOrdenes, ordenes) => {
+        if (errOrdenes) return res.status(500).json({ error: "Error al cargar órdenes" });
+        const lista = Array.isArray(ordenes) ? ordenes : [];
+        if (!lista.length) return res.json([]);
+
+        let pendientes = lista.length;
+        const salida = [];
+
+        lista.forEach((orden) => {
+          bdInventario.all(
+            "SELECT id, tipo_item, id_inventario, id_utensilio, codigo, nombre, cantidad_requerida, cantidad_surtida, precio_unitario, costo_total_surtido, surtido FROM ordenes_compra_items WHERE id_orden=? ORDER BY nombre",
+            [orden.id],
+            (errItems, items) => {
+              salida.push({ ...orden, items: items || [] });
+              pendientes -= 1;
+              if (pendientes === 0) {
+                salida.sort((a, b) => String(b.fecha_creacion || '').localeCompare(String(a.fecha_creacion || '')));
+                res.json(salida);
+              }
+            }
+          );
+        });
+      }
+    );
+  });
+
+  app.patch("/recetas/ordenes-compra/items/:id/cantidad", (req, res) => {
+    const idItem = Number(req.params.id);
+    const cantidadRequerida = Number(req.body?.cantidad_requerida);
+    if (!Number.isFinite(idItem) || idItem <= 0) return res.status(400).json({ error: "Item inválido" });
+    if (!Number.isFinite(cantidadRequerida) || cantidadRequerida <= 0) return res.status(400).json({ error: "Cantidad inválida" });
+
+    bdInventario.run(
+      "UPDATE ordenes_compra_items SET cantidad_requerida=? WHERE id=? AND surtido=0",
+      [cantidadRequerida, idItem],
+      function () {
+        if (!this.changes) return res.status(404).json({ error: "Item no encontrado o ya surtido" });
+        transmitir({ tipo: "inventario_actualizado" });
+        res.json({ ok: true });
+      }
+    );
+  });
+
+  app.post("/recetas/ordenes-compra/items/:id/surtir", (req, res) => {
+    const idItem = Number(req.params.id);
+    const cantidadSurtidaInput = Number(req.body?.cantidad_surtida);
+    const costoTotalInput = Number(req.body?.costo_total);
+    if (!Number.isFinite(idItem) || idItem <= 0) return res.status(400).json({ error: "Item inválido" });
+
+    bdInventario.get(
+      "SELECT * FROM ordenes_compra_items WHERE id=?",
+      [idItem],
+      (errItem, item) => {
+        if (errItem || !item) return res.status(404).json({ error: "Item no encontrado" });
+        if (Number(item.surtido) === 1) return res.status(400).json({ error: "El item ya fue surtido" });
+
+        const cantidadSurtida = Number.isFinite(cantidadSurtidaInput) && cantidadSurtidaInput > 0
+          ? cantidadSurtidaInput
+          : (Number(item.cantidad_requerida) || 0);
+        if (!Number.isFinite(cantidadSurtida) || cantidadSurtida <= 0) {
+          return res.status(400).json({ error: "Cantidad a surtir inválida" });
+        }
+
+        const precioUnitarioBase = Number(item.precio_unitario) || 0;
+        const costoTotal = Number.isFinite(costoTotalInput) && costoTotalInput > 0
+          ? costoTotalInput
+          : (cantidadSurtida * precioUnitarioBase);
+        const precioUnitarioFinal = cantidadSurtida > 0 ? (costoTotal / cantidadSurtida) : precioUnitarioBase;
+
+        const tipoItem = String(item.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+        const idReferencia = tipoItem === 'utensilio' ? Number(item.id_utensilio) : Number(item.id_inventario);
+        if (!Number.isFinite(idReferencia) || idReferencia <= 0) {
+          return res.status(400).json({ error: "El item no tiene referencia válida" });
+        }
+
+        const tabla = tipoItem === 'utensilio' ? 'utensilios' : 'inventario';
+        const campoCantidadDisponible = tipoItem === 'utensilio' ? null : 'cantidad_disponible';
+        const campoId = 'id';
+
+        bdInventario.get(`SELECT * FROM ${tabla} WHERE ${campoId}=?`, [idReferencia], (errRef, ref) => {
+          if (errRef || !ref) return res.status(404).json({ error: "Referencia no encontrada" });
+
+          const nuevaCantidadTotal = (Number(ref.cantidad_total) || 0) + cantidadSurtida;
+          const nuevoCostoTotal = (Number(ref.costo_total) || 0) + costoTotal;
+          const nuevoCostoUnidad = nuevaCantidadTotal > 0 ? (nuevoCostoTotal / nuevaCantidadTotal) : 0;
+
+          const ejecutarHistorial = () => {
+            if (tipoItem === 'utensilio') {
+              bdInventario.run(
+                "INSERT INTO historial_utensilios (id_utensilio, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)",
+                [idReferencia, new Date().toISOString(), cantidadSurtida, costoTotal]
+              );
+            } else {
+              bdInventario.run(
+                "INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)",
+                [idReferencia, new Date().toISOString(), cantidadSurtida, costoTotal]
+              );
+            }
+          };
+
+          const onInventarioActualizado = () => {
+            bdInventario.run(
+              "UPDATE ordenes_compra_items SET cantidad_surtida=?, precio_unitario=?, costo_total_surtido=?, surtido=1 WHERE id=?",
+              [cantidadSurtida, precioUnitarioFinal, costoTotal, idItem],
+              () => {
+                cerrarOrdenSiCompleta(item.id_orden);
+                transmitir({ tipo: "inventario_actualizado" });
+                res.json({ ok: true });
+              }
+            );
+          };
+
+          if (tipoItem === 'utensilio') {
+            bdInventario.run(
+              "UPDATE utensilios SET cantidad_total=?, costo_total=?, costo_por_unidad=? WHERE id=?",
+              [nuevaCantidadTotal, nuevoCostoTotal, nuevoCostoUnidad, idReferencia],
+              () => {
+                ejecutarHistorial();
+                onInventarioActualizado();
+              }
+            );
+            return;
+          }
+
+          const nuevaDisponible = (Number(ref.cantidad_disponible) || 0) + cantidadSurtida;
+          bdInventario.run(
+            "UPDATE inventario SET cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=? WHERE id=?",
+            [nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, nuevoCostoUnidad, idReferencia],
+            () => {
+              ejecutarHistorial();
+              onInventarioActualizado();
+            }
+          );
+        });
+      }
+    );
+  });
+
+  app.get("/recetas/:id", (req, res) => {
+    const id = req.params.id;
+    bdRecetas.get("SELECT * FROM recetas WHERE id=?", [id], (e, receta) => {
+      if (!receta) return res.status(404).json({ error: "No encontrada" });
+      bdRecetas.all(
+        `SELECT ir.id, ir.id_insumo, ir.nombre_insumo, ir.proveedor, ir.cantidad, ir.unidad
+         FROM ingredientes_receta ir
+         WHERE ir.id_receta=?`,
+        [id],
+        (err, ingredientes) => {
+          if (!ingredientes || ingredientes.length === 0) {
+            receta.ingredientes = [];
+            return res.json(receta);
+          }
+          // Obtener nombres y pendiente de insumos desde la otra BD
+          let pendientes = ingredientes.length;
+          ingredientes.forEach(ing => {
+            bdInventario.get(
+              "SELECT nombre, pendiente FROM inventario WHERE id=?",
+              [ing.id_insumo],
+              (errInv, insumo) => {
+                const finalizar = () => {
+                  pendientes--;
+                  if (pendientes === 0) {
+                    receta.ingredientes = ingredientes;
+                    res.json(receta);
+                  }
+                };
+
+                const nombreGuardado = String(ing.nombre_insumo || '').trim();
+                if (insumo) {
+                  ing.nombre = String(insumo.nombre || '').trim() || nombreGuardado || 'Insumo';
+                  ing.pendiente = insumo.pendiente === 1 || insumo.pendiente === true;
+                  ing.eliminado = false;
+                  if (!nombreGuardado && ing.nombre) {
+                    bdRecetas.run("UPDATE ingredientes_receta SET nombre_insumo=? WHERE id=?", [ing.nombre, ing.id]);
+                  }
+                  finalizar();
+                  return;
+                }
+
+                const aplicarNombreEliminado = (nombreEliminado) => {
+                  const etiqueta = String(nombreEliminado || nombreGuardado || '').trim();
+                  ing.nombre = etiqueta ? `Insumo eliminado (${etiqueta})` : 'Insumo eliminado (sin nombre)';
+                  ing.pendiente = true;
+                  ing.eliminado = true;
+                  if (etiqueta && !nombreGuardado) {
+                    bdRecetas.run("UPDATE ingredientes_receta SET nombre_insumo=? WHERE id=?", [etiqueta, ing.id]);
+                  }
+                  finalizar();
+                };
+
+                if (nombreGuardado) {
+                  aplicarNombreEliminado(nombreGuardado);
+                  return;
+                }
+
+                resolverNombreInsumoEliminado(bdInventario, ing.id_insumo, aplicarNombreEliminado);
+              }
+            );
+          });
+        }
+      );
+    });
+  });
+
+  app.post("/recetas", (req, res) => {
+    const {
+      nombre,
+      id_categoria,
+      gramaje,
+      ingredientes,
+      tienda_descripcion,
+      tienda_modo_uso,
+      tienda_cuidados,
+      tienda_ingredientes,
+      tienda_precio_publico,
+      tienda_image_url,
+      tienda_galeria
+    } = req.body;
+    if (!nombre || !id_categoria) return res.status(400).json({ error: "Datos incompletos" });
+
+    bdRecetas.run(
+      `INSERT INTO recetas
+       (nombre, id_categoria, gramaje, archivada, tienda_descripcion, tienda_modo_uso, tienda_cuidados, tienda_ingredientes, tienda_precio_publico, tienda_image_url, tienda_galeria)
+       VALUES (?,?,?,0,?,?,?,?,?,?,?)`,
+      [
+        nombre,
+        id_categoria,
+        gramaje || 0,
+        textoPlano(tienda_descripcion),
+        textoPlano(tienda_modo_uso),
+        textoPlano(tienda_cuidados),
+        textoPlano(tienda_ingredientes),
+        Number(tienda_precio_publico) || 0,
+        textoPlano(tienda_image_url),
+        JSON.stringify(Array.isArray(tienda_galeria) ? tienda_galeria.map((item) => textoPlano(item)).filter(Boolean) : [])
+      ],
+      function () {
+        const idReceta = this.lastID;
+        const lista = Array.isArray(ingredientes) ? ingredientes : [];
+        if (lista.length === 0) {
+          transmitir({ tipo: "recetas_actualizado" });
+          return res.json({ ok: true, id: idReceta });
+        }
+
+        let pendientes = lista.length;
+        lista.forEach(ing => {
+          bdRecetas.run(
+            "INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad) VALUES (?,?,?,?,?,?)",
+            [idReceta, ing.id_insumo, ing.nombre || '', String(ing.proveedor || '').trim(), ing.cantidad, ing.unidad],
+            () => {
+              pendientes--;
+              if (pendientes === 0) {
+                transmitir({ tipo: "recetas_actualizado" });
+                res.json({ ok: true, id: idReceta });
+              }
+            }
+          );
+        });
+      }
+    );
+  });
+
+  app.patch("/recetas/:id", (req, res) => {
+    const id = req.params.id;
+    const {
+      nombre,
+      id_categoria,
+      gramaje,
+      ingredientes,
+      archivada,
+      tienda_descripcion,
+      tienda_modo_uso,
+      tienda_cuidados,
+      tienda_ingredientes,
+      tienda_precio_publico,
+      tienda_image_url,
+      tienda_galeria
+    } = req.body;
+
+    bdRecetas.run(
+      `UPDATE recetas
+       SET nombre=?,
+           id_categoria=?,
+           gramaje=?,
+           archivada=COALESCE(?, archivada),
+           tienda_descripcion=COALESCE(?, tienda_descripcion),
+           tienda_modo_uso=COALESCE(?, tienda_modo_uso),
+           tienda_cuidados=COALESCE(?, tienda_cuidados),
+           tienda_ingredientes=COALESCE(?, tienda_ingredientes),
+           tienda_precio_publico=COALESCE(?, tienda_precio_publico),
+             tienda_image_url=COALESCE(?, tienda_image_url),
+             tienda_galeria=COALESCE(?, tienda_galeria)
+       WHERE id=?`,
+      [
+        nombre,
+        id_categoria,
+        gramaje || 0,
+        Number.isFinite(Number(archivada)) ? Number(archivada) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_descripcion') ? textoPlano(tienda_descripcion) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_modo_uso') ? textoPlano(tienda_modo_uso) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_cuidados') ? textoPlano(tienda_cuidados) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_ingredientes') ? textoPlano(tienda_ingredientes) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_precio_publico') ? (Number(tienda_precio_publico) || 0) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_image_url') ? textoPlano(tienda_image_url) : null,
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_galeria') ? JSON.stringify(Array.isArray(tienda_galeria) ? tienda_galeria.map((item) => textoPlano(item)).filter(Boolean) : []) : null,
+        id
+      ],
+      () => {
+        bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [id], () => {
+          const lista = Array.isArray(ingredientes) ? ingredientes : [];
+          if (lista.length === 0) {
+            transmitir({ tipo: "recetas_actualizado" });
+            return res.json({ ok: true });
+          }
+
+          let pendientes = lista.length;
+          lista.forEach(ing => {
+            bdRecetas.run(
+                "INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad) VALUES (?,?,?,?,?,?)",
+                [id, ing.id_insumo, ing.nombre || '', String(ing.proveedor || '').trim(), ing.cantidad, ing.unidad],
+              () => {
+                pendientes--;
+                if (pendientes === 0) {
+                  transmitir({ tipo: "recetas_actualizado" });
+                  res.json({ ok: true });
+                }
+              }
+            );
+          });
+        });
+      }
+    );
+  });
+
+  app.delete("/recetas/:id", (req, res) => {
+    const id = req.params.id;
+    bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [id], () => {
+      bdRecetas.run("DELETE FROM recetas WHERE id=?", [id], () => {
+        transmitir({ tipo: "recetas_actualizado" });
+        res.json({ ok: true });
+      });
+    });
+  });
+
+  app.post("/recetas/archivar", (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
+    if (!ids.length) return res.status(400).json({ error: "Debes enviar al menos una receta" });
+    const placeholders = ids.map(() => "?").join(",");
+    bdRecetas.run(`UPDATE recetas SET archivada = 1 WHERE id IN (${placeholders})`, ids, () => {
+      transmitir({ tipo: "recetas_actualizado" });
+      res.json({ ok: true, total: ids.length });
+    });
+  });
+
+  app.post("/recetas/desarchivar", (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
+    if (!ids.length) return res.status(400).json({ error: "Debes enviar al menos una receta" });
+    const placeholders = ids.map(() => "?").join(",");
+    bdRecetas.run(`UPDATE recetas SET archivada = 0 WHERE id IN (${placeholders})`, ids, () => {
+      transmitir({ tipo: "recetas_actualizado" });
+      res.json({ ok: true, total: ids.length });
+    });
+  });
+
+  app.post("/recetas/calcular", (req, res) => {
+    const { id_receta } = req.body;
+    bdRecetas.all(
+      "SELECT * FROM ingredientes_receta WHERE id_receta=?",
+      [id_receta],
+      (err, ingredientes) => {
+        if (!ingredientes || ingredientes.length === 0) return res.json({ piezas_maximas: 0, costo_por_pieza: 0 });
+
+        let piezasMaximas = null;
+        let costoPorPieza = 0;
+        let pendientes = ingredientes.length;
+
+        ingredientes.forEach(ing => {
+          bdInventario.get("SELECT * FROM inventario WHERE id=?", [ing.id_insumo], (errInv, insumo) => {
+            if (insumo) {
+              const requerido = convertirCantidad(Number(ing.cantidad) || 0, ing.unidad, insumo.unidad);
+              if (requerido > 0) {
+                const disponibles = Number(insumo.cantidad_disponible) || 0;
+                const maxPorIngrediente = Math.floor(disponibles / requerido);
+                piezasMaximas = piezasMaximas === null ? maxPorIngrediente : Math.min(piezasMaximas, maxPorIngrediente);
+                costoPorPieza += (Number(insumo.costo_por_unidad) || 0) * requerido;
+              }
+            }
+            pendientes--;
+            if (pendientes === 0) {
+              res.json({
+                piezas_maximas: piezasMaximas === null ? 0 : piezasMaximas,
+                costo_por_pieza: costoPorPieza
+              });
+            }
+          });
+        });
+      }
+    );
+  });
+
+}

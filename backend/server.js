@@ -73,7 +73,9 @@ try {
   // No hay build de React. No serviremos el frontend legacy.
   console.log('No se encontró build de React. El servidor no servirá el frontend estático.');
 }
-const usarBuildReact = process.env.NODE_ENV === 'production' && hasReactBuild;
+const forzarBuildReact = process.env.SERVE_REACT_BUILD === '1';
+const enRender = Boolean(process.env.RENDER) || Boolean(process.env.RENDER_EXTERNAL_URL);
+const usarBuildReact = hasReactBuild && (forzarBuildReact || enRender);
 
 const app = express();
 const servidor = http.createServer(app);

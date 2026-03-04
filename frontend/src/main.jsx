@@ -43,6 +43,19 @@ root.render(
   </React.StrictMode>
 )
 
+// In development, clean up any old service worker/caches to avoid stale UI.
+if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((registrations) => Promise.all(registrations.map((reg) => reg.unregister())))
+    .catch(() => {})
+
+  if ('caches' in window) {
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+      .catch(() => {})
+  }
+}
+
 // Register service worker only in production
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {

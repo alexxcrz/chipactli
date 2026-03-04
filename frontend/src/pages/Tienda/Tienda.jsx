@@ -4,7 +4,7 @@ import { API } from '../../utils/config.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 
 const API_TIENDA = import.meta.env.DEV
-  ? (import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1:3001')
+  ? (import.meta.env.VITE_BACKEND_URL || '')
   : API;
 
 const CLAVE_TOKEN_CLIENTE = 'tienda_cliente_token';

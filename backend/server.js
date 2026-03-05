@@ -95,9 +95,11 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 } // 100MB por archivo
 });
 
-// Configuración de directorios para las bases de datos
-// En Render, usar el volumen persistente. En local, usar el directorio actual
-const dbDir = process.env.NODE_ENV === 'production' ? '/opt/render/data/backend' : __dirname;
+// Configuración de directorios para las bases de datos.
+// Prioridad: DB_DIR (si se define) > ruta persistente por defecto en Render > directorio local.
+const dbDir = process.env.DB_DIR
+  ? path.resolve(process.env.DB_DIR)
+  : (process.env.NODE_ENV === 'production' ? '/opt/render/data/backend' : __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
 
 configurarBackup({
@@ -147,6 +149,7 @@ const reglasPermisos = [
   { metodos: ['POST'], exacto: '/recetas/archivar', pestana: 'recetas', accion: 'editar' },
   { metodos: ['POST'], exacto: '/recetas/desarchivar', pestana: 'recetas', accion: 'editar' },
   { metodos: ['POST'], exacto: '/api/uploads/tienda-imagen', pestana: 'recetas', accion: 'editar' },
+  { metodos: ['POST'], exacto: '/api/uploads/lista-precios-archivo', pestana: 'inventario', accion: 'editar' },
   { metodos: ['PATCH'], prefijo: '/recetas', pestana: 'recetas', accion: 'editar' },
   { metodos: ['DELETE'], prefijo: '/recetas', pestana: 'recetas', accion: 'eliminar' },
 
@@ -252,6 +255,48 @@ app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res)
     return res.json({ ok: true, url: `${base}/uploads/tienda/${nombre}` });
   } catch {
     return res.status(500).json({ exito: false, mensaje: 'No se pudo subir la imagen' });
+  }
+});
+
+app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar un archivo' });
+    }
+
+    const mime = String(req.file.mimetype || '').toLowerCase();
+    const permitidos = new Set([
+      'application/pdf',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv'
+    ]);
+    if (!permitidos.has(mime)) {
+      return res.status(400).json({ exito: false, mensaje: 'Solo se permite PDF o Excel (XLS/XLSX/CSV)' });
+    }
+
+    const extOriginal = path.extname(String(req.file.originalname || '')).toLowerCase();
+    const ext = extOriginal || (mime === 'application/pdf' ? '.pdf' : (mime.includes('sheet') ? '.xlsx' : (mime.includes('excel') ? '.xls' : '.csv')));
+    const nombre = `lista-precios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const destino = path.join(uploadsDir, 'tienda', nombre);
+
+    await fs.writeFile(destino, req.file.buffer);
+
+    const textoExtraido = String(req.file.buffer.toString('utf8') || '')
+      .replace(/\u0000/g, ' ')
+      .replace(/\s+/g, ' ')
+      .slice(0, 200000);
+
+    const base = `${req.protocol}://${req.get('host')}`;
+    return res.json({
+      ok: true,
+      url: `${base}/uploads/tienda/${nombre}`,
+      nombre_original: String(req.file.originalname || nombre),
+      tipo: mime,
+      texto_extraido: textoExtraido
+    });
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo subir el archivo de lista de precios' });
   }
 });
 
@@ -369,24 +414,115 @@ app.post("/api/backup/importar", upload.fields([
 // RUTAS DE EXPORTAR/IMPORTAR DATOS
 // ============================================
 
-// Exportar datos de inventario
-app.get("/api/exportar/inventario", (req, res) => {
-  bdInventario.all("SELECT * FROM inventario", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ exito: false, mensaje: "Error al exportar inventario" });
-    }
-    res.json({ tipo: "inventario", datos: rows, total: rows.length });
+function dbAllAsync(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
   });
+}
+
+function dbRunAsync(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+}
+
+function toArrayMaybe(valor) {
+  return Array.isArray(valor) ? valor : [];
+}
+
+// Exportar datos de inventario
+app.get("/api/exportar/inventario", async (req, res) => {
+  try {
+    const [
+      inventario,
+      historial_inventario,
+      insumos_eliminados,
+      inversion_recuperada,
+      utensilios,
+      historial_utensilios,
+      recuperado_utensilios,
+      ordenes_compra,
+      ordenes_compra_items,
+      proveedores,
+      lista_precios_ordenes,
+      historial_lista_precios_ordenes
+    ] = await Promise.all([
+      dbAllAsync(bdInventario, "SELECT * FROM inventario ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM historial_inventario ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM insumos_eliminados ORDER BY id_inventario"),
+      dbAllAsync(bdInventario, "SELECT * FROM inversion_recuperada ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM utensilios ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM historial_utensilios ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM recuperado_utensilios ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM ordenes_compra ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM ordenes_compra_items ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM proveedores ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM lista_precios_ordenes ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM historial_lista_precios_ordenes ORDER BY id")
+    ]);
+
+    const datos = {
+      inventario,
+      historial_inventario,
+      insumos_eliminados,
+      inversion_recuperada,
+      utensilios,
+      historial_utensilios,
+      recuperado_utensilios,
+      ordenes_compra,
+      ordenes_compra_items,
+      proveedores,
+      lista_precios_ordenes,
+      historial_lista_precios_ordenes
+    };
+
+    res.json({
+      tipo: "inventario",
+      datos,
+      total: {
+        inventario: inventario.length,
+        historial_inventario: historial_inventario.length,
+        insumos_eliminados: insumos_eliminados.length,
+        inversion_recuperada: inversion_recuperada.length,
+        utensilios: utensilios.length,
+        historial_utensilios: historial_utensilios.length,
+        recuperado_utensilios: recuperado_utensilios.length,
+        ordenes_compra: ordenes_compra.length,
+        ordenes_compra_items: ordenes_compra_items.length,
+        proveedores: proveedores.length,
+        lista_precios_ordenes: lista_precios_ordenes.length,
+        historial_lista_precios_ordenes: historial_lista_precios_ordenes.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: "Error al exportar inventario", detalle: error.message });
+  }
 });
 
 // Exportar datos de utensilios
-app.get("/api/exportar/utensilios", (req, res) => {
-  bdInventario.all("SELECT * FROM utensilios", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ exito: false, mensaje: "Error al exportar utensilios" });
-    }
-    res.json({ tipo: "utensilios", datos: rows, total: rows.length });
-  });
+app.get("/api/exportar/utensilios", async (req, res) => {
+  try {
+    const [utensilios, historial_utensilios, recuperado_utensilios] = await Promise.all([
+      dbAllAsync(bdInventario, "SELECT * FROM utensilios ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM historial_utensilios ORDER BY id"),
+      dbAllAsync(bdInventario, "SELECT * FROM recuperado_utensilios ORDER BY id")
+    ]);
+
+    res.json({
+      tipo: "utensilios",
+      datos: { utensilios, historial_utensilios, recuperado_utensilios },
+      total: {
+        utensilios: utensilios.length,
+        historial_utensilios: historial_utensilios.length,
+        recuperado_utensilios: recuperado_utensilios.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: "Error al exportar utensilios", detalle: error.message });
+  }
 });
 
 // Exportar datos de recetas (incluye categorías e ingredientes)
@@ -448,36 +584,279 @@ app.get("/api/exportar/ventas", (req, res) => {
 // Importar datos de inventario
 app.post("/api/importar/inventario", async (req, res) => {
   const { datos } = req.body;
-  
-  if (!Array.isArray(datos)) {
-    return res.status(400).json({ exito: false, mensaje: "Formato de datos inválido" });
-  }
-  
+
   try {
-    let importados = 0;
-    
-    for (const item of datos) {
-      await new Promise((resolve, reject) => {
-        bdInventario.run(
-          `INSERT INTO inventario (codigo, nombre, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+    // Compatibilidad hacia atrás: formato antiguo (solo arreglo de inventario)
+    if (Array.isArray(datos)) {
+      let importados = 0;
+      for (const item of datos) {
+        await dbRunAsync(
+          bdInventario,
+          `INSERT INTO inventario (codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(codigo) DO UPDATE SET
-           nombre=excluded.nombre, unidad=excluded.unidad, cantidad_total=excluded.cantidad_total,
-           cantidad_disponible=excluded.cantidad_disponible, costo_total=excluded.costo_total,
-           costo_por_unidad=excluded.costo_por_unidad`,
-          [item.codigo, item.nombre, item.unidad, item.cantidad_total, item.cantidad_disponible, item.costo_total, item.costo_por_unidad],
-          (err) => {
-            if (err) reject(err);
-            else {
-              importados++;
-              resolve();
-            }
-          }
+             nombre=excluded.nombre,
+             proveedor=excluded.proveedor,
+             unidad=excluded.unidad,
+             cantidad_total=excluded.cantidad_total,
+             cantidad_disponible=excluded.cantidad_disponible,
+             costo_total=excluded.costo_total,
+             costo_por_unidad=excluded.costo_por_unidad,
+             pendiente=excluded.pendiente`,
+          [
+            item.codigo,
+            item.nombre,
+            item.proveedor || '',
+            item.unidad,
+            item.cantidad_total,
+            item.cantidad_disponible,
+            item.costo_total,
+            item.costo_por_unidad,
+            Number(item.pendiente || 0) ? 1 : 0
+          ]
         );
-      });
+        importados += 1;
+      }
+      return res.json({ exito: true, mensaje: "Inventario importado", importados });
     }
-    
-    res.json({ exito: true, mensaje: "Inventario importado", importados });
+
+    const bloque = (datos && typeof datos === 'object') ? datos : null;
+    if (!bloque) {
+      return res.status(400).json({ exito: false, mensaje: "Formato de datos inválido" });
+    }
+
+    const inventario = toArrayMaybe(bloque.inventario);
+    const historialInventario = toArrayMaybe(bloque.historial_inventario);
+    const insumosEliminados = toArrayMaybe(bloque.insumos_eliminados);
+    const inversionRecuperada = toArrayMaybe(bloque.inversion_recuperada);
+    const utensilios = toArrayMaybe(bloque.utensilios);
+    const historialUtensilios = toArrayMaybe(bloque.historial_utensilios);
+    const recuperadoUtensilios = toArrayMaybe(bloque.recuperado_utensilios);
+    const ordenesCompra = toArrayMaybe(bloque.ordenes_compra);
+    const ordenesCompraItems = toArrayMaybe(bloque.ordenes_compra_items);
+    const proveedores = toArrayMaybe(bloque.proveedores);
+    const listaPreciosOrdenes = toArrayMaybe(bloque.lista_precios_ordenes);
+    const historialListaPreciosOrdenes = toArrayMaybe(bloque.historial_lista_precios_ordenes);
+
+    await dbRunAsync(bdInventario, "DELETE FROM historial_lista_precios_ordenes");
+    await dbRunAsync(bdInventario, "DELETE FROM lista_precios_ordenes");
+    await dbRunAsync(bdInventario, "DELETE FROM ordenes_compra_items");
+    await dbRunAsync(bdInventario, "DELETE FROM ordenes_compra");
+    await dbRunAsync(bdInventario, "DELETE FROM historial_inventario");
+    await dbRunAsync(bdInventario, "DELETE FROM historial_utensilios");
+    await dbRunAsync(bdInventario, "DELETE FROM inversion_recuperada");
+    await dbRunAsync(bdInventario, "DELETE FROM recuperado_utensilios");
+    await dbRunAsync(bdInventario, "DELETE FROM insumos_eliminados");
+    await dbRunAsync(bdInventario, "DELETE FROM inventario");
+    await dbRunAsync(bdInventario, "DELETE FROM utensilios");
+    await dbRunAsync(bdInventario, "DELETE FROM proveedores");
+
+    for (const row of proveedores) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO proveedores (id, nombre, direccion, telefono, forma_pago, numero_cuenta, correo, notas, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.nombre || '',
+          row.direccion || '',
+          row.telefono || '',
+          row.forma_pago || '',
+          row.numero_cuenta || '',
+          row.correo || '',
+          row.notas || '',
+          row.creado_en || new Date().toISOString(),
+          row.actualizado_en || new Date().toISOString()
+        ]
+      );
+    }
+
+    for (const row of inventario) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO inventario (id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.codigo || '',
+          row.nombre || '',
+          row.proveedor || '',
+          row.unidad || '',
+          Number(row.cantidad_total || 0),
+          Number(row.cantidad_disponible || 0),
+          Number(row.costo_total || 0),
+          Number(row.costo_por_unidad || 0),
+          Number(row.pendiente || 0) ? 1 : 0
+        ]
+      );
+    }
+
+    for (const row of utensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO utensilios (id, codigo, nombre, proveedor, unidad, cantidad_total, costo_total, costo_por_unidad)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.codigo || '',
+          row.nombre || '',
+          row.proveedor || '',
+          row.unidad || '',
+          Number(row.cantidad_total || 0),
+          Number(row.costo_total || 0),
+          Number(row.costo_por_unidad || 0)
+        ]
+      );
+    }
+
+    for (const row of historialInventario) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO historial_inventario (id, id_inventario, fecha_cambio, cambio_cantidad, cambio_costo)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.id, row.id_inventario, row.fecha_cambio, Number(row.cambio_cantidad || 0), Number(row.cambio_costo || 0)]
+      );
+    }
+
+    for (const row of historialUtensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO historial_utensilios (id, id_utensilio, fecha_cambio, cambio_cantidad, cambio_costo)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.id, row.id_utensilio, row.fecha_cambio, Number(row.cambio_cantidad || 0), Number(row.cambio_costo || 0)]
+      );
+    }
+
+    for (const row of inversionRecuperada) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO inversion_recuperada (id, fecha_venta, costo_recuperado)
+         VALUES (?, ?, ?)`,
+        [row.id, row.fecha_venta, Number(row.costo_recuperado || 0)]
+      );
+    }
+
+    for (const row of recuperadoUtensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO recuperado_utensilios (id, fecha_recuperado, monto_recuperado)
+         VALUES (?, ?, ?)`,
+        [row.id, row.fecha_recuperado, Number(row.monto_recuperado || 0)]
+      );
+    }
+
+    for (const row of insumosEliminados) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO insumos_eliminados (id_inventario, codigo, nombre, unidad, eliminado_en)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.id_inventario, row.codigo || '', row.nombre || '', row.unidad || '', row.eliminado_en || new Date().toISOString()]
+      );
+    }
+
+    for (const row of ordenesCompra) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO ordenes_compra (id, numero_orden, proveedor, fecha_creacion, estado, fecha_surtida)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.numero_orden || '',
+          row.proveedor || '',
+          row.fecha_creacion || new Date().toISOString(),
+          row.estado || 'pendiente',
+          row.fecha_surtida || null
+        ]
+      );
+    }
+
+    for (const row of ordenesCompraItems) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO ordenes_compra_items
+         (id, id_orden, tipo_item, id_inventario, id_utensilio, codigo, nombre, cantidad_requerida, cantidad_surtida, precio_unitario, costo_total_surtido, surtido)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.id_orden,
+          row.tipo_item || 'insumo',
+          row.id_inventario ?? null,
+          row.id_utensilio ?? null,
+          row.codigo || '',
+          row.nombre || '',
+          Number(row.cantidad_requerida || 0),
+          Number(row.cantidad_surtida || 0),
+          Number(row.precio_unitario || 0),
+          Number(row.costo_total_surtido || 0),
+          Number(row.surtido || 0) ? 1 : 0
+        ]
+      );
+    }
+
+    for (const row of listaPreciosOrdenes) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO lista_precios_ordenes
+         (id, tipo_item, id_referencia, codigo, nombre, proveedor, unidad, cantidad_referencia, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, ultima_compra_en, activo, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.tipo_item || 'insumo',
+          row.id_referencia ?? null,
+          row.codigo || '',
+          row.nombre || '',
+          row.proveedor || '',
+          row.unidad || '',
+          Number(row.cantidad_referencia || 0),
+          Number(row.precio_unitario || 0),
+          Number(row.costo_total_referencia || 0),
+          row.vigente_desde || null,
+          row.vigente_hasta || null,
+          row.ultima_compra_en || null,
+          Number(row.activo || 0) ? 1 : 0,
+          row.creado_en || new Date().toISOString(),
+          row.actualizado_en || new Date().toISOString()
+        ]
+      );
+    }
+
+    for (const row of historialListaPreciosOrdenes) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO historial_lista_precios_ordenes
+         (id, id_lista_precio, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.id_lista_precio,
+          Number(row.precio_unitario || 0),
+          Number(row.costo_total_referencia || 0),
+          row.vigente_desde || null,
+          row.vigente_hasta || null,
+          row.motivo || '',
+          row.registrado_en || new Date().toISOString()
+        ]
+      );
+    }
+
+    res.json({
+      exito: true,
+      mensaje: "Inventario completo importado",
+      importados: {
+        inventario: inventario.length,
+        historial_inventario: historialInventario.length,
+        insumos_eliminados: insumosEliminados.length,
+        inversion_recuperada: inversionRecuperada.length,
+        utensilios: utensilios.length,
+        historial_utensilios: historialUtensilios.length,
+        recuperado_utensilios: recuperadoUtensilios.length,
+        ordenes_compra: ordenesCompra.length,
+        ordenes_compra_items: ordenesCompraItems.length,
+        proveedores: proveedores.length,
+        lista_precios_ordenes: listaPreciosOrdenes.length,
+        historial_lista_precios_ordenes: historialListaPreciosOrdenes.length
+      }
+    });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: "Error al importar inventario: " + error.message });
   }
@@ -486,35 +865,96 @@ app.post("/api/importar/inventario", async (req, res) => {
 // Importar datos de utensilios
 app.post("/api/importar/utensilios", async (req, res) => {
   const { datos } = req.body;
-  
-  if (!Array.isArray(datos)) {
-    return res.status(400).json({ exito: false, mensaje: "Formato de datos inválido" });
-  }
-  
+
   try {
-    let importados = 0;
-    
-    for (const item of datos) {
-      await new Promise((resolve, reject) => {
-        bdInventario.run(
-          `INSERT INTO utensilios (codigo, nombre, unidad, cantidad_total, costo_total, costo_por_unidad)
-           VALUES (?, ?, ?, ?, ?, ?)
+    // Compatibilidad hacia atrás: arreglo simple de utensilios
+    if (Array.isArray(datos)) {
+      let importados = 0;
+      for (const item of datos) {
+        await dbRunAsync(
+          bdInventario,
+          `INSERT INTO utensilios (codigo, nombre, proveedor, unidad, cantidad_total, costo_total, costo_por_unidad)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(codigo) DO UPDATE SET
-           nombre=excluded.nombre, unidad=excluded.unidad, cantidad_total=excluded.cantidad_total,
-           costo_total=excluded.costo_total, costo_por_unidad=excluded.costo_por_unidad`,
-          [item.codigo, item.nombre, item.unidad, item.cantidad_total, item.costo_total, item.costo_por_unidad],
-          (err) => {
-            if (err) reject(err);
-            else {
-              importados++;
-              resolve();
-            }
-          }
+             nombre=excluded.nombre,
+             proveedor=excluded.proveedor,
+             unidad=excluded.unidad,
+             cantidad_total=excluded.cantidad_total,
+             costo_total=excluded.costo_total,
+             costo_por_unidad=excluded.costo_por_unidad`,
+          [
+            item.codigo,
+            item.nombre,
+            item.proveedor || '',
+            item.unidad,
+            item.cantidad_total,
+            item.costo_total,
+            item.costo_por_unidad
+          ]
         );
-      });
+        importados += 1;
+      }
+      return res.json({ exito: true, mensaje: "Utensilios importados", importados });
     }
-    
-    res.json({ exito: true, mensaje: "Utensilios importados", importados });
+
+    const bloque = (datos && typeof datos === 'object') ? datos : null;
+    if (!bloque) {
+      return res.status(400).json({ exito: false, mensaje: "Formato de datos inválido" });
+    }
+
+    const utensilios = toArrayMaybe(bloque.utensilios);
+    const historialUtensilios = toArrayMaybe(bloque.historial_utensilios);
+    const recuperadoUtensilios = toArrayMaybe(bloque.recuperado_utensilios);
+
+    await dbRunAsync(bdInventario, "DELETE FROM historial_utensilios");
+    await dbRunAsync(bdInventario, "DELETE FROM recuperado_utensilios");
+    await dbRunAsync(bdInventario, "DELETE FROM utensilios");
+
+    for (const row of utensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO utensilios (id, codigo, nombre, proveedor, unidad, cantidad_total, costo_total, costo_por_unidad)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.codigo || '',
+          row.nombre || '',
+          row.proveedor || '',
+          row.unidad || '',
+          Number(row.cantidad_total || 0),
+          Number(row.costo_total || 0),
+          Number(row.costo_por_unidad || 0)
+        ]
+      );
+    }
+
+    for (const row of historialUtensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO historial_utensilios (id, id_utensilio, fecha_cambio, cambio_cantidad, cambio_costo)
+         VALUES (?, ?, ?, ?, ?)`,
+        [row.id, row.id_utensilio, row.fecha_cambio, Number(row.cambio_cantidad || 0), Number(row.cambio_costo || 0)]
+      );
+    }
+
+    for (const row of recuperadoUtensilios) {
+      await dbRunAsync(
+        bdInventario,
+        `INSERT INTO recuperado_utensilios (id, fecha_recuperado, monto_recuperado)
+         VALUES (?, ?, ?)`,
+        [row.id, row.fecha_recuperado, Number(row.monto_recuperado || 0)]
+      );
+    }
+
+    res.json({
+      exito: true,
+      mensaje: "Utensilios importados",
+      importados: {
+        utensilios: utensilios.length,
+        historial_utensilios: historialUtensilios.length,
+        recuperado_utensilios: recuperadoUtensilios.length
+      }
+    });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: "Error al importar utensilios: " + error.message });
   }
@@ -641,15 +1081,32 @@ app.post("/api/importar/ventas", async (req, res) => {
     let importados = 0;
     
     for (const item of datos) {
+      const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
+      const costoProduccion = Number(item.costo_produccion) || Number(item.costo_unitario) || 0;
+      const precioVenta = Number(item.precio_venta) || Number(item.precio_venta_unitario) || 0;
+      const ganancia = (typeof item.ganancia !== 'undefined')
+        ? Number(item.ganancia) || 0
+        : ((precioVenta * cantidad) - costoProduccion);
+
       await new Promise((resolve, reject) => {
         bdVentas.run(
-          `INSERT INTO ventas (id, id_orden, cantidad_vendida, precio_venta_unitario, costo_unitario, ganancia_unitaria, ganancia_total, fecha_venta, es_cortesia, pedido)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO ventas (id, nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-           id_orden=excluded.id_orden, cantidad_vendida=excluded.cantidad_vendida, precio_venta_unitario=excluded.precio_venta_unitario,
-           costo_unitario=excluded.costo_unitario, ganancia_unitaria=excluded.ganancia_unitaria, ganancia_total=excluded.ganancia_total,
-           fecha_venta=excluded.fecha_venta, es_cortesia=excluded.es_cortesia, pedido=excluded.pedido`,
-          [item.id, item.id_orden, item.cantidad_vendida, item.precio_venta_unitario, item.costo_unitario, item.ganancia_unitaria, item.ganancia_total, item.fecha_venta, item.es_cortesia, item.pedido],
+           nombre_receta=excluded.nombre_receta, cantidad=excluded.cantidad, fecha_produccion=excluded.fecha_produccion,
+           fecha_venta=excluded.fecha_venta, costo_produccion=excluded.costo_produccion, precio_venta=excluded.precio_venta,
+           ganancia=excluded.ganancia, numero_pedido=excluded.numero_pedido`,
+          [
+            item.id,
+            item.nombre_receta || item.pedido || item.id_orden || 'Sin receta',
+            cantidad,
+            item.fecha_produccion || item.fecha_venta || new Date().toISOString(),
+            item.fecha_venta || new Date().toISOString(),
+            costoProduccion,
+            precioVenta,
+            ganancia,
+            item.numero_pedido || item.pedido || ''
+          ],
           (err) => {
             if (err) reject(err);
             else {

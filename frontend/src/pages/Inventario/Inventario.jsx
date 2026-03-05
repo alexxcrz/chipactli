@@ -1,5 +1,5 @@
 ﻿import React, { useEffect } from 'react';
-import './Inventario.css';
+import './inventario.css';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
@@ -13,6 +13,9 @@ let tabOrdenesActiva = 'lista-insumos';
 let tabOrdenesCompraActiva = 'creadas';
 let inventarioData = [];
 let listaInsumosOrdenData = [];
+let listaPreciosArchivosData = [];
+let archivoListaPreciosPendiente = null;
+let busquedaArchivoListaPrecios = '';
 let itemsOrdenTemporal = [];
 let proveedoresCatalogo = [];
 let proveedoresMaestros = [];
@@ -21,6 +24,7 @@ let usoProveedorPendiente = { inventario: 0, utensilios: 0, total: 0 };
 let ordenesCompraCache = [];
 let modalEditarItemOrdenId = null;
 let modalSurtirItemOrdenId = null;
+let modalEditarPrecioListaId = null;
 let colaSurtidoOrden = [];
 let indiceProveedorRapidoOrden = null;
 const CLAVE_ULTIMO_PROVEEDOR_INSUMO = 'chipactli:ultimoProveedorInsumo';
@@ -98,6 +102,12 @@ function formatearFechaVariante(fechaIso) {
   return d.toLocaleString('es-MX');
 }
 
+function esPdfArchivoLista(tipo, url) {
+  const mime = texto(tipo).toLowerCase();
+  const ruta = texto(url).toLowerCase();
+  return mime === 'application/pdf' || ruta.endsWith('.pdf');
+}
+
 function escapeHtml(s) {
   return texto(s)
     .replaceAll('&', '&amp;')
@@ -138,6 +148,7 @@ function setTab(tab) {
     cargarCatalogoProveedores();
     cargarInsumosOrden();
     cargarListaInsumosOrdenes();
+    cargarArchivosListaPrecios();
     renderItemsTemporales();
     renderListaInsumosOrden();
     cargarOrdenesRegistradas();
@@ -154,6 +165,139 @@ async function cargarListaInsumosOrdenes() {
     listaInsumosOrdenData = [];
   }
   renderListaInsumosOrden();
+}
+
+async function cargarArchivosListaPrecios() {
+  try {
+    const q = texto(busquedaArchivoListaPrecios).trim();
+    const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+    const data = await fetchAPIJSON(`${API}/inventario/lista-precios/archivos${qs}`);
+    listaPreciosArchivosData = Array.isArray(data?.archivos) ? data.archivos : [];
+  } catch {
+    listaPreciosArchivosData = [];
+  }
+  renderArchivosListaPrecios();
+}
+
+function renderArchivosListaPrecios() {
+  const cont = document.getElementById('listaArchivosListaPrecios');
+  if (!cont) return;
+  const arr = Array.isArray(listaPreciosArchivosData) ? listaPreciosArchivosData : [];
+  if (!arr.length) {
+    cont.innerHTML = '<div style="color:#666;padding:8px 0">Sin archivos cargados en Lista de precios.</div>';
+    return;
+  }
+
+  cont.innerHTML = arr.map((item) => {
+    const id = Number(item?.id || 0);
+    const nombre = escapeHtml(texto(item?.nombre || 'Archivo'));
+    const proveedor = escapeHtml(texto(item?.proveedor || 'Sin proveedor'));
+    const url = escapeHtml(texto(item?.url || ''));
+    const tipo = escapeHtml(texto(item?.tipo || ''));
+    const fecha = escapeHtml(formatearFechaVariante(item?.creado_en));
+    const preview = esPdfArchivoLista(item?.tipo, item?.url)
+      ? `<iframe src="${url}" style="width:100%;min-height:300px;border:1px solid #ddd;border-radius:8px;background:#fff"></iframe>`
+      : `<iframe src="${url}" style="width:100%;min-height:300px;border:1px solid #ddd;border-radius:8px;background:#fff"></iframe>`;
+
+    return `
+      <div style="border:1px solid #d9e1dc;border-radius:10px;padding:10px;margin-bottom:10px;background:#fafdfb">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <div>
+            <strong>${nombre}</strong><br/>
+            <small style="color:#666">Proveedor: ${proveedor} · ${tipo || 'tipo no especificado'} · ${fecha}</small>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <a class="botonPequeno" href="${url}" download>Descargar</a>
+            <button class="botonPequeno botonDanger" type="button" onclick="window.inventario.eliminarArchivoListaPrecios(${id})">Eliminar</button>
+          </div>
+        </div>
+        ${preview}
+      </div>
+    `;
+  }).join('');
+}
+
+function seleccionarArchivoListaPrecios(evento) {
+  const input = evento?.target;
+  archivoListaPreciosPendiente = input?.files?.[0] || null;
+}
+
+function buscarArchivosListaPrecios(valor) {
+  busquedaArchivoListaPrecios = texto(valor).trim();
+  cargarArchivosListaPrecios();
+}
+
+async function subirArchivoListaPrecios() {
+  const archivo = archivoListaPreciosPendiente;
+  if (!archivo) return;
+
+  const proveedorInput = document.getElementById('proveedorArchivoListaPrecios');
+  const proveedor = texto(proveedorInput?.value || '').trim();
+  if (!proveedor) {
+    mostrarNotificacion('Escribe el nombre del proveedor', 'error');
+    return;
+  }
+
+  try {
+    const token = texto(window.localStorage.getItem('token')).trim();
+    if (!token) throw new Error('No hay sesión activa');
+
+    const fd = new FormData();
+    fd.append('archivo', archivo);
+    const response = await fetch(`${API}/api/uploads/lista-precios-archivo`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.url) {
+      throw new Error(data?.mensaje || data?.error || 'No se pudo subir archivo');
+    }
+
+    let contenidoTexto = texto(data?.texto_extraido || '').trim();
+    if (!contenidoTexto) {
+      try {
+        const textoLocal = await archivo.text();
+        contenidoTexto = texto(textoLocal).slice(0, 200000);
+      } catch {
+        contenidoTexto = '';
+      }
+    }
+
+    await fetchAPIJSON(`${API}/inventario/lista-precios/archivos`, {
+      method: 'POST',
+      body: {
+        nombre: data?.nombre_original || archivo?.name || 'Archivo lista de precios',
+        proveedor,
+        url: data?.url || '',
+        tipo: data?.tipo || archivo?.type || '',
+        contenido_texto: contenidoTexto
+      }
+    });
+
+    mostrarNotificacion('Archivo cargado en Lista de precios', 'exito');
+    if (proveedorInput) proveedorInput.value = '';
+    const fileInput = document.getElementById('archivoListaPreciosInput');
+    if (fileInput) fileInput.value = '';
+    archivoListaPreciosPendiente = null;
+    await cargarArchivosListaPrecios();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo cargar archivo', 'error');
+  }
+}
+
+async function eliminarArchivoListaPrecios(idArchivo) {
+  const id = Number(idArchivo || 0);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const ok = await mostrarConfirmacion('¿Eliminar este archivo de Lista de precios?', 'Eliminar archivo');
+  if (!ok) return;
+  try {
+    await fetchAPIJSON(`${API}/inventario/lista-precios/archivos/${id}`, { method: 'DELETE' });
+    mostrarNotificacion('Archivo eliminado', 'exito');
+    await cargarArchivosListaPrecios();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo eliminar archivo', 'error');
+  }
 }
 
 function setTabOrdenes(tab) {
@@ -180,6 +324,9 @@ function setTabOrdenes(tab) {
 
   if (tabOrdenesActiva === 'ordenes') setTabOrdenesCompra(tabOrdenesCompraActiva);
   if (tabOrdenesActiva === 'proveedores') cargarProveedoresMaestros();
+  if (tabOrdenesActiva === 'lista-insumos') {
+    cargarArchivosListaPrecios();
+  }
 }
 
 function setTabOrdenesCompra(tab) {
@@ -849,18 +996,7 @@ function renderListaInsumosOrden() {
   if (!cuerpo) return;
   const busqueda = busquedaOrdenesActual();
 
-  const listaBase = (Array.isArray(listaInsumosOrdenData) && listaInsumosOrdenData.length)
-    ? listaInsumosOrdenData
-    : (Array.isArray(inventarioData) ? inventarioData.map((it) => ({
-      id_inventario: it?.id,
-      codigo: it?.codigo,
-      nombre: it?.nombre,
-      proveedor: it?.proveedor,
-      unidad: it?.unidad,
-      cantidad: it?.cantidad_total,
-      costo: it?.costo_total,
-      fecha_cambio: null
-    })) : []);
+  const listaBase = Array.isArray(listaInsumosOrdenData) ? listaInsumosOrdenData : [];
 
   const lista = listaBase
     .filter((it) => {
@@ -873,13 +1009,14 @@ function renderListaInsumosOrden() {
     .sort((a, b) => cmpTexto(a?.proveedor || 'Sin proveedor', b?.proveedor || 'Sin proveedor') || cmpTexto(a?.nombre, b?.nombre));
 
   if (!lista.length) {
-    cuerpo.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777">No hay insumos para mostrar</td></tr>';
+    cuerpo.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#777">No hay insumos para mostrar</td></tr>';
     return;
   }
 
   let proveedorActual = '';
   const filas = [];
   lista.forEach((it) => {
+    const idRegistro = Number(it?.id || it?.id_movimiento || 0);
     const proveedor = texto(it?.proveedor).trim() || 'Sin proveedor';
     if (proveedor !== proveedorActual) {
       proveedorActual = proveedor;
@@ -893,11 +1030,149 @@ function renderListaInsumosOrden() {
         <td>${escapeHtml(formatearCantidadComercial(Number(it?.cantidad || 0), it?.unidad || ''))}</td>
         <td>$${Number(it?.costo || 0).toFixed(2)}</td>
         <td>${escapeHtml(formatearFechaVariante(it?.fecha_cambio))}</td>
+        <td>
+          <button class="botonPequeno" type="button" onclick="window.inventario.editarPrecioListaInsumo(${idRegistro})">✏️</button>
+          <button class="botonPequeno" type="button" onclick="window.inventario.verHistorialPrecioListaInsumo(${idRegistro})">📜</button>
+          <button class="botonPequeno botonDanger" type="button" onclick="window.inventario.eliminarPrecioListaInsumo(${idRegistro})">🗑️</button>
+        </td>
       </tr>
     `);
   });
 
   cuerpo.innerHTML = filas.join('');
+}
+
+async function editarPrecioListaInsumo(idRegistro) {
+  const id = Number(idRegistro || 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    mostrarNotificacion('Este registro aún no tiene ID válido. Recarga la pestaña.', 'error');
+    return;
+  }
+  const item = (listaInsumosOrdenData || []).find((x) => Number(x?.id) === id);
+  if (!item) {
+    mostrarNotificacion('No se encontró el insumo en la lista', 'error');
+    return;
+  }
+
+  modalEditarPrecioListaId = id;
+  const f = (idEl, val) => {
+    const el = document.getElementById(idEl);
+    if (el) el.value = val;
+  };
+
+  f('editListaPrecioCodigo', texto(item?.codigo || ''));
+  f('editListaPrecioNombre', texto(item?.nombre || ''));
+  f('editListaPrecioProveedor', texto(item?.proveedor || ''));
+  f('editListaPrecioUnidad', texto(item?.unidad || ''));
+  f('editListaPrecioCantidad', Number(item?.cantidad || 0).toFixed(2));
+  f('editListaPrecioUnitario', Number(item?.precio_unitario || 0).toFixed(4));
+  f('editListaPrecioTotal', Number(item?.costo || 0).toFixed(2));
+
+  abrirModal('modalEditarPrecioListaOC');
+}
+
+async function guardarEdicionPrecioLista(event) {
+  if (event) event.preventDefault();
+  const id = Number(modalEditarPrecioListaId || 0);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  const payload = {
+    codigo: texto(document.getElementById('editListaPrecioCodigo')?.value || '').trim(),
+    nombre: texto(document.getElementById('editListaPrecioNombre')?.value || '').trim(),
+    proveedor: texto(document.getElementById('editListaPrecioProveedor')?.value || '').trim(),
+    unidad: texto(document.getElementById('editListaPrecioUnidad')?.value || '').trim(),
+    cantidad_referencia: Number(document.getElementById('editListaPrecioCantidad')?.value || 0),
+    precio_unitario: Number(document.getElementById('editListaPrecioUnitario')?.value || 0),
+    costo_total_referencia: Number(document.getElementById('editListaPrecioTotal')?.value || 0)
+  };
+
+  if (!payload.nombre) {
+    mostrarNotificacion('Nombre requerido', 'error');
+    return;
+  }
+  if (!Number.isFinite(payload.cantidad_referencia) || payload.cantidad_referencia <= 0) {
+    mostrarNotificacion('Cantidad inválida', 'error');
+    return;
+  }
+  if (!Number.isFinite(payload.precio_unitario) || payload.precio_unitario < 0) {
+    mostrarNotificacion('Precio unitario inválido', 'error');
+    return;
+  }
+
+  try {
+    await fetchAPIJSON(`${API}/inventario/lista-insumos-ordenes/${id}`, {
+      method: 'PATCH',
+      body: payload
+    });
+    cerrarModal('modalEditarPrecioListaOC');
+    modalEditarPrecioListaId = null;
+    mostrarNotificacion('Registro de precio actualizado', 'exito');
+    await cargarListaInsumosOrdenes();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo guardar el registro', 'error');
+  }
+}
+
+function cerrarModalEditarPrecioLista() {
+  modalEditarPrecioListaId = null;
+  cerrarModal('modalEditarPrecioListaOC');
+}
+
+async function eliminarPrecioListaInsumo(idRegistro) {
+  const id = Number(idRegistro || 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    mostrarNotificacion('Este registro aún no tiene ID válido. Recarga la pestaña.', 'error');
+    return;
+  }
+  const ok = await mostrarConfirmacion('¿Eliminar este insumo de la lista de precios?', 'Eliminar registro');
+  if (!ok) return;
+
+  try {
+    await fetchAPIJSON(`${API}/inventario/lista-insumos-ordenes/${id}`, { method: 'DELETE' });
+    mostrarNotificacion('Registro eliminado', 'exito');
+    await cargarListaInsumosOrdenes();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo eliminar el registro', 'error');
+  }
+}
+
+async function verHistorialPrecioListaInsumo(idRegistro) {
+  const id = Number(idRegistro || 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    mostrarNotificacion('Este registro aún no tiene ID válido. Recarga la pestaña.', 'error');
+    return;
+  }
+
+  try {
+    const data = await fetchAPIJSON(`${API}/inventario/lista-insumos-ordenes/${id}/historial`);
+    const item = data?.item || {};
+    const historial = Array.isArray(data?.historial) ? data.historial : [];
+
+    const titulo = document.getElementById('tituloHistorialPrecioListaOC');
+    if (titulo) titulo.textContent = `Historial de precio · ${texto(item?.nombre || 'Insumo')}`;
+
+    const cuerpo = document.getElementById('cuerpoHistorialPrecioListaOC');
+    if (cuerpo) {
+      if (!historial.length) {
+        cuerpo.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#777">Sin historial de precio</td></tr>';
+      } else {
+        cuerpo.innerHTML = historial.map((h) => `
+          <tr>
+            <td>${escapeHtml(formatearFechaVariante(h?.vigente_desde))}</td>
+            <td>${escapeHtml(h?.vigente_hasta ? formatearFechaVariante(h.vigente_hasta) : 'Vigente')}</td>
+            <td>$${Number(h?.precio_unitario || 0).toFixed(4)}</td>
+            <td>$${Number(h?.costo_total_referencia || 0).toFixed(2)}</td>
+            <td>${escapeHtml(h?.motivo || '-')}</td>
+            <td>${escapeHtml(formatearFechaVariante(h?.registrado_en))}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    abrirModal('modalHistorialPrecioListaOC');
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo cargar historial de precio', 'error');
+  }
 }
 
 async function cargarProveedoresMaestros() {
@@ -1344,6 +1619,11 @@ export default function Inventario() {
       editarItemOrden,
       surtirItemOrden,
       surtirOrdenCompleta,
+      editarPrecioListaInsumo,
+      eliminarPrecioListaInsumo,
+      verHistorialPrecioListaInsumo,
+      eliminarArchivoListaPrecios,
+      subirArchivoListaPrecios,
       abrirModalProveedores,
       editarProveedor,
       guardarProveedor,
@@ -1414,7 +1694,7 @@ export default function Inventario() {
 
       <div id="panelOc" style={{ display: 'none' }}>
         <div className="tabsSubseccionInventario" style={{ marginBottom: '10px' }}>
-          <button id="btnOcListaInsumos" type="button" className="boton activo" onClick={() => setTabOrdenes('lista-insumos')}>📋 Lista de insumos</button>
+          <button id="btnOcListaInsumos" type="button" className="boton activo" onClick={() => setTabOrdenes('lista-insumos')}>📋 Lista de precios</button>
           <button id="btnOcNueva" type="button" className="boton" onClick={() => setTabOrdenes('nueva')}>🧾 Nueva orden de compra</button>
           <button id="btnOcOrdenes" type="button" className="boton" onClick={() => setTabOrdenes('ordenes')}>📦 Órdenes de compra</button>
           <button id="btnOcProveedores" type="button" className="boton" onClick={() => setTabOrdenes('proveedores')}>👤 Proveedores</button>
@@ -1426,11 +1706,30 @@ export default function Inventario() {
           </div>
 
           <div id="panelOrdenListaInsumos">
-            <h3>Lista de insumos</h3>
-            <table>
-              <thead><tr><th>Código</th><th>Nombre</th><th>Gramaje inicial</th><th>Precio total</th><th>Fecha variante</th></tr></thead>
-              <tbody id="cuerpoListaInsumosOC"></tbody>
-            </table>
+            <h3>Lista de precios</h3>
+            <div className="filaOrdenCompraInventario" style={{ marginBottom: '10px', alignItems: 'center' }}>
+              <input
+                id="proveedorArchivoListaPrecios"
+                type="text"
+                placeholder="Nombre del proveedor"
+                style={{ minWidth: '220px' }}
+              />
+              <input
+                id="archivoListaPreciosInput"
+                type="file"
+                accept=".pdf,.xls,.xlsx,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                onChange={(e) => seleccionarArchivoListaPrecios(e)}
+              />
+              <button className="boton" type="button" onClick={() => subirArchivoListaPrecios()}>Subir archivo</button>
+              <input
+                id="buscarArchivoListaPrecios"
+                type="text"
+                placeholder="Buscar producto dentro de archivos..."
+                style={{ minWidth: '260px' }}
+                onChange={(e) => buscarArchivosListaPrecios(e.target.value)}
+              />
+            </div>
+            <div id="listaArchivosListaPrecios" style={{ marginBottom: '10px' }}></div>
           </div>
 
           <div id="panelOrdenNueva" style={{ display: 'none' }}>
@@ -1615,6 +1914,53 @@ export default function Inventario() {
               <button className="boton botonExito" type="submit">Guardar cambios</button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <div id="modalEditarPrecioListaOC" className="modal" onClick={() => cerrarModalEditarPrecioLista()}>
+        <div className="contenidoModal" style={{ maxWidth: '620px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3>Editar registro de lista de precios</h3>
+            <button className="cerrarModal" onClick={() => cerrarModalEditarPrecioLista()}>&times;</button>
+          </div>
+          <form className="cajaFormulario" onSubmit={guardarEdicionPrecioLista}>
+            <div className="filaFormulario" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <input id="editListaPrecioCodigo" type="text" placeholder="Código" />
+              <input id="editListaPrecioNombre" type="text" placeholder="Nombre" required />
+            </div>
+            <div className="filaFormulario">
+              <input id="editListaPrecioProveedor" type="text" placeholder="Proveedor" />
+            </div>
+            <div className="filaFormulario" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+              <input id="editListaPrecioCantidad" type="number" min="0.01" step="0.01" placeholder="Cantidad" required />
+              <input id="editListaPrecioUnidad" type="text" placeholder="Unidad" />
+              <input id="editListaPrecioUnitario" type="number" min="0" step="0.0001" placeholder="Precio unitario" required />
+            </div>
+            <div className="filaFormulario">
+              <input id="editListaPrecioTotal" type="number" min="0" step="0.01" placeholder="Precio total" required />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="boton" type="button" onClick={() => cerrarModalEditarPrecioLista()}>Cancelar</button>
+              <button className="boton botonExito" type="submit">Guardar cambios</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="modalHistorialPrecioListaOC" className="modal" onClick={() => cerrarModal('modalHistorialPrecioListaOC')}>
+        <div className="contenidoModal" style={{ maxWidth: '920px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3 id="tituloHistorialPrecioListaOC">Historial de precio</h3>
+            <button className="cerrarModal" onClick={() => cerrarModal('modalHistorialPrecioListaOC')}>&times;</button>
+          </div>
+          <div className="cajaFormulario" style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+            <table>
+              <thead>
+                <tr><th>Desde</th><th>Hasta</th><th>Precio unitario</th><th>Precio total</th><th>Motivo</th><th>Registro</th></tr>
+              </thead>
+              <tbody id="cuerpoHistorialPrecioListaOC"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 

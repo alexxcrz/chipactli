@@ -66,6 +66,129 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
   const textoPlano = (valor) => String(valor || '').trim();
   const PREFIJO_ORDEN_COMPRA = 'ORCHI';
 
+  const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+    bdInventario.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+
+  const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+    bdInventario.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+
+  async function actualizarListaPreciosOrden({
+    tipoItem,
+    idReferencia,
+    codigo,
+    nombre,
+    proveedor,
+    unidad,
+    cantidadReferencia,
+    precioUnitario,
+    costoTotal,
+    fechaEvento
+  }) {
+    const precio = Number(precioUnitario || 0);
+    const cantidad = Number(cantidadReferencia || 0);
+    const costo = Number(costoTotal || 0);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return;
+    if (!Number.isFinite(precio) || precio <= 0) return;
+
+    const tipo = String(tipoItem || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+    const idRef = Number(idReferencia || 0);
+    const codigoLimpio = String(codigo || '').trim();
+    const nombreLimpio = String(nombre || '').trim();
+    const unidadLimpia = String(unidad || '').trim();
+    const proveedorLimpio = String(proveedor || '').trim();
+    const ahora = String(fechaEvento || new Date().toISOString());
+
+    const existente = await dbGet(
+      `SELECT *
+       FROM lista_precios_ordenes
+       WHERE COALESCE(activo, 1)=1
+         AND tipo_item=?
+         AND (
+           (COALESCE(id_referencia, 0) > 0 AND id_referencia = ?)
+           OR (
+             LOWER(COALESCE(codigo, '')) = LOWER(?)
+             AND LOWER(COALESCE(nombre, '')) = LOWER(?)
+           )
+         )
+         AND LOWER(COALESCE(unidad, '')) = LOWER(?)
+         AND ABS(COALESCE(cantidad_referencia, 0) - ?) < 0.000001
+       ORDER BY id DESC
+       LIMIT 1`,
+      [tipo, idRef, codigoLimpio, nombreLimpio, unidadLimpia, cantidad]
+    );
+
+    if (!existente) {
+      const nuevo = await dbRun(
+        `INSERT INTO lista_precios_ordenes
+         (tipo_item, id_referencia, codigo, nombre, proveedor, unidad, cantidad_referencia, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, ultima_compra_en, activo, creado_en, actualizado_en)
+         VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,1,?,?)`,
+        [
+          tipo,
+          idRef > 0 ? idRef : null,
+          codigoLimpio,
+          nombreLimpio,
+          proveedorLimpio,
+          unidadLimpia,
+          cantidad,
+          precio,
+          costo,
+          ahora,
+          ahora,
+          ahora,
+          ahora
+        ]
+      );
+
+      await dbRun(
+        `INSERT INTO historial_lista_precios_ordenes
+         (id_lista_precio, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en)
+         VALUES (?,?,?,?,NULL,?,?)`,
+        [nuevo.lastID, precio, costo, ahora, 'alta_desde_orden_compra', ahora]
+      );
+      return;
+    }
+
+    const precioActual = Number(existente?.precio_unitario || 0);
+    const costoActual = Number(existente?.costo_total_referencia || 0);
+    const cambioPrecio = Math.abs(precioActual - precio) > 0.000001 || Math.abs(costoActual - costo) > 0.000001;
+
+    if (!cambioPrecio) {
+      await dbRun(
+        `UPDATE lista_precios_ordenes
+         SET proveedor=?, ultima_compra_en=?, actualizado_en=?
+         WHERE id=?`,
+        [proveedorLimpio, ahora, ahora, existente.id]
+      );
+      return;
+    }
+
+    await dbRun(
+      `UPDATE historial_lista_precios_ordenes
+       SET vigente_hasta=?
+       WHERE id_lista_precio=? AND vigente_hasta IS NULL`,
+      [ahora, existente.id]
+    );
+
+    await dbRun(
+      `INSERT INTO historial_lista_precios_ordenes
+       (id_lista_precio, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en)
+       VALUES (?,?,?,?,NULL,?,?)`,
+      [existente.id, precio, costo, ahora, 'actualizacion_desde_orden_compra', ahora]
+    );
+
+    await dbRun(
+      `UPDATE lista_precios_ordenes
+       SET proveedor=?, precio_unitario=?, costo_total_referencia=?, vigente_desde=?, vigente_hasta=NULL, ultima_compra_en=?, actualizado_en=?
+       WHERE id=?`,
+      [proveedorLimpio, precio, costo, ahora, ahora, ahora, existente.id]
+    );
+  }
+
   const generarNumeroOrdenCompra = (callback) => {
     bdInventario.get(
       `SELECT numero_orden
@@ -355,7 +478,23 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
             bdInventario.run(
               "UPDATE ordenes_compra_items SET cantidad_surtida=?, precio_unitario=?, costo_total_surtido=?, surtido=1 WHERE id=?",
               [cantidadSurtida, precioUnitarioFinal, costoTotal, idItem],
-              () => {
+              async () => {
+                try {
+                  await actualizarListaPreciosOrden({
+                    tipoItem,
+                    idReferencia,
+                    codigo: item?.codigo,
+                    nombre: item?.nombre,
+                    proveedor: item?.proveedor || ref?.proveedor || '',
+                    unidad: ref?.unidad || item?.unidad || '',
+                    cantidadReferencia: cantidadSurtida,
+                    precioUnitario: precioUnitarioFinal,
+                    costoTotal,
+                    fechaEvento: new Date().toISOString()
+                  });
+                } catch {
+                  // Si falla la actualización del catálogo de precios, no bloquea el surtido.
+                }
                 cerrarOrdenSiCompleta(item.id_orden);
                 transmitir({ tipo: "inventario_actualizado" });
                 res.json({ ok: true });

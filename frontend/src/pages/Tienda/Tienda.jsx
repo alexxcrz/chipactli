@@ -67,6 +67,8 @@ const CONFIG_DEFAULT = {
   info_link_5_activo: '1'
 };
 
+const PUNTO_ENTREGA_DEFAULT = { nombre: '', direccion: '', horario: '', activo: true };
+
 function configActivo(valor, predeterminado = true) {
   if (valor === undefined || valor === null || valor === '') return predeterminado;
   const txt = String(valor).trim().toLowerCase();
@@ -238,7 +240,7 @@ export default function Tienda({
   const [infoSeleccionada, setInfoSeleccionada] = useState(null);
   const [configTienda, setConfigTienda] = useState(CONFIG_DEFAULT);
   const [configTiendaAdmin, setConfigTiendaAdmin] = useState(CONFIG_DEFAULT);
-  const [nuevoPunto, setNuevoPunto] = useState({ nombre: '', direccion: '', horario: '', activo: true });
+  const [nuevoPunto, setNuevoPunto] = useState(PUNTO_ENTREGA_DEFAULT);
   const [mostrarModalNuevoPunto, setMostrarModalNuevoPunto] = useState(false);
   const [modalPunto, setModalPunto] = useState({ visible: false, modo: 'ver', data: null });
   const [guardandoClasificacion, setGuardandoClasificacion] = useState('');
@@ -794,7 +796,7 @@ export default function Tienda({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nuevoPunto)
       });
-      setNuevoPunto({ nombre: '', direccion: '', horario: '', activo: true });
+      setNuevoPunto(PUNTO_ENTREGA_DEFAULT);
       setMostrarModalNuevoPunto(false);
       await cargarAdminPuntos();
       await cargarPuntosEntrega();
@@ -821,7 +823,7 @@ export default function Tienda({
   }
 
   function abrirModalNuevoPuntoAdmin() {
-    setNuevoPunto({ nombre: '', direccion: '', horario: '', activo: true });
+    setNuevoPunto(PUNTO_ENTREGA_DEFAULT);
     setMostrarModalNuevoPunto(true);
   }
 
@@ -1723,18 +1725,18 @@ export default function Tienda({
                   <article key={punto.id} className="tiendaAdminPuntoCard">
                     <div className="tiendaAdminPuntoCardHead">
                       <h4>{punto.nombre || 'Sin nombre'}</h4>
-                      <span className={Number(punto.activo) ? 'tiendaBadgeEstadoPunto activo' : 'tiendaBadgeEstadoPunto inactivo'}>
-                        {Number(punto.activo) ? 'Activo' : 'Inactivo'}
-                      </span>
+                      <SwitchConTexto
+                        checked={Number(punto.activo) === 1}
+                        label={Number(punto.activo) === 1 ? 'Activo' : 'Inactivo'}
+                        ariaLabel={`Estado del punto ${punto.nombre || punto.id}`}
+                        onChange={(event) => cambiarEstadoPunto(punto.id, event.target.checked)}
+                      />
                     </div>
                     <p>{punto.direccion || 'Sin dirección'}</p>
                     <p><strong>Horario:</strong> {punto.horario || 'Sin horario'}</p>
                     <div className="tiendaAdminPuntoCardAcciones">
                       <button className="botonPequeno" type="button" onClick={() => abrirModalPunto('ver', punto)}>Ver</button>
                       <button className="botonPequeno" type="button" onClick={() => abrirModalPunto('editar', punto)}>Editar</button>
-                      <button className="botonPequeno" type="button" onClick={() => cambiarEstadoPunto(punto.id, Number(punto.activo) ? 0 : 1)}>
-                        {Number(punto.activo) ? 'Desactivar' : 'Activar'}
-                      </button>
                       <button className="botonPequeno botonDanger" type="button" onClick={() => eliminarPuntoAdmin(punto.id)}>Eliminar</button>
                     </div>
                   </article>
@@ -2609,15 +2611,13 @@ export default function Tienda({
         </button>
         </>
       )}
-    </div>
-  );
 
       {mostrarModalNuevoPunto && (
         <div className="modal tiendaModalTop" style={{ display: 'flex' }} onClick={() => setMostrarModalNuevoPunto(false)}>
           <div className="contenidoModal tiendaAuthModal tiendaAdminPuntoModal" onClick={(e) => e.stopPropagation()}>
             <div className="encabezadoModal">
               <h3>Nuevo punto de entrega</h3>
-              <button className="cerrarModal" onClick={() => setMostrarModalNuevoPunto(false)}>&times;</button>
+              <button className="cerrarModal" type="button" onClick={() => setMostrarModalNuevoPunto(false)}>&times;</button>
             </div>
             <form className="tiendaAdminPuntoModalForm" onSubmit={crearPuntoEntregaAdmin}>
               <input
@@ -2627,7 +2627,7 @@ export default function Tienda({
                 required
               />
               <input
-                placeholder="Dirección"
+                placeholder="Direccion"
                 value={nuevoPunto.direccion}
                 onChange={(e) => setNuevoPunto((p) => ({ ...p, direccion: e.target.value }))}
               />
@@ -2658,13 +2658,13 @@ export default function Tienda({
           <div className="contenidoModal tiendaAuthModal tiendaAdminPuntoModal" onClick={(e) => e.stopPropagation()}>
             <div className="encabezadoModal">
               <h3>{modalPunto.modo === 'editar' ? 'Editar punto de entrega' : 'Detalle de punto de entrega'}</h3>
-              <button className="cerrarModal" onClick={cerrarModalPunto}>&times;</button>
+              <button className="cerrarModal" type="button" onClick={cerrarModalPunto}>&times;</button>
             </div>
 
             {modalPunto.modo === 'ver' ? (
               <div className="tiendaAdminPuntoVista">
                 <p><strong>Nombre:</strong> {modalPunto.data.nombre || 'Sin nombre'}</p>
-                <p><strong>Dirección:</strong> {modalPunto.data.direccion || 'Sin dirección'}</p>
+                <p><strong>Direccion:</strong> {modalPunto.data.direccion || 'Sin direccion'}</p>
                 <p><strong>Horario:</strong> {modalPunto.data.horario || 'Sin horario'}</p>
                 <p><strong>Estado:</strong> {modalPunto.data.activo ? 'Activo' : 'Inactivo'}</p>
                 <div className="tiendaAdminPuntoModalAcciones">
@@ -2680,7 +2680,7 @@ export default function Tienda({
                   required
                 />
                 <input
-                  placeholder="Dirección"
+                  placeholder="Direccion"
                   value={modalPunto.data.direccion}
                   onChange={(e) => editarCampoModalPunto('direccion', e.target.value)}
                 />
@@ -2706,4 +2706,6 @@ export default function Tienda({
           </div>
         </div>
       )}
+    </div>
+  );
 }

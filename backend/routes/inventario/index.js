@@ -7,6 +7,27 @@ function normalizarUnidadInsumo(unidad) {
   return u;
 }
 
+function dbRun(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+}
+
+function dbGet(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+}
+
+function dbAll(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
+  });
+}
+
 export function registrarRutasInventario(app, bdInventario) {
   app.get('/inventario', (req, res) => {
     const termino = (req.query.busqueda || '').trim();
@@ -53,75 +74,382 @@ export function registrarRutasInventario(app, bdInventario) {
   });
 
   app.get('/inventario/lista-insumos-ordenes', (req, res) => {
-    bdInventario.all(
-      `SELECT
-         h.id AS id_movimiento,
-         h.id_inventario,
-        COALESCE(i.codigo, '') AS codigo,
-         COALESCE(i.nombre, 'Insumo eliminado') AS nombre,
-         COALESCE(i.proveedor, '') AS proveedor,
-         COALESCE(i.unidad, '') AS unidad,
-         COALESCE(h.cambio_cantidad, 0) AS cantidad,
-         COALESCE(h.cambio_costo, 0) AS costo,
-         h.fecha_cambio
-       FROM historial_inventario h
-       LEFT JOIN inventario i ON i.id = h.id_inventario
-       WHERE COALESCE(h.cambio_cantidad, 0) > 0
-       ORDER BY COALESCE(NULLIF(TRIM(i.proveedor), ''), 'ZZZ'), COALESCE(i.nombre, ''), h.fecha_cambio DESC`,
-      (errHist, historial) => {
-        if (errHist) return res.status(500).json({ error: 'Error al cargar historial de insumos para órdenes' });
-
-        bdInventario.all(
-          `SELECT
-             i.id AS id_inventario,
-             i.codigo,
-             i.nombre,
-             i.proveedor,
-             i.unidad,
-             i.cantidad_total AS cantidad,
-             i.costo_total AS costo,
-             NULL AS fecha_cambio
-           FROM inventario i
-           WHERE i.id NOT IN (
-             SELECT DISTINCT id_inventario
-             FROM historial_inventario
-             WHERE COALESCE(cambio_cantidad, 0) > 0
-           )
-           ORDER BY COALESCE(NULLIF(TRIM(i.proveedor), ''), 'ZZZ'), i.nombre`,
-          (errSinHist, sinHistorial) => {
-            if (errSinHist) return res.status(500).json({ error: 'Error al cargar insumos base para órdenes' });
-
-            const itemsHistorial = (historial || []).map((item) => ({
-              id_movimiento: Number(item?.id_movimiento || 0),
-              id_inventario: Number(item?.id_inventario || 0),
-              codigo: String(item?.codigo || '').trim(),
-              nombre: String(item?.nombre || '').trim(),
-              proveedor: String(item?.proveedor || '').trim(),
-              unidad: normalizarUnidadInsumo(item?.unidad),
-              cantidad: Number(item?.cantidad || 0),
-              costo: Number(item?.costo || 0),
-              fecha_cambio: item?.fecha_cambio || null,
-              fuente: 'historial'
-            }));
-
-            const itemsSinHistorial = (sinHistorial || []).map((item) => ({
-              id_movimiento: 0,
-              id_inventario: Number(item?.id_inventario || 0),
-              codigo: String(item?.codigo || '').trim(),
-              nombre: String(item?.nombre || '').trim(),
-              proveedor: String(item?.proveedor || '').trim(),
-              unidad: normalizarUnidadInsumo(item?.unidad),
-              cantidad: Number(item?.cantidad || 0),
-              costo: Number(item?.costo || 0),
-              fecha_cambio: item?.fecha_cambio || null,
-              fuente: 'base'
-            }));
-
-            res.json({ items: [...itemsHistorial, ...itemsSinHistorial] });
+    const responderLista = () => {
+      bdInventario.all(
+        `SELECT
+           id,
+           tipo_item,
+           id_referencia,
+           codigo,
+           nombre,
+           proveedor,
+           unidad,
+           cantidad_referencia,
+           precio_unitario,
+           costo_total_referencia,
+           vigente_desde,
+           vigente_hasta,
+           ultima_compra_en,
+           creado_en
+         FROM lista_precios_ordenes
+         WHERE COALESCE(activo, 1) = 1
+         ORDER BY
+           COALESCE(NULLIF(vigente_desde, ''), NULLIF(ultima_compra_en, ''), NULLIF(creado_en, ''), '9999-12-31T23:59:59.999Z') ASC,
+           id ASC`,
+        (errOut, rowsOut) => {
+          if (errOut) return res.status(500).json({ error: 'Error al cargar lista de precios de insumos' });
+          const mapaPrimerRegistro = new Map();
+          for (const row of (rowsOut || [])) {
+            const tipo = String(row?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+            const idRef = Number(row?.id_referencia || 0);
+            const codigo = String(row?.codigo || '').trim().toLowerCase();
+            const nombre = String(row?.nombre || '').trim().toLowerCase();
+            const claveBase = idRef > 0 ? `ref:${idRef}` : `txt:${codigo}|${nombre}`;
+            const clave = `${tipo}:${claveBase}`;
+            if (!mapaPrimerRegistro.has(clave)) {
+              mapaPrimerRegistro.set(clave, row);
+            }
           }
-        );
+
+          const rowsUnicas = Array.from(mapaPrimerRegistro.values()).sort((a, b) => {
+            const proveedorA = String(a?.proveedor || '').trim().toLowerCase();
+            const proveedorB = String(b?.proveedor || '').trim().toLowerCase();
+            if (proveedorA !== proveedorB) return proveedorA.localeCompare(proveedorB, 'es');
+            const nombreA = String(a?.nombre || '').trim().toLowerCase();
+            const nombreB = String(b?.nombre || '').trim().toLowerCase();
+            if (nombreA !== nombreB) return nombreA.localeCompare(nombreB, 'es');
+            return Number(a?.id || 0) - Number(b?.id || 0);
+          });
+
+          const items = rowsUnicas.map((row) => ({
+            id: Number(row?.id || 0),
+            tipo_item: String(row?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo',
+            id_referencia: Number(row?.id_referencia || 0),
+            codigo: String(row?.codigo || '').trim(),
+            nombre: String(row?.nombre || '').trim(),
+            proveedor: String(row?.proveedor || '').trim(),
+            unidad: normalizarUnidadInsumo(row?.unidad),
+            cantidad: Number(row?.cantidad_referencia || 0),
+            precio_unitario: Number(row?.precio_unitario || 0),
+            costo: Number(row?.costo_total_referencia || 0),
+            fecha_cambio: row?.vigente_desde || row?.ultima_compra_en || row?.creado_en || null,
+            vigente_hasta: row?.vigente_hasta || null,
+            fuente: 'lista_precios'
+          }));
+          res.json({ items });
+        }
+      );
+    };
+
+    bdInventario.get(
+      `SELECT COUNT(*) AS total FROM lista_precios_ordenes`,
+      async (errCount, rowCount) => {
+        if (errCount) return res.status(500).json({ error: 'Error al validar lista de precios' });
+        if (Number(rowCount?.total || 0) > 0) return responderLista();
+
+        try {
+          const surtidos = await dbAll(
+            bdInventario,
+            `SELECT
+               oci.id,
+               oci.tipo_item,
+               oci.id_inventario,
+               oci.id_utensilio,
+               oci.codigo,
+               oci.nombre,
+               COALESCE(oc.proveedor, '') AS proveedor,
+               COALESCE(oci.cantidad_surtida, 0) AS cantidad_surtida,
+               COALESCE(oci.precio_unitario, 0) AS precio_unitario,
+               COALESCE(oci.costo_total_surtido, 0) AS costo_total_surtido,
+               COALESCE(oc.fecha_surtida, oc.fecha_creacion) AS fecha,
+               CASE WHEN LOWER(COALESCE(oci.tipo_item, 'insumo')) = 'utensilio' THEN COALESCE(u.unidad, '') ELSE COALESCE(i.unidad, '') END AS unidad
+             FROM ordenes_compra_items oci
+             INNER JOIN ordenes_compra oc ON oc.id = oci.id_orden
+             LEFT JOIN inventario i ON i.id = oci.id_inventario
+             LEFT JOIN utensilios u ON u.id = oci.id_utensilio
+             WHERE (COALESCE(oci.cantidad_surtida, 0) > 0 OR COALESCE(oci.surtido, 0)=1)
+               AND COALESCE(oci.precio_unitario, 0) > 0
+             ORDER BY COALESCE(oc.fecha_surtida, oc.fecha_creacion) ASC, oci.id ASC`
+          );
+
+          const mapa = new Map();
+          for (const row of surtidos) {
+            const tipo = String(row?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+            const idRef = tipo === 'utensilio' ? Number(row?.id_utensilio || 0) : Number(row?.id_inventario || 0);
+            const cantidad = Number(row?.cantidad_surtida || 0);
+            if (!Number.isFinite(cantidad) || cantidad <= 0) continue;
+            const codigo = String(row?.codigo || '').trim().toLowerCase();
+            const nombre = String(row?.nombre || '').trim().toLowerCase();
+            const clave = idRef > 0
+              ? `${tipo}:ref:${idRef}`
+              : `${tipo}:txt:${codigo}|${nombre}`;
+            if (!mapa.has(clave)) mapa.set(clave, row);
+          }
+
+          for (const row of mapa.values()) {
+            const tipo = String(row?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+            const idRef = tipo === 'utensilio' ? Number(row?.id_utensilio || 0) : Number(row?.id_inventario || 0);
+            const fecha = String(row?.fecha || new Date().toISOString());
+            const cantidad = Number(row?.cantidad_surtida || 0);
+            const precio = Number(row?.precio_unitario || 0);
+            const costo = Number(row?.costo_total_surtido || (cantidad * precio));
+
+            const inserted = await dbRun(
+              bdInventario,
+              `INSERT INTO lista_precios_ordenes
+               (tipo_item, id_referencia, codigo, nombre, proveedor, unidad, cantidad_referencia, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, ultima_compra_en, activo, creado_en, actualizado_en)
+               VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,1,?,?)`,
+              [
+                tipo,
+                idRef > 0 ? idRef : null,
+                String(row?.codigo || '').trim(),
+                String(row?.nombre || '').trim(),
+                String(row?.proveedor || '').trim(),
+                normalizarUnidadInsumo(row?.unidad),
+                cantidad,
+                precio,
+                costo,
+                fecha,
+                fecha,
+                fecha,
+                fecha
+              ]
+            );
+
+            await dbRun(
+              bdInventario,
+              `INSERT INTO historial_lista_precios_ordenes
+               (id_lista_precio, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en)
+               VALUES (?,?,?,?,NULL,?,?)`,
+              [inserted.lastID, precio, costo, fecha, 'migracion_desde_ordenes_previas', fecha]
+            );
+          }
+        } catch {
+          // Si falla la migración inicial, respondemos con lo que exista.
+        }
+
+        responderLista();
       }
     );
+  });
+
+  app.get('/inventario/lista-insumos-ordenes/:id/historial', async (req, res) => {
+    const id = Number(req.params.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    try {
+      const item = await dbGet(
+        bdInventario,
+        `SELECT id, codigo, nombre, proveedor, unidad, cantidad_referencia, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta
+         FROM lista_precios_ordenes WHERE id=?`,
+        [id]
+      );
+      if (!item) return res.status(404).json({ error: 'Insumo no encontrado en lista' });
+
+      const historial = await dbAll(
+        bdInventario,
+        `SELECT id, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en
+         FROM historial_lista_precios_ordenes
+         WHERE id_lista_precio=?
+         ORDER BY COALESCE(vigente_desde, registrado_en) DESC, id DESC`,
+        [id]
+      );
+
+      res.json({
+        item,
+        historial: historial || []
+      });
+    } catch {
+      res.status(500).json({ error: 'Error al cargar historial de precios del insumo' });
+    }
+  });
+
+  app.patch('/inventario/lista-insumos-ordenes/:id', async (req, res) => {
+    const id = Number(req.params.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    const codigo = String(req.body?.codigo || '').trim();
+    const nombre = String(req.body?.nombre || '').trim();
+    const proveedor = String(req.body?.proveedor || '').trim();
+    const unidad = normalizarUnidadInsumo(req.body?.unidad);
+    const cantidad = Number(req.body?.cantidad_referencia ?? req.body?.cantidad ?? 0);
+    const precioUnitario = Number(req.body?.precio_unitario ?? 0);
+    const costoTotal = Number(req.body?.costo_total_referencia ?? req.body?.costo ?? 0);
+
+    if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+    if (!Number.isFinite(cantidad) || cantidad <= 0) return res.status(400).json({ error: 'Cantidad de referencia inválida' });
+    if (!Number.isFinite(precioUnitario) || precioUnitario < 0) return res.status(400).json({ error: 'Precio unitario inválido' });
+
+    try {
+      const actual = await dbGet(
+        bdInventario,
+        `SELECT id, precio_unitario, costo_total_referencia
+         FROM lista_precios_ordenes
+         WHERE id=? AND COALESCE(activo, 1)=1`,
+        [id]
+      );
+      if (!actual) return res.status(404).json({ error: 'Registro no encontrado' });
+
+      const ahora = new Date().toISOString();
+      await dbRun(
+        bdInventario,
+        `UPDATE lista_precios_ordenes
+         SET codigo=?, nombre=?, proveedor=?, unidad=?, cantidad_referencia=?, precio_unitario=?, costo_total_referencia=?, actualizado_en=?
+         WHERE id=?`,
+        [codigo, nombre, proveedor, unidad, cantidad, precioUnitario, costoTotal, ahora, id]
+      );
+
+      const precioCambio = Math.abs(Number(actual?.precio_unitario || 0) - precioUnitario) > 0.000001
+        || Math.abs(Number(actual?.costo_total_referencia || 0) - costoTotal) > 0.000001;
+
+      if (precioCambio) {
+        await dbRun(
+          bdInventario,
+          `UPDATE historial_lista_precios_ordenes
+           SET vigente_hasta=?
+           WHERE id_lista_precio=? AND vigente_hasta IS NULL`,
+          [ahora, id]
+        );
+        await dbRun(
+          bdInventario,
+          `INSERT INTO historial_lista_precios_ordenes
+           (id_lista_precio, precio_unitario, costo_total_referencia, vigente_desde, vigente_hasta, motivo, registrado_en)
+           VALUES (?,?,?,?,NULL,?,?)`,
+          [id, precioUnitario, costoTotal, ahora, 'edicion_manual', ahora]
+        );
+      }
+
+      transmitir({ tipo: 'inventario_actualizado' });
+      res.json({ ok: true, precio_actualizado: precioCambio });
+    } catch {
+      res.status(500).json({ error: 'No se pudo actualizar el insumo de la lista de precios' });
+    }
+  });
+
+  app.delete('/inventario/lista-insumos-ordenes/:id', async (req, res) => {
+    const id = Number(req.params.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    try {
+      const actual = await dbGet(
+        bdInventario,
+        `SELECT id, tipo_item, id_referencia, codigo, nombre
+         FROM lista_precios_ordenes
+         WHERE id=?`,
+        [id]
+      );
+      if (!actual) return res.status(404).json({ error: 'Registro no encontrado' });
+
+      const tipo = String(actual?.tipo_item || 'insumo').toLowerCase() === 'utensilio' ? 'utensilio' : 'insumo';
+      const idRef = Number(actual?.id_referencia || 0);
+      const codigo = String(actual?.codigo || '').trim();
+      const nombre = String(actual?.nombre || '').trim();
+      const ahora = new Date().toISOString();
+
+      const idsRelacionados = await dbAll(
+        bdInventario,
+        `SELECT id
+         FROM lista_precios_ordenes
+         WHERE COALESCE(activo, 1)=1
+           AND LOWER(COALESCE(tipo_item, 'insumo')) = ?
+           AND (
+             (? > 0 AND COALESCE(id_referencia, 0) = ?)
+             OR
+             (? <= 0 AND LOWER(TRIM(COALESCE(codigo, ''))) = LOWER(TRIM(?)) AND LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?)))
+           )`,
+        [tipo, idRef, idRef, idRef, codigo, nombre]
+      );
+      const ids = idsRelacionados.map((row) => Number(row?.id || 0)).filter((n) => Number.isFinite(n) && n > 0);
+      if (!ids.length) return res.status(404).json({ error: 'Registro no encontrado' });
+
+      const placeholders = ids.map(() => '?').join(',');
+      await dbRun(
+        bdInventario,
+        `UPDATE historial_lista_precios_ordenes
+         SET vigente_hasta=COALESCE(vigente_hasta, ?)
+         WHERE id_lista_precio IN (${placeholders}) AND vigente_hasta IS NULL`,
+        [ahora, ...ids]
+      );
+
+      const out = await dbRun(
+        bdInventario,
+        `UPDATE lista_precios_ordenes
+         SET activo=0, vigente_hasta=COALESCE(vigente_hasta, ?), actualizado_en=?
+         WHERE id IN (${placeholders}) AND COALESCE(activo,1)=1`,
+        [ahora, ahora, ...ids]
+      );
+
+      if (!out.changes) return res.status(404).json({ error: 'Registro no encontrado' });
+
+      transmitir({ tipo: 'inventario_actualizado' });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo eliminar el registro de la lista de precios' });
+    }
+  });
+
+  app.get('/inventario/lista-precios/archivos', async (req, res) => {
+    try {
+      const q = String(req.query?.q || '').trim().toLowerCase();
+      const params = [];
+      let where = '';
+      if (q) {
+        where = `WHERE LOWER(COALESCE(nombre, '')) LIKE ?
+                  OR LOWER(COALESCE(proveedor, '')) LIKE ?
+                  OR LOWER(COALESCE(contenido_texto, '')) LIKE ?`;
+        const like = `%${q}%`;
+        params.push(like, like, like);
+      }
+
+      const archivos = await dbAll(
+        bdInventario,
+        `SELECT id, nombre, proveedor, url, tipo, creado_en
+         FROM lista_precios_archivos
+         ${where}
+         ORDER BY datetime(COALESCE(creado_en, '1970-01-01T00:00:00Z')) DESC, id DESC`,
+        params
+      );
+      res.json({ archivos: archivos || [] });
+    } catch {
+      res.status(500).json({ error: 'No se pudieron cargar archivos de lista de precios' });
+    }
+  });
+
+  app.post('/inventario/lista-precios/archivos', async (req, res) => {
+    try {
+      const nombre = String(req.body?.nombre || '').trim();
+      const proveedor = String(req.body?.proveedor || '').trim();
+      const url = String(req.body?.url || '').trim();
+      const tipo = String(req.body?.tipo || '').trim();
+      const contenidoTexto = String(req.body?.contenido_texto || '').slice(0, 200000);
+      if (!nombre || !url) return res.status(400).json({ error: 'Nombre y URL son obligatorios' });
+
+      const out = await dbRun(
+        bdInventario,
+        `INSERT INTO lista_precios_archivos (nombre, proveedor, url, tipo, contenido_texto, creado_en)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [nombre, proveedor, url, tipo, contenidoTexto]
+      );
+      res.json({ ok: true, id: out.lastID });
+    } catch {
+      res.status(500).json({ error: 'No se pudo guardar el archivo de lista de precios' });
+    }
+  });
+
+  app.delete('/inventario/lista-precios/archivos/:id', async (req, res) => {
+    const id = Number(req.params.id || 0);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+    try {
+      const out = await dbRun(
+        bdInventario,
+        `DELETE FROM lista_precios_archivos WHERE id=?`,
+        [id]
+      );
+      if (!out.changes) return res.status(404).json({ error: 'Archivo no encontrado' });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo eliminar el archivo de lista de precios' });
+    }
   });
 
   app.post('/inventario/agregar', (req, res) => {

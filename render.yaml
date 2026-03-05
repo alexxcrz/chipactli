@@ -7,8 +7,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DB_DIR
+        value: /opt/render/data/backend
     # Disco persistente para que las bases de datos no se borren
     disk:
       name: chipactli-data
-      mountPath: /app/backend
+      mountPath: /opt/render/data
       sizeGB: 1

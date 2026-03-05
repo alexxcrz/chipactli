@@ -59,6 +59,13 @@ function boolToInt(valor) {
   return valor === true || Number(valor) === 1 ? 1 : 0;
 }
 
+function valorActivoAInt(valor) {
+  if (valor === false || valor === 0 || valor === '0') return 0;
+  const txt = String(valor ?? '').trim().toLowerCase();
+  if (txt === 'false' || txt === 'off' || txt === 'no') return 0;
+  return 1;
+}
+
 function lineasTexto(valor = "") {
   return String(valor || "")
     .split(/\r?\n|,/)
@@ -699,7 +706,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const nombre = String(req.body?.nombre || "").trim();
       const direccion = String(req.body?.direccion || "").trim();
       const horario = String(req.body?.horario || "").trim();
-      const activo = req.body?.activo === false ? 0 : 1;
+      const activo = valorActivoAInt(req.body?.activo);
       if (!nombre) return res.status(400).json({ error: "Nombre obligatorio" });
 
       const creado = await dbRun(
@@ -722,7 +729,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const nombre = String(req.body?.nombre || "").trim();
       const direccion = String(req.body?.direccion || "").trim();
       const horario = String(req.body?.horario || "").trim();
-      const activo = req.body?.activo === false ? 0 : 1;
+      const activo = valorActivoAInt(req.body?.activo);
 
       await dbRun(
         bdVentas,

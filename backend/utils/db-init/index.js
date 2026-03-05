@@ -147,6 +147,65 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
         });
       }
     });
+
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS lista_precios_ordenes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo_item TEXT DEFAULT 'insumo',
+      id_referencia INTEGER,
+      codigo TEXT,
+      nombre TEXT,
+      proveedor TEXT,
+      unidad TEXT,
+      cantidad_referencia REAL,
+      precio_unitario REAL,
+      costo_total_referencia REAL,
+      vigente_desde TEXT,
+      vigente_hasta TEXT,
+      ultima_compra_en TEXT,
+      activo INTEGER DEFAULT 1,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS historial_lista_precios_ordenes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_lista_precio INTEGER,
+      precio_unitario REAL,
+      costo_total_referencia REAL,
+      vigente_desde TEXT,
+      vigente_hasta TEXT,
+      motivo TEXT,
+      registrado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdInventario.run(`CREATE INDEX IF NOT EXISTS idx_lista_precios_ordenes_activo
+      ON lista_precios_ordenes (activo, tipo_item, id_referencia, codigo, nombre, unidad, cantidad_referencia)`);
+
+    bdInventario.run(`CREATE INDEX IF NOT EXISTS idx_historial_lista_precios_ordenes_lista
+      ON historial_lista_precios_ordenes (id_lista_precio, vigente_desde)`);
+
+    bdInventario.run(`CREATE TABLE IF NOT EXISTS lista_precios_archivos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT,
+      proveedor TEXT,
+      url TEXT,
+      tipo TEXT,
+      contenido_texto TEXT,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdInventario.all('PRAGMA table_info(lista_precios_archivos)', (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === 'proveedor')) {
+        bdInventario.run('ALTER TABLE lista_precios_archivos ADD COLUMN proveedor TEXT');
+      }
+      if (!columnas.some((col) => col.name === 'contenido_texto')) {
+        bdInventario.run('ALTER TABLE lista_precios_archivos ADD COLUMN contenido_texto TEXT');
+      }
+    });
+
+    bdInventario.run(`CREATE INDEX IF NOT EXISTS idx_lista_precios_archivos_creado
+      ON lista_precios_archivos (creado_en DESC)`);
   });
 
   // ===== BASE DE DATOS DE RECETAS =====
@@ -323,9 +382,25 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       direccion TEXT,
       horario TEXT,
       activo INTEGER DEFAULT 1,
+      archivo_url TEXT,
+      archivo_nombre TEXT,
+      archivo_tipo TEXT,
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    bdVentas.all("PRAGMA table_info(tienda_puntos_entrega)", (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === "archivo_url")) {
+        bdVentas.run("ALTER TABLE tienda_puntos_entrega ADD COLUMN archivo_url TEXT");
+      }
+      if (!columnas.some((col) => col.name === "archivo_nombre")) {
+        bdVentas.run("ALTER TABLE tienda_puntos_entrega ADD COLUMN archivo_nombre TEXT");
+      }
+      if (!columnas.some((col) => col.name === "archivo_tipo")) {
+        bdVentas.run("ALTER TABLE tienda_puntos_entrega ADD COLUMN archivo_tipo TEXT");
+      }
+    });
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_orden_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

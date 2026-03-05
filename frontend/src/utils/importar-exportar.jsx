@@ -4,6 +4,7 @@
 
 import { API } from './config.jsx';
 import { mostrarNotificacion } from './notificaciones.jsx';
+import { fetchAPIJSON } from './api.jsx';
 
 /**
  * Obtener la URL base de la API
@@ -23,14 +24,8 @@ function obtenerURLAPI() {
  */
 export async function exportarDatos(tipo) {
   try {
-    const apiURL = obtenerURLAPI();
-    const response = await fetch(`${apiURL}/api/exportar/${tipo}`);
-    
-    if (!response.ok) {
-      throw new Error(`Error al exportar ${tipo}: ${response.statusText}`);
-    }
-    
-    const datos = await response.json();
+    const endpoint = `${obtenerURLAPI()}/api/exportar/${tipo}`;
+    const datos = await fetchAPIJSON(endpoint);
     
     // Crear archivo JSON
     const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' });
@@ -82,22 +77,21 @@ export async function importarDatos(tipo, input) {
     }
     
     // Enviar al servidor
-    const apiURL = obtenerURLAPI();
-    const response = await fetch(`${apiURL}/api/importar/${tipo}`, {
+    const endpoint = `${obtenerURLAPI()}/api/importar/${tipo}`;
+    const resultado = await fetchAPIJSON(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(datos)
+      body: datos
     });
     
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.mensaje || response.statusText);
-    }
-    
-    const resultado = await response.json();
-    
+    const importados = resultado?.importados;
+    const totalImportados = (typeof importados === 'number')
+      ? importados
+      : (importados && typeof importados === 'object')
+        ? Object.values(importados).reduce((acc, v) => acc + (Number(v) || 0), 0)
+        : 0;
+
     mostrarNotificacion(
-      `✅ ${resultado.importados || 0} registros importados correctamente`,
+      `✅ ${totalImportados} registros importados correctamente`,
       'exito'
     );
     

@@ -14,7 +14,7 @@
     "build": "npm run guard:local && npm --prefix frontend install && npm --prefix frontend run prepare-assets && npm --prefix frontend run build && npm --prefix backend install"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20 <21"
   },
   "keywords": [
     "chipactli",

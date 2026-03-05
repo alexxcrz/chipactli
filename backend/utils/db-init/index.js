@@ -231,6 +231,17 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       costo_produccion REAL,
       precio_venta REAL
     )`);
+
+    bdProduccion.run(`CREATE TABLE IF NOT EXISTS produccion_descuentos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_produccion INTEGER,
+      id_insumo INTEGER,
+      cantidad_descuento REAL,
+      unidad_insumo TEXT,
+      costo_por_unidad REAL,
+      fecha_descuento TEXT,
+      FOREIGN KEY(id_produccion) REFERENCES produccion(id)
+    )`);
   });
 
   // ===== BASE DE DATOS DE VENTAS =====
@@ -325,6 +336,16 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       subtotal REAL,
       variante TEXT,
       FOREIGN KEY(id_orden) REFERENCES tienda_ordenes(id)
+    )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_resenas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      receta_nombre TEXT,
+      id_cliente INTEGER,
+      nombre_cliente TEXT,
+      calificacion INTEGER,
+      comentario TEXT,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_config (

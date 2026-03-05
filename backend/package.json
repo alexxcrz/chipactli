@@ -13,13 +13,13 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "dotenv": "^16.6.1",
+    "bcrypt": "^5.1.0",
     "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "sqlite3": "^5.1.7",
-    "ws": "^8.19.0",
-    "bcrypt": "^5.1.0",
-    "jsonwebtoken": "^9.0.2"
+    "ws": "^8.19.0"
   }
 }

@@ -188,15 +188,17 @@ export default function Recetas() {
         <div className="contenidoModal" onClick={e => e.stopPropagation()}>
           <div className="encabezadoModal"><h3>Nueva Receta</h3><button className="cerrarModal" onClick={() => cerrarModal('modalReceta')}>&times;</button></div>
           <form id="formularioReceta" onSubmit={guardarReceta} className="cajaFormulario">
-            <input id="nombreReceta" type="text" placeholder="Nombre de receta" required />
-            <select id="categoriaReceta" required></select>
-            <input id="gramajeReceta" type="number" step="0.01" min="0" placeholder="Gramaje (opcional)" />
-            <div>
-              <input id="insumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
-              <input id="idInsumoSeleccionado" type="hidden" />
-              <div id="listaBusquedaInsumos"></div>
+            <div className="recetaFilaDatosPrincipales">
+              <input id="nombreReceta" type="text" placeholder="Nombre de receta" required />
+              <select id="categoriaReceta" required></select>
+              <input id="gramajeReceta" type="number" step="0.01" min="0" placeholder="Gramaje (opcional)" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px' }}>
+            <div className="recetaFilaInsumo">
+              <div className="recetaBusquedaInsumoWrap">
+                <input id="insumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
+                <input id="idInsumoSeleccionado" type="hidden" />
+                <div id="listaBusquedaInsumos"></div>
+              </div>
               <input id="cantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" />
               <select id="unidadIngrediente" disabled>
                 <option value="">Seleccionar</option>
@@ -228,15 +230,17 @@ export default function Recetas() {
           <div className="encabezadoModal"><h3>Editar Receta</h3><button className="cerrarModal" onClick={() => cerrarModal('modalEditarReceta')}>&times;</button></div>
           <form onSubmit={guardarEditarReceta} className="cajaFormulario">
             <input id="idEditReceta" type="hidden" />
-            <input id="editNombreReceta" type="text" required />
-            <select id="editCategoriaReceta" required></select>
-            <input id="editGramajeReceta" type="number" step="0.01" min="0" />
-            <div>
-              <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
-              <input id="editIdInsumoSeleccionado" type="hidden" />
-              <div id="editListaBusquedaInsumos"></div>
+            <div className="recetaFilaDatosPrincipales">
+              <input id="editNombreReceta" type="text" required />
+              <select id="editCategoriaReceta" required></select>
+              <input id="editGramajeReceta" type="number" step="0.01" min="0" />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '8px' }}>
+            <div className="recetaFilaInsumo">
+              <div className="recetaBusquedaInsumoWrap">
+                <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
+                <input id="editIdInsumoSeleccionado" type="hidden" />
+                <div id="editListaBusquedaInsumos"></div>
+              </div>
               <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" />
               <select id="editUnidadIngrediente" disabled>
                 <option value="">Seleccionar</option>

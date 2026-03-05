@@ -64,6 +64,28 @@ function resolverNombreInsumoEliminado(bdInventario, idInsumo, callback) {
 
 export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
   const textoPlano = (valor) => String(valor || '').trim();
+  const PREFIJO_ORDEN_COMPRA = 'ORCHI';
+
+  const generarNumeroOrdenCompra = (callback) => {
+    bdInventario.get(
+      `SELECT numero_orden
+       FROM ordenes_compra
+       WHERE numero_orden LIKE ?
+       ORDER BY numero_orden DESC
+       LIMIT 1`,
+      [`${PREFIJO_ORDEN_COMPRA}%`],
+      (err, row) => {
+        if (err) {
+          callback(`${PREFIJO_ORDEN_COMPRA}000001`);
+          return;
+        }
+        const actual = String(row?.numero_orden || '').trim();
+        const match = actual.match(/^ORCHI(\d+)$/);
+        const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
+        callback(`${PREFIJO_ORDEN_COMPRA}${String(consecutivo).padStart(6, '0')}`);
+      }
+    );
+  };
 
   const cerrarOrdenSiCompleta = (idOrden) => {
     bdInventario.get(
@@ -99,13 +121,13 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (!items.length) return res.status(400).json({ error: "Debes enviar al menos un insumo" });
 
-    const numeroOrden = `OC-${Date.now()}`;
     const fechaCreacion = new Date().toISOString();
 
-    bdInventario.run(
-      "INSERT INTO ordenes_compra (numero_orden, proveedor, fecha_creacion, estado, fecha_surtida) VALUES (?,?,?,?,NULL)",
-      [numeroOrden, proveedor, fechaCreacion, 'pendiente'],
-      function () {
+    generarNumeroOrdenCompra((numeroOrden) => {
+      bdInventario.run(
+        "INSERT INTO ordenes_compra (numero_orden, proveedor, fecha_creacion, estado, fecha_surtida) VALUES (?,?,?,?,NULL)",
+        [numeroOrden, proveedor, fechaCreacion, 'pendiente'],
+        function () {
         const idOrden = this.lastID;
         let pendientes = items.length;
         if (!pendientes) return res.json({ ok: true, id: idOrden, numero_orden: numeroOrden });
@@ -154,14 +176,23 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
               () => {
                 pendientes -= 1;
                 if (pendientes === 0) {
+                  transmitir({
+                    tipo: "orden_compra_nueva",
+                    id_orden: idOrden,
+                    numero_orden: numeroOrden,
+                    proveedor: proveedor || "Sin proveedor",
+                    total_items: items.length
+                  });
+                  transmitir({ tipo: "inventario_actualizado" });
                   res.json({ ok: true, id: idOrden, numero_orden: numeroOrden });
                 }
               }
             );
           });
         });
-      }
-    );
+        }
+      );
+    });
   });
 
   app.get("/recetas/ordenes-compra", (req, res) => {
@@ -193,21 +224,74 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
     );
   });
 
+  app.delete("/recetas/ordenes-compra/:id", (req, res) => {
+    const idOrden = Number(req.params.id);
+    if (!Number.isFinite(idOrden) || idOrden <= 0) {
+      return res.status(400).json({ error: "Orden inválida" });
+    }
+
+    bdInventario.get(
+      "SELECT id, numero_orden FROM ordenes_compra WHERE id=?",
+      [idOrden],
+      (errOrden, orden) => {
+        if (errOrden) return res.status(500).json({ error: "Error al buscar orden" });
+        if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+        bdInventario.get(
+          `SELECT COUNT(*) AS surtidos
+           FROM ordenes_compra_items
+           WHERE id_orden=? AND (COALESCE(cantidad_surtida, 0) > 0 OR COALESCE(surtido, 0) = 1)`,
+          [idOrden],
+          (errCount, row) => {
+            if (errCount) return res.status(500).json({ error: "Error al validar orden" });
+            if (Number(row?.surtidos || 0) > 0) {
+              return res.status(400).json({
+                error: "No se puede eliminar la orden porque ya tiene insumos surtidos"
+              });
+            }
+
+            bdInventario.run("DELETE FROM ordenes_compra_items WHERE id_orden=?", [idOrden], (errItems) => {
+              if (errItems) return res.status(500).json({ error: "Error al eliminar items de la orden" });
+
+              bdInventario.run("DELETE FROM ordenes_compra WHERE id=?", [idOrden], function (errDelete) {
+                if (errDelete) return res.status(500).json({ error: "Error al eliminar orden" });
+                if (!this.changes) return res.status(404).json({ error: "Orden no encontrada" });
+
+                transmitir({
+                  tipo: "orden_compra_eliminada",
+                  id_orden: idOrden,
+                  numero_orden: orden.numero_orden || ''
+                });
+                transmitir({ tipo: "inventario_actualizado" });
+                res.json({ ok: true });
+              });
+            });
+          }
+        );
+      }
+    );
+  });
+
   app.patch("/recetas/ordenes-compra/items/:id/cantidad", (req, res) => {
     const idItem = Number(req.params.id);
     const cantidadRequerida = Number(req.body?.cantidad_requerida);
+    const precioUnitarioRaw = req.body?.precio_unitario;
+    const actualizarPrecio = Number.isFinite(Number(precioUnitarioRaw)) && Number(precioUnitarioRaw) >= 0;
     if (!Number.isFinite(idItem) || idItem <= 0) return res.status(400).json({ error: "Item inválido" });
     if (!Number.isFinite(cantidadRequerida) || cantidadRequerida <= 0) return res.status(400).json({ error: "Cantidad inválida" });
 
-    bdInventario.run(
-      "UPDATE ordenes_compra_items SET cantidad_requerida=? WHERE id=? AND surtido=0",
-      [cantidadRequerida, idItem],
-      function () {
-        if (!this.changes) return res.status(404).json({ error: "Item no encontrado o ya surtido" });
-        transmitir({ tipo: "inventario_actualizado" });
-        res.json({ ok: true });
-      }
-    );
+    const sql = actualizarPrecio
+      ? "UPDATE ordenes_compra_items SET cantidad_requerida=?, precio_unitario=? WHERE id=? AND surtido=0"
+      : "UPDATE ordenes_compra_items SET cantidad_requerida=? WHERE id=? AND surtido=0";
+    const params = actualizarPrecio
+      ? [cantidadRequerida, Number(precioUnitarioRaw), idItem]
+      : [cantidadRequerida, idItem];
+
+    bdInventario.run(sql, params, function () {
+      if (!this.changes) return res.status(404).json({ error: "Item no encontrado o ya surtido" });
+      transmitir({ tipo: "inventario_actualizado" });
+      res.json({ ok: true });
+    });
   });
 
   app.post("/recetas/ordenes-compra/items/:id/surtir", (req, res) => {

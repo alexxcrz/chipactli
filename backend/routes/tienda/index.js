@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { convertirCantidad } from "../../utils/index.js";
+import { transmitir } from "../../utils/index.js";
 
 const TIENDA_JWT_SECRET = process.env.TIENDA_JWT_SECRET || process.env.JWT_SECRET || "chipactli_tienda_jwt_secret";
 
@@ -125,13 +126,48 @@ const CONFIG_DEFAULT = {
   promo_texto: '💖 ¡Últimas horas! Llévate productos favoritos con promoción especial.',
   footer_marca_titulo: 'CHIPACTLI',
   footer_marca_texto: 'Formulamos productos artesanales para el cuidado personal de forma segura y consciente.',
+  atencion_horario_lunes_viernes: '09:00 a.m. - 06:00 p.m.',
+  atencion_horario_sabado: '09:00 a.m. - 02:00 p.m.',
   atencion_horario_lunes_sabado: '09:00 a.m. - 09:00 p.m.',
   atencion_horario_domingo: '08:00 a.m. - 12:00 p.m.',
-  atencion_telefono: '+52 55 2079 7407',
   atencion_correo: 'atc@chipactli.mx',
   whatsapp_numero: '',
+  social_facebook_url: '',
+  social_facebook_activo: '0',
+  social_instagram_url: '',
+  social_instagram_activo: '0',
+  social_tiktok_url: '',
+  social_tiktok_activo: '0',
+  social_youtube_url: '',
+  social_youtube_activo: '0',
+  social_x_url: '',
+  social_x_activo: '0',
+  social_linkedin_url: '',
+  social_linkedin_activo: '0',
   footer_pagos_texto: 'VISA · MasterCard · PayPal · AMEX · OXXO'
 };
+
+async function obtenerResumenResenas(bdVentas) {
+  const rows = await dbAll(
+    bdVentas,
+    `SELECT receta_nombre,
+            COUNT(*) AS total,
+            ROUND(AVG(COALESCE(calificacion, 0)), 2) AS promedio
+     FROM tienda_resenas
+     GROUP BY receta_nombre`
+  );
+
+  const mapa = new Map();
+  for (const row of rows || []) {
+    const receta = String(row?.receta_nombre || '').trim();
+    if (!receta) continue;
+    mapa.set(receta, {
+      total: Number(row?.total) || 0,
+      promedio: Number(row?.promedio) || 0
+    });
+  }
+  return mapa;
+}
 
 async function obtenerConfigTienda(bdVentas) {
   const rows = await dbAll(bdVentas, 'SELECT clave, valor FROM tienda_config');
@@ -274,6 +310,8 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     (catalogoRows || []).map((row) => [String(row?.receta_nombre || '').trim(), row])
   );
 
+  const mapaResenas = await obtenerResumenResenas(bdVentas);
+
   const salidaFlat = [];
   for (const receta of recetas) {
     const nombreReceta = String(receta?.nombre || "").trim();
@@ -322,6 +360,8 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       es_favorito: Number(catalogo?.es_favorito) === 1,
       es_oferta: Number(catalogo?.es_oferta) === 1,
       es_accesorio: Number(catalogo?.es_accesorio) === 1,
+      resenas_total: Number(mapaResenas.get(nombreReceta)?.total) || 0,
+      resenas_promedio: Number(mapaResenas.get(nombreReceta)?.promedio) || 0,
       ultima_produccion: prod?.ultima_produccion || null
     });
   }
@@ -360,6 +400,8 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
         es_favorito: catalogoBase ? Number(catalogoBase?.es_favorito) === 1 : Boolean(item.es_favorito),
         es_oferta: catalogoBase ? Number(catalogoBase?.es_oferta) === 1 : Boolean(item.es_oferta),
         es_accesorio: catalogoBase ? Number(catalogoBase?.es_accesorio) === 1 : Boolean(item.es_accesorio),
+        resenas_total: Number(mapaResenas.get(base)?.total) || 0,
+        resenas_promedio: Number(mapaResenas.get(base)?.promedio) || 0,
         ultima_produccion: item.ultima_produccion || null
       });
     }
@@ -449,7 +491,7 @@ async function crearPreferenciaMercadoPago({ orden, items }) {
 
   const body = {
     items: items.map((item) => ({
-      title: String(item.nombre_receta || "Producto"),
+      title: String(item.descripcion_mp || `${String(item.categoria_nombre || '').trim()} - ${String(item.nombre_receta || 'Producto').trim()}`).replace(/^\s*-\s*/, '').trim() || String(item.nombre_receta || "Producto"),
       quantity: Number(item.cantidad) || 1,
       unit_price: Number(item.precio_unitario) || 0,
       currency_id: "MXN"
@@ -487,6 +529,102 @@ async function crearPreferenciaMercadoPago({ orden, items }) {
     id: data?.id || "",
     init_point: data?.init_point || "",
     sandbox_init_point: data?.sandbox_init_point || ""
+  };
+}
+
+async function registrarRecuperacionVenta(bdInventario, { fechaVenta, costoProduccion, ganancia }) {
+  await dbRun(
+    bdInventario,
+    "INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)",
+    [fechaVenta, Number(costoProduccion) || 0]
+  );
+
+  const inv = await dbGet(
+    bdInventario,
+    "SELECT COALESCE(SUM(costo_total),0) as inversion_total FROM inventario"
+  );
+  const rec = await dbGet(
+    bdInventario,
+    "SELECT COALESCE(SUM(costo_recuperado),0) as inversion_recuperada FROM inversion_recuperada"
+  );
+
+  const inversionTotal = Number(inv?.inversion_total) || 0;
+  const inversionRecuperada = Number(rec?.inversion_recuperada) || 0;
+  if (inversionRecuperada >= inversionTotal && (Number(ganancia) || 0) > 0) {
+    await dbRun(
+      bdInventario,
+      "INSERT INTO recuperado_utensilios (fecha_recuperado, monto_recuperado) VALUES (?,?)",
+      [fechaVenta, Number(ganancia) || 0]
+    );
+    transmitir({ tipo: "utensilios_actualizado" });
+  }
+}
+
+async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventario, { nombreReceta, cantidadSolicitada, numeroPedido }) {
+  let restante = Number(cantidadSolicitada) || 0;
+  if (restante <= 0) return { cantidadVendida: 0, cantidadPendiente: 0 };
+
+  const lotes = await dbAll(
+    bdProduccion,
+    `SELECT id, cantidad, fecha_produccion, costo_produccion, precio_venta
+     FROM produccion
+     WHERE nombre_receta = ? AND COALESCE(cantidad, 0) > 0
+     ORDER BY datetime(COALESCE(fecha_produccion, '1970-01-01T00:00:00Z')) ASC, id ASC`,
+    [nombreReceta]
+  );
+
+  let cantidadVendida = 0;
+  const fechaVenta = new Date().toISOString();
+
+  for (const lote of lotes) {
+    if (restante <= 0) break;
+
+    const loteCantidad = Number(lote?.cantidad) || 0;
+    if (loteCantidad <= 0) continue;
+
+    const aVender = Math.min(restante, loteCantidad);
+    if (aVender <= 0) continue;
+
+    const costoTotalLote = Number(lote?.costo_produccion) || 0;
+    const costoUnitario = loteCantidad > 0 ? (costoTotalLote / loteCantidad) : 0;
+    const costoVenta = costoUnitario * aVender;
+    const precioVenta = Number(lote?.precio_venta) || 0;
+    const ganancia = (precioVenta * aVender) - costoVenta;
+
+    await dbRun(
+      bdVentas,
+      `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [nombreReceta, aVender, lote?.fecha_produccion || fechaVenta, fechaVenta, costoVenta, precioVenta, ganancia, numeroPedido || ""]
+    );
+
+    await registrarRecuperacionVenta(bdInventario, { fechaVenta, costoProduccion: costoVenta, ganancia });
+
+    const restanteLote = loteCantidad - aVender;
+    if (restanteLote <= 0) {
+      await dbRun(bdProduccion, "DELETE FROM produccion_descuentos WHERE id_produccion = ?", [lote.id]);
+      await dbRun(bdProduccion, "DELETE FROM produccion WHERE id = ?", [lote.id]);
+    } else {
+      const factorRestante = restanteLote / loteCantidad;
+      await dbRun(
+        bdProduccion,
+        "UPDATE produccion SET cantidad = ?, costo_produccion = ? WHERE id = ?",
+        [restanteLote, costoUnitario * restanteLote, lote.id]
+      );
+      await dbRun(
+        bdProduccion,
+        "UPDATE produccion_descuentos SET cantidad_descuento = cantidad_descuento * ? WHERE id_produccion = ?",
+        [factorRestante, lote.id]
+      );
+    }
+
+    restante -= aVender;
+    cantidadVendida += aVender;
+  }
+
+  return {
+    cantidadVendida,
+    cantidadPendiente: Math.max(0, restante)
   };
 }
 
@@ -653,6 +791,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       );
 
       if (!resultado.changes) return res.status(404).json({ error: "Orden no encontrada" });
+      transmitir({ tipo: 'tienda_orden_actualizada', id_orden: id, estado });
+      transmitir({ tipo: 'ventas_actualizado' });
       res.json({ ok: true });
     } catch {
       res.status(500).json({ error: "No se pudo actualizar estado" });
@@ -801,6 +941,89 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
+  app.get('/tienda/resenas', async (req, res) => {
+    try {
+      const recetaNombre = String(req.query?.receta_nombre || '').trim();
+      if (!recetaNombre) {
+        return res.status(400).json({ error: 'receta_nombre es obligatorio' });
+      }
+
+      const resenas = await dbAll(
+        bdVentas,
+        `SELECT id, receta_nombre, nombre_cliente, calificacion, comentario, creado_en
+         FROM tienda_resenas
+         WHERE receta_nombre = ?
+         ORDER BY id DESC
+         LIMIT 100`,
+        [recetaNombre]
+      );
+
+      const resumen = await dbGet(
+        bdVentas,
+        `SELECT COUNT(*) AS total, ROUND(AVG(COALESCE(calificacion, 0)), 2) AS promedio
+         FROM tienda_resenas
+         WHERE receta_nombre = ?`,
+        [recetaNombre]
+      );
+
+      return res.json({
+        receta_nombre: recetaNombre,
+        resumen: {
+          total: Number(resumen?.total) || 0,
+          promedio: Number(resumen?.promedio) || 0
+        },
+        resenas: resenas || []
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudieron cargar las reseñas' });
+    }
+  });
+
+  app.post('/tienda/resenas', authCliente, async (req, res) => {
+    try {
+      const recetaNombre = String(req.body?.receta_nombre || '').trim();
+      const comentario = String(req.body?.comentario || '').trim();
+      const calificacion = Math.round(Number(req.body?.calificacion) || 0);
+
+      if (!recetaNombre) return res.status(400).json({ error: 'receta_nombre es obligatorio' });
+      if (calificacion < 1 || calificacion > 5) return res.status(400).json({ error: 'La calificación debe ser entre 1 y 5' });
+      if (comentario.length < 3) return res.status(400).json({ error: 'Comentario demasiado corto' });
+
+      const cliente = await dbGet(
+        bdVentas,
+        'SELECT id, nombre FROM tienda_clientes WHERE id = ?',
+        [req.cliente.id]
+      );
+      if (!cliente) return res.status(401).json({ error: 'Cliente inválido' });
+
+      const insert = await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_resenas (receta_nombre, id_cliente, nombre_cliente, calificacion, comentario, creado_en)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [recetaNombre, cliente.id, String(cliente?.nombre || '').trim() || 'Cliente', calificacion, comentario]
+      );
+
+      const resumen = await dbGet(
+        bdVentas,
+        `SELECT COUNT(*) AS total, ROUND(AVG(COALESCE(calificacion, 0)), 2) AS promedio
+         FROM tienda_resenas
+         WHERE receta_nombre = ?`,
+        [recetaNombre]
+      );
+
+      return res.json({
+        ok: true,
+        id: insert.lastID,
+        resumen: {
+          total: Number(resumen?.total) || 0,
+          promedio: Number(resumen?.promedio) || 0
+        }
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo guardar la reseña' });
+    }
+  });
+
   app.get("/tienda/catalogo", async (req, res) => {
     try {
       const rows = await dbAll(
@@ -904,6 +1127,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
       const itemsFinales = [];
       let total = 0;
+      const mapaStockTemporal = new Map();
 
       for (const item of items) {
         const nombreReceta = String(item?.nombre_receta || "").trim();
@@ -915,13 +1139,23 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           return res.status(400).json({ error: `Producto no disponible: ${nombreReceta}` });
         }
 
+        const stockDisponibleInicial = Number(producto.stock) || 0;
+        const stockDisponibleTemporal = mapaStockTemporal.has(nombreReceta)
+          ? Number(mapaStockTemporal.get(nombreReceta)) || 0
+          : stockDisponibleInicial;
+        const cantidadAutoVenta = Math.max(0, Math.min(stockDisponibleTemporal, cantidad));
+        mapaStockTemporal.set(nombreReceta, Math.max(0, stockDisponibleTemporal - cantidadAutoVenta));
+
         const precioUnitario = Number(producto.precio_venta) || 0;
         const subtotal = precioUnitario * cantidad;
         total += subtotal;
 
         itemsFinales.push({
           nombre_receta: nombreReceta,
+          categoria_nombre: String(producto?.categoria_nombre || item?.categoria_nombre || '').trim(),
+          descripcion_mp: String(item?.descripcion_mp || '').trim(),
           cantidad,
+          cantidad_auto_venta: cantidadAutoVenta,
           precio_unitario: precioUnitario,
           subtotal,
           variante
@@ -980,6 +1214,25 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         );
       }
 
+      let cantidadAutoVendida = 0;
+      for (const item of itemsFinales) {
+        const cantidadSolicitada = Number(item?.cantidad_auto_venta) || 0;
+        if (cantidadSolicitada <= 0) continue;
+
+        const mov = await pasarProduccionAVentasPorPedido(
+          bdProduccion,
+          bdVentas,
+          bdInventario,
+          {
+            nombreReceta: item.nombre_receta,
+            cantidadSolicitada,
+            numeroPedido: folio
+          }
+        );
+
+        cantidadAutoVendida += Number(mov?.cantidadVendida) || 0;
+      }
+
       let checkout = null;
       if (metodoPago.toLowerCase() === "mercado_pago") {
         const preferencia = await crearPreferenciaMercadoPago({ orden: { folio, id: insertOrden.lastID }, items: itemsFinales });
@@ -999,6 +1252,19 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           checkout = { proveedor: "mercado_pago", error: preferencia.mensaje || "No disponible" };
         }
       }
+
+      transmitir({
+        tipo: 'tienda_orden_nueva',
+        id_orden: insertOrden.lastID,
+        folio,
+        total,
+        cliente: cliente.nombre,
+        metodo_pago: metodoPago
+      });
+      if (cantidadAutoVendida > 0) {
+        transmitir({ tipo: 'produccion_actualizado' });
+      }
+      transmitir({ tipo: 'ventas_actualizado' });
 
       res.json({
         ok: true,

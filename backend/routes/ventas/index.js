@@ -1,16 +1,40 @@
 import { transmitir } from "../../utils/index.js";
 
 export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas) {
+  const PREFIJO_VENTA = 'VECHI';
+
+  const generarNumeroVenta = (callback) => {
+    bdVentas.get(
+      `SELECT numero_pedido
+       FROM ventas
+       WHERE numero_pedido LIKE ?
+       ORDER BY numero_pedido DESC
+       LIMIT 1`,
+      [`${PREFIJO_VENTA}%`],
+      (err, row) => {
+        if (err) {
+          callback(`${PREFIJO_VENTA}000001`);
+          return;
+        }
+        const actual = String(row?.numero_pedido || '').trim();
+        const match = actual.match(/^VECHI(\d+)$/);
+        const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
+        callback(`${PREFIJO_VENTA}${String(consecutivo).padStart(6, '0')}`);
+      }
+    );
+  };
+
   app.post("/ventas", (req, res) => {
-    const { nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta, id_produccion, numero_pedido } = req.body;
+    const { nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta, id_produccion } = req.body;
     const ganancia = (precio_venta * cantidad) - costo_produccion;
     const fechaNow = new Date().toISOString();
 
-    bdVentas.run(
-      `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
-       VALUES (?,?,?,?,?,?,?,?)`,
-      [nombre_receta, cantidad, fecha_produccion, fechaNow, costo_produccion, precio_venta, ganancia, numero_pedido || ""],
-      (err) => {
+    generarNumeroVenta((numeroVenta) => {
+      bdVentas.run(
+        `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [nombre_receta, cantidad, fecha_produccion, fechaNow, costo_produccion, precio_venta, ganancia, numeroVenta],
+        (err) => {
         if (err) return res.status(500).json({ error: "Error venta" });
 
         const finalizar = () => {
@@ -56,8 +80,9 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
         } else {
           finalizar();
         }
-      }
-    );
+        }
+      );
+    });
   });
 
   app.get("/ventas", (req, res) => {

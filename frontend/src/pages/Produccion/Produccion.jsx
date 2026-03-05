@@ -55,7 +55,7 @@ export default function Produccion() {
           </div>
           <form onSubmit={confirmarVentaPedido} className="cajaFormulario">
             <label htmlFor="numeroPedidoVenta">Número de pedido</label>
-            <input id="numeroPedidoVenta" type="text" required />
+            <input id="numeroPedidoVenta" type="text" placeholder="Opcional, si se deja vacío se genera VECHI..." />
             <button className="boton botonExito" type="submit">Confirmar</button>
           </form>
         </div>
@@ -198,10 +198,6 @@ async function confirmarVentaPedido(event) {
   if (event) event.preventDefault();
   if (!ventaPendiente) return;
   const numeroPedido = document.getElementById('numeroPedidoVenta')?.value.trim();
-  if (!numeroPedido) {
-    mostrarNotificacion('Por favor ingresa el numero de pedido', 'error');
-    return;
-  }
   cerrarModal('modalVentaPedido');
   const { idProduccion, nombreReceta, cantidad, costoProduccion, precioVenta } = ventaPendiente;
   ventaPendiente = null;

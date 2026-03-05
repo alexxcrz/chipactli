@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Eczar:wght@400;500;600;700;800&display=swap');
+
 :root{
   --bg: #f6f2eb;
   --bg-secondary: #f0eadf;
@@ -16,6 +18,7 @@
   --border-color: #d4ccc0;
   --card-bg: #ffffff;
   --header-bg: #f5f1e8;
+  --font-main: 'Eczar', Georgia, serif;
 }
 
 /* Header Card fijo (flag visible en la cabecera principal) */
@@ -151,7 +154,14 @@
   top: -8px;
   right: -8px;
 }
-*{box-sizing:border-box;font-family: Inter, system-ui, Arial, sans-serif}
+*{box-sizing:border-box;font-family:var(--font-main)}
+
+h1, h2, h3, h4, h5, h6,
+.tituloEncabezado,
+.encabezadoModal h3,
+.tiendaBrand {
+  font-family: var(--font-main);
+}
 html,body,#root{height:100%;margin:0}
 .app{
   background-color: var(--bg);
@@ -694,6 +704,33 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   border-radius: 12px;
 }
 
+#formularioReceta .recetaFilaInsumo,
+#modalEditarReceta .recetaFilaInsumo {
+  display: grid;
+  grid-template-columns: minmax(320px, 2.4fr) minmax(110px, 0.8fr) minmax(140px, 1fr) minmax(180px, 1.1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+#formularioReceta .recetaFilaDatosPrincipales,
+#modalEditarReceta .recetaFilaDatosPrincipales {
+  display: grid;
+  grid-template-columns: minmax(260px, 2.2fr) minmax(170px, 1.2fr) minmax(130px, 0.8fr);
+  gap: 8px;
+  align-items: center;
+}
+
+#formularioReceta .recetaBusquedaInsumoWrap,
+#modalEditarReceta .recetaBusquedaInsumoWrap {
+  position: relative;
+}
+
+#insumoSeleccionado,
+#editInsumoSeleccionado {
+  font-size: 15px;
+  padding: 12px 14px;
+}
+
 #listaBusquedaInsumos,
 #editListaBusquedaInsumos {
   border: 2px solid #2a2a2a;
@@ -703,6 +740,11 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   max-height: 190px;
   overflow-y: auto;
   box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 20;
 }
 
 #tablaIngredientesTemporales td,
@@ -925,6 +967,22 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   #modalAumentarInsumo .filaAumentarInsumo input:first-child { grid-column: 1 / -1; }
   #modalAumentarInsumo .accionesAumentarInsumo { justify-content: stretch; }
   #modalAumentarInsumo .accionesAumentarInsumo .boton { flex: 1; min-width: 0; }
+  #formularioReceta .recetaFilaInsumo,
+  #formularioReceta .recetaFilaDatosPrincipales,
+  #modalEditarReceta .recetaFilaInsumo {
+    grid-template-columns: 1fr 1fr;
+  }
+  #modalEditarReceta .recetaFilaDatosPrincipales {
+    grid-template-columns: 1fr;
+  }
+  #formularioReceta .recetaBusquedaInsumoWrap,
+  #modalEditarReceta .recetaBusquedaInsumoWrap,
+  #formularioReceta .recetaFilaInsumo .boton,
+  #modalEditarReceta .recetaFilaInsumo .boton,
+  #formularioReceta .recetaFilaInsumo input[type='text']:last-of-type,
+  #modalEditarReceta .recetaFilaInsumo input[type='text']:last-of-type {
+    grid-column: 1 / -1;
+  }
   .grupoFormulario input, .grupoFormulario select { font-size:16px; padding:13px; border-radius:16px; }
   
   /* Search */

@@ -18,6 +18,11 @@ let proveedoresCatalogo = [];
 let proveedoresMaestros = [];
 let proveedorPendienteEliminar = null;
 let usoProveedorPendiente = { inventario: 0, utensilios: 0, total: 0 };
+let ordenesCompraCache = [];
+let modalEditarItemOrdenId = null;
+let modalSurtirItemOrdenId = null;
+let colaSurtidoOrden = [];
+let indiceProveedorRapidoOrden = null;
 const CLAVE_ULTIMO_PROVEEDOR_INSUMO = 'chipactli:ultimoProveedorInsumo';
 
 function texto(a) {
@@ -406,14 +411,25 @@ function actualizarProveedorItem(index, proveedor) {
 }
 
 function agregarProveedorRapido(index = null) {
-  const capt = window.prompt('Nombre del proveedor');
-  const prov = texto(capt).trim();
-  if (!prov) return;
+  indiceProveedorRapidoOrden = Number.isInteger(index) ? index : null;
+  const input = document.getElementById('inputProveedorRapidoOrden');
+  if (input) input.value = '';
+  abrirModal('modalProveedorRapidoOrden');
+}
+
+function confirmarProveedorRapidoOrden(event) {
+  if (event) event.preventDefault();
+  const prov = texto(document.getElementById('inputProveedorRapidoOrden')?.value).trim();
+  if (!prov) {
+    mostrarNotificacion('Ingresa el nombre del proveedor', 'error');
+    return;
+  }
+
   if (!proveedoresCatalogo.includes(prov)) proveedoresCatalogo.push(prov);
   proveedoresCatalogo.sort(cmpTexto);
 
-  if (Number.isInteger(index) && index >= 0 && index < itemsOrdenTemporal.length) {
-    itemsOrdenTemporal[index].proveedor = prov;
+  if (Number.isInteger(indiceProveedorRapidoOrden) && indiceProveedorRapidoOrden >= 0 && indiceProveedorRapidoOrden < itemsOrdenTemporal.length) {
+    itemsOrdenTemporal[indiceProveedorRapidoOrden].proveedor = prov;
     renderItemsTemporales();
   }
 
@@ -422,6 +438,9 @@ function agregarProveedorRapido(index = null) {
     select.innerHTML = renderOpcionesProveedor(prov);
     select.value = prov;
   }
+
+  indiceProveedorRapidoOrden = null;
+  cerrarModal('modalProveedorRapidoOrden');
 }
 
 function renderItemsTemporales() {
@@ -507,6 +526,34 @@ function busquedaOrdenesActual() {
   return normalizarTextoBusqueda(document.getElementById('buscarOrdenesGeneral')?.value || '');
 }
 
+async function eliminarOrdenCompra(idOrden, numeroOrden = '') {
+  const id = Number(idOrden);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  const ok = await mostrarConfirmacion(
+    `Se eliminará la orden ${texto(numeroOrden || '').trim() || `#${id}`}. Esta acción no se puede deshacer.`,
+    'Eliminar orden de compra'
+  );
+  if (!ok) return;
+
+  try {
+    await fetchAPIJSON(`${API}/recetas/ordenes-compra/${id}`, { method: 'DELETE' });
+    mostrarNotificacion('Orden eliminada correctamente', 'exito');
+    await Promise.all([cargarOrdenesRegistradas(), cargarHistorialOrdenesSurtidas(), cargarListaInsumosOrdenes()]);
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'No se pudo eliminar la orden', 'error');
+  }
+}
+
+function buscarItemOrdenPorId(idItem) {
+  const id = Number(idItem);
+  for (const orden of ordenesCompraCache) {
+    const item = (orden.items || []).find((it) => Number(it?.id) === id);
+    if (item) return { item, orden };
+  }
+  return { item: null, orden: null };
+}
+
 async function cargarOrdenes(targetId = 'listaOrdenes', filtro = 'creadas') {
   const cont = document.getElementById(targetId);
   if (!cont) return;
@@ -526,6 +573,10 @@ async function cargarOrdenes(targetId = 'listaOrdenes', filtro = 'creadas') {
       })
       .sort((a, b) => new Date(b?.fecha_creacion || 0).getTime() - new Date(a?.fecha_creacion || 0).getTime())
       .sort((a, b) => cmpTexto(a.proveedor, b.proveedor));
+
+    if (filtro === 'creadas') {
+      ordenesCompraCache = ordenes;
+    }
 
     const filtradas = !busqueda
       ? ordenes
@@ -553,7 +604,13 @@ async function cargarOrdenes(targetId = 'listaOrdenes', filtro = 'creadas') {
             <span>${escapeHtml(orden.proveedor)}</span>
             <span>${orden.fecha_creacion ? new Date(orden.fecha_creacion).toLocaleString() : ''}</span>
           </div>
-          <div style="display:flex;justify-content:flex-end;margin-bottom:6px">${estadoHtml}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+            <div>${estadoHtml}</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              ${estado !== 'surtida' ? `<button class="botonPequeno botonExito" type="button" onclick="window.inventario.surtirOrdenCompleta(${Number(orden?.id || 0)})">✅ Surtir todo</button>` : ''}
+              <button class="botonPequeno botonDanger" type="button" onclick="window.inventario.eliminarOrdenCompra(${Number(orden?.id || 0)}, '${escapeHtml(texto(orden?.numero_orden || '').replaceAll('\\', '\\\\').replaceAll("'", "\\'"))}')">🗑️ Eliminar</button>
+            </div>
+          </div>
           <ul>${(orden.items || []).map((item) => renderItemOrdenConAcciones(item)).join('') || '<li>Sin insumos</li>'}</ul>
         </div>
       `;
@@ -575,24 +632,50 @@ async function cargarHistorialOrdenesSurtidas() {
 async function editarItemOrden(idItem) {
   const id = Number(idItem);
   if (!Number.isFinite(id) || id <= 0) return;
-  const cantidad = Number(window.prompt('Nueva cantidad requerida', '1'));
+  const { item } = buscarItemOrdenPorId(id);
+  if (!item) {
+    mostrarNotificacion('No se encontró el ítem a editar', 'error');
+    return;
+  }
+
+  modalEditarItemOrdenId = id;
+  const inputCantidad = document.getElementById('editOcCantidadRequerida');
+  const inputPrecio = document.getElementById('editOcPrecioUnitario');
+  const txtNombre = document.getElementById('editOcNombreItem');
+  if (inputCantidad) inputCantidad.value = Number(item?.cantidad_requerida || 0).toFixed(2);
+  if (inputPrecio) inputPrecio.value = Number(item?.precio_unitario || 0).toFixed(2);
+  if (txtNombre) txtNombre.textContent = `${texto(item?.nombre)} (${abrevUnidad(item?.unidad || '')})`;
+  abrirModal('modalEditarItemOrdenCompra');
+}
+
+async function confirmarEditarItemOrden(event) {
+  if (event) event.preventDefault();
+  const id = Number(modalEditarItemOrdenId);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  const cantidad = Number(document.getElementById('editOcCantidadRequerida')?.value || 0);
+  const precio = Number(document.getElementById('editOcPrecioUnitario')?.value || 0);
   if (!Number.isFinite(cantidad) || cantidad <= 0) {
     mostrarNotificacion('Cantidad inválida', 'error');
     return;
   }
-  const precioTxt = window.prompt('Precio unitario (opcional, deja vacío para conservar)', '');
-  const precio = precioTxt === null || texto(precioTxt).trim() === '' ? null : Number(precioTxt);
+  if (!Number.isFinite(precio) || precio < 0) {
+    mostrarNotificacion('Precio unitario inválido', 'error');
+    return;
+  }
 
   try {
     await fetchAPIJSON(`${API}/recetas/ordenes-compra/items/${id}/cantidad`, {
       method: 'PATCH',
       body: {
         cantidad_requerida: cantidad,
-        precio_unitario: Number.isFinite(precio) && precio >= 0 ? precio : undefined
+        precio_unitario: precio
       }
     });
+    cerrarModal('modalEditarItemOrdenCompra');
+    modalEditarItemOrdenId = null;
     mostrarNotificacion('Ítem actualizado', 'exito');
-    await Promise.all([cargarOrdenesRegistradas(), cargarHistorialOrdenesSurtidas()]);
+    await Promise.all([cargarOrdenesRegistradas(), cargarHistorialOrdenesSurtidas(), cargarListaInsumosOrdenes()]);
   } catch (error) {
     mostrarNotificacion(error?.message || 'No se pudo actualizar el ítem', 'error');
   }
@@ -602,19 +685,109 @@ async function surtirItemOrden(idItem) {
   const id = Number(idItem);
   if (!Number.isFinite(id) || id <= 0) return;
 
-  const cantidad = Number(window.prompt('Cantidad a surtir', '1'));
-  if (!Number.isFinite(cantidad) || cantidad <= 0) {
-    mostrarNotificacion('Cantidad inválida', 'error');
+  prepararModalSurtidoItem(id, false);
+}
+
+function prepararModalSurtidoItem(idItem, desdeLote = false) {
+  const { item, orden } = buscarItemOrdenPorId(idItem);
+  if (!item) {
+    mostrarNotificacion('No se encontró el ítem para surtir', 'error');
     return;
   }
 
-  const costo = Number(window.prompt('Costo total surtido', '0'));
+  const requerido = Number(item?.cantidad_requerida || 0);
+  const surtida = Number(item?.cantidad_surtida || 0);
+  const faltante = Math.max(0, requerido - surtida);
+  const precioUnitario = Number(item?.precio_unitario || 0);
+
+  if (faltante <= 0 || Number(item?.surtido || 0) === 1) {
+    mostrarNotificacion('Este ítem ya está surtido', 'advertencia');
+    return;
+  }
+
+  modalSurtirItemOrdenId = Number(idItem);
+
+  const txtTitulo = document.getElementById('surtirOcTitulo');
+  const txtSub = document.getElementById('surtirOcSubtitulo');
+  const inputCant = document.getElementById('surtirOcCantidad');
+  const inputCosto = document.getElementById('surtirOcCostoTotal');
+  const radioCompleto = document.getElementById('surtirOcModoCompleto');
+  const radioOtro = document.getElementById('surtirOcModoOtro');
+  const bloqueCantidad = document.getElementById('surtirOcBloqueCantidad');
+  const txtLote = document.getElementById('surtirOcEstadoLote');
+
+  if (txtTitulo) txtTitulo.textContent = `${texto(item?.nombre)} (${abrevUnidad(item?.unidad || '')})`;
+  if (txtSub) txtSub.textContent = `Orden: ${texto(orden?.numero_orden)} | Faltante: ${faltante.toFixed(2)}`;
+  if (inputCant) inputCant.value = faltante.toFixed(2);
+  if (inputCosto) inputCosto.value = Math.max(0, precioUnitario * faltante).toFixed(2);
+  if (radioCompleto) radioCompleto.checked = true;
+  if (radioOtro) radioOtro.checked = false;
+  if (bloqueCantidad) bloqueCantidad.style.display = 'none';
+
+  if (txtLote) {
+    txtLote.textContent = desdeLote && colaSurtidoOrden.length
+      ? `Surtido por lote: faltan ${colaSurtidoOrden.length} producto(s) después de este`
+      : '';
+  }
+
+  abrirModal('modalSurtirItemOrdenCompra');
+}
+
+function cambiarModoCantidadSurtido() {
+  const radioOtro = document.getElementById('surtirOcModoOtro');
+  const bloqueCantidad = document.getElementById('surtirOcBloqueCantidad');
+  if (!bloqueCantidad) return;
+  bloqueCantidad.style.display = radioOtro?.checked ? '' : 'none';
+}
+
+function cerrarModalEditarItemOrden() {
+  modalEditarItemOrdenId = null;
+  cerrarModal('modalEditarItemOrdenCompra');
+}
+
+function cancelarSurtirItemOrden() {
+  modalSurtirItemOrdenId = null;
+  colaSurtidoOrden = [];
+  cerrarModal('modalSurtirItemOrdenCompra');
+}
+
+async function confirmarSurtirItemOrden(event) {
+  if (event) event.preventDefault();
+  const id = Number(modalSurtirItemOrdenId);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  const { item } = buscarItemOrdenPorId(id);
+  if (!item) {
+    mostrarNotificacion('No se encontró el ítem para surtir', 'error');
+    return;
+  }
+
+  const requerido = Number(item?.cantidad_requerida || 0);
+  const surtida = Number(item?.cantidad_surtida || 0);
+  const faltante = Math.max(0, requerido - surtida);
+  const radioOtro = document.getElementById('surtirOcModoOtro');
+  const inputCant = document.getElementById('surtirOcCantidad');
+  const inputCosto = document.getElementById('surtirOcCostoTotal');
+
+  let cantidad = faltante;
+  if (radioOtro?.checked) {
+    cantidad = Number(inputCant?.value || 0);
+  }
+  if (!Number.isFinite(cantidad) || cantidad <= 0 || cantidad > faltante) {
+    mostrarNotificacion(`Cantidad inválida. Debe ser mayor a 0 y menor o igual a ${faltante.toFixed(2)}`, 'error');
+    return;
+  }
+
+  const costo = Number(inputCosto?.value || 0);
   if (!Number.isFinite(costo) || costo < 0) {
     mostrarNotificacion('Costo inválido', 'error');
     return;
   }
 
-  const ok = await mostrarConfirmacion('Se actualizará inventario y se guardará historial de surtido.', 'Confirmar surtido');
+  const ok = await mostrarConfirmacion(
+    'Se actualizará inventario y se guardará historial de surtido.',
+    'Confirmar surtido'
+  );
   if (!ok) return;
 
   try {
@@ -622,10 +795,52 @@ async function surtirItemOrden(idItem) {
       method: 'POST',
       body: { cantidad_surtida: cantidad, costo_total: costo }
     });
+    cerrarModal('modalSurtirItemOrdenCompra');
+    modalSurtirItemOrdenId = null;
     mostrarNotificacion('Surtido aplicado y registrado en historial', 'exito');
     await Promise.all([cargarOrdenesRegistradas(), cargarHistorialOrdenesSurtidas(), cargarInventario(), cargarEstadisticasInventario(), cargarListaInsumosOrdenes()]);
+
+    if (colaSurtidoOrden.length) {
+      const siguiente = colaSurtidoOrden.shift();
+      if (Number.isFinite(Number(siguiente))) {
+        prepararModalSurtidoItem(Number(siguiente), true);
+      }
+    }
   } catch (error) {
     mostrarNotificacion(error?.message || 'No se pudo surtir el ítem', 'error');
+  }
+}
+
+async function surtirOrdenCompleta(idOrden) {
+  const id = Number(idOrden);
+  if (!Number.isFinite(id) || id <= 0) return;
+
+  const orden = ordenesCompraCache.find((o) => Number(o?.id) === id);
+  if (!orden) {
+    mostrarNotificacion('No se encontró la orden seleccionada', 'error');
+    return;
+  }
+
+  const pendientes = (orden.items || [])
+    .filter((item) => Number(item?.surtido || 0) !== 1)
+    .map((item) => Number(item?.id))
+    .filter((itemId) => Number.isFinite(itemId) && itemId > 0);
+
+  if (!pendientes.length) {
+    mostrarNotificacion('La orden ya está completamente surtida', 'advertencia');
+    return;
+  }
+
+  const ok = await mostrarConfirmacion(
+    `Se abrirá un modal por producto para confirmar cantidad y costo (${pendientes.length} pendiente(s)).`,
+    `Surtir todo ${texto(orden?.numero_orden || '')}`
+  );
+  if (!ok) return;
+
+  colaSurtidoOrden = [...pendientes];
+  const primero = colaSurtidoOrden.shift();
+  if (Number.isFinite(Number(primero))) {
+    prepararModalSurtidoItem(Number(primero), true);
   }
 }
 
@@ -1125,8 +1340,10 @@ export default function Inventario() {
       agregarProveedorRapido,
       crearOrden,
       cargarOrdenes,
+      eliminarOrdenCompra,
       editarItemOrden,
       surtirItemOrden,
+      surtirOrdenCompleta,
       abrirModalProveedores,
       editarProveedor,
       guardarProveedor,
@@ -1360,6 +1577,82 @@ export default function Inventario() {
               <button className="boton botonExito" type="button" onClick={() => confirmarEliminarProveedorConReasignacion()}>Reasignar y eliminar</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="modalProveedorRapidoOrden" className="modal" onClick={() => cerrarModal('modalProveedorRapidoOrden')}>
+        <div className="contenidoModal" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3>Nuevo proveedor para orden</h3>
+            <button className="cerrarModal" onClick={() => cerrarModal('modalProveedorRapidoOrden')}>&times;</button>
+          </div>
+          <form className="cajaFormulario" onSubmit={confirmarProveedorRapidoOrden}>
+            <div className="filaFormulario">
+              <input id="inputProveedorRapidoOrden" type="text" placeholder="Nombre del proveedor" required />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="boton" type="button" onClick={() => cerrarModal('modalProveedorRapidoOrden')}>Cancelar</button>
+              <button className="boton botonExito" type="submit">Guardar proveedor</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="modalEditarItemOrdenCompra" className="modal" onClick={() => cerrarModalEditarItemOrden()}>
+        <div className="contenidoModal" style={{ maxWidth: '560px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3>Editar item de orden</h3>
+            <button className="cerrarModal" onClick={() => cerrarModalEditarItemOrden()}>&times;</button>
+          </div>
+          <form className="cajaFormulario" onSubmit={confirmarEditarItemOrden}>
+            <p id="editOcNombreItem" style={{ margin: '0 0 8px 0', color: '#555' }}></p>
+            <div className="filaFormulario" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <input id="editOcCantidadRequerida" type="number" min="0.01" step="0.01" placeholder="Cantidad requerida" required />
+              <input id="editOcPrecioUnitario" type="number" min="0" step="0.01" placeholder="Precio unitario" required />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="boton" type="button" onClick={() => cerrarModalEditarItemOrden()}>Cancelar</button>
+              <button className="boton botonExito" type="submit">Guardar cambios</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="modalSurtirItemOrdenCompra" className="modal" onClick={() => cancelarSurtirItemOrden()}>
+        <div className="contenidoModal" style={{ maxWidth: '580px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3>Surtir item de orden</h3>
+            <button className="cerrarModal" onClick={() => cancelarSurtirItemOrden()}>&times;</button>
+          </div>
+          <form className="cajaFormulario" onSubmit={confirmarSurtirItemOrden}>
+            <h4 id="surtirOcTitulo" style={{ margin: '0 0 6px 0' }}></h4>
+            <p id="surtirOcSubtitulo" style={{ margin: '0 0 6px 0', color: '#555' }}></p>
+            <p id="surtirOcEstadoLote" style={{ margin: '0 0 10px 0', color: '#666', fontSize: '12px' }}></p>
+
+            <div className="filaFormulario" style={{ display: 'grid', gap: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input id="surtirOcModoCompleto" name="surtirOcModo" type="radio" defaultChecked onChange={cambiarModoCantidadSurtido} />
+                Surtir cantidad faltante completa
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input id="surtirOcModoOtro" name="surtirOcModo" type="radio" onChange={cambiarModoCantidadSurtido} />
+                Surtir otra cantidad
+              </label>
+            </div>
+
+            <div id="surtirOcBloqueCantidad" className="filaFormulario" style={{ display: 'none' }}>
+              <input id="surtirOcCantidad" type="number" min="0.01" step="0.01" placeholder="Cantidad a surtir" />
+            </div>
+
+            <div className="filaFormulario">
+              <input id="surtirOcCostoTotal" type="number" min="0" step="0.01" placeholder="Costo total de esta entrada" required />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="boton" type="button" onClick={() => cancelarSurtirItemOrden()}>Cancelar</button>
+              <button className="boton botonExito" type="submit">Aplicar surtido</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

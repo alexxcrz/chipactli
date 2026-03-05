@@ -20,6 +20,7 @@ import AdminUsuarios from '../admin-usuarios/AdminUsuarios.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 import { mostrarModalCambiarPassword } from '../modal-cambiar-password.jsx';
 import { inicializarCierreModalConEsc } from '../../utils/modales.jsx';
+import { conectarWebSocket, cerrarWebSocket } from '../../utils/websocket.jsx';
 
 const PERMISOS_POR_DEFECTO = {
   inventario: { ver: true, acciones: { ver: true } },
@@ -36,6 +37,7 @@ const MAPEO_PESTANA_PERMISO = {
   produccion: 'produccion',
   ventas: 'ventas',
   tienda: 'ventas',
+  trastienda: 'ventas',
   utensilios: 'utensilios',
   'admin-usuarios': 'admin_usuarios'
 };
@@ -129,6 +131,7 @@ export default function App() {
     produccion: '#/produccion',
     ventas: '#/ventas',
     tienda: '#/tienda',
+    trastienda: '#/trastienda',
     utensilios: '#/utensilios',
     'admin-usuarios': '#/admin-usuarios'
   };
@@ -401,6 +404,107 @@ export default function App() {
 
   React.useEffect(() => {
     if (!isAuthenticated) {
+      cerrarWebSocket();
+      return;
+    }
+
+    const estadoLegible = (estadoRaw) => {
+      const estado = String(estadoRaw || '').toLowerCase();
+      if (estado === 'pendiente') return 'pendiente';
+      if (estado === 'entregado') return 'entregado';
+      if (estado === 'cancelado') return 'cancelado';
+      return estado || 'actualizado';
+    };
+
+    const formatearMoneda = (valor) => {
+      const numero = Number(valor);
+      if (!Number.isFinite(numero)) return '';
+      return numero.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+    };
+
+    conectarWebSocket((evento) => {
+      const tipo = String(evento?.tipo || '');
+      if (!tipo) return;
+
+      if (tipo === 'tienda_orden_nueva') {
+        const folio = String(evento?.folio || '').trim();
+        const cliente = String(evento?.cliente || '').trim() || 'Cliente';
+        const metodo = String(evento?.metodo_pago || '').trim() || 'pago no definido';
+        const total = formatearMoneda(evento?.total);
+        const partes = [
+          folio ? `Nueva orden ${folio}` : 'Nueva orden en tienda',
+          `Cliente: ${cliente}`,
+          total ? `Total: ${total}` : null,
+          `Pago: ${metodo}`
+        ].filter(Boolean);
+        agregarAlerta(`tienda:nueva:${evento?.id_orden || Date.now()}`, partes.join(' · '), 'advertencia');
+        return;
+      }
+
+      if (tipo === 'orden_compra_nueva') {
+        const numero = String(evento?.numero_orden || '').trim();
+        const proveedor = String(evento?.proveedor || '').trim() || 'Sin proveedor';
+        const totalItems = Number(evento?.total_items) || 0;
+        agregarAlerta(
+          `orden-compra:nueva:${evento?.id_orden || Date.now()}`,
+          `${numero ? `Nueva orden de compra ${numero}` : 'Nueva orden de compra'} · Proveedor: ${proveedor} · Items: ${totalItems}`,
+          'advertencia'
+        );
+        return;
+      }
+
+      if (tipo === 'tienda_orden_actualizada') {
+        const idOrden = evento?.id_orden ? `#${evento.id_orden}` : '';
+        agregarAlerta(
+          `tienda:estado:${evento?.id_orden || Date.now()}`,
+          `Orden ${idOrden} marcada como ${estadoLegible(evento?.estado)}`.trim(),
+          'exito'
+        );
+        return;
+      }
+
+      if (tipo === 'inventario_actualizado') {
+        agregarAlerta('sistema:inventario', 'Inventario actualizado', 'advertencia');
+        return;
+      }
+
+      if (tipo === 'ventas_actualizado') {
+        agregarAlerta('sistema:ventas', 'Ventas actualizadas', '');
+        return;
+      }
+
+      if (tipo === 'produccion_actualizado') {
+        agregarAlerta('sistema:produccion', 'Producción actualizada', '');
+        return;
+      }
+
+      if (tipo === 'cortesias_actualizado') {
+        agregarAlerta('sistema:cortesias', 'Cortesías actualizadas', '');
+        return;
+      }
+
+      if (tipo === 'recetas_actualizado') {
+        agregarAlerta('sistema:recetas', 'Recetas actualizadas', '');
+        return;
+      }
+
+      if (tipo === 'categorias_actualizado') {
+        agregarAlerta('sistema:categorias', 'Categorías actualizadas', '');
+        return;
+      }
+
+      if (tipo === 'utensilios_actualizado') {
+        agregarAlerta('sistema:utensilios', 'Utensilios actualizados', '');
+      }
+    });
+
+    return () => {
+      cerrarWebSocket();
+    };
+  }, [isAuthenticated]);
+
+  React.useEffect(() => {
+    if (!isAuthenticated) {
       setProveedoresPendientes({ visible: false, cargando: false, guardandoClave: '', pendientes: [], drafts: {} });
       setFichasProveedorPendientes({ visible: false, cargando: false, guardandoClave: '', pendientes: [], drafts: {} });
       return;
@@ -507,7 +611,8 @@ export default function App() {
         { key: 'recetas', label: 'Recetas' },
         { key: 'produccion', label: 'Producción' },
         { key: 'ventas', label: 'Ventas' },
-        { key: 'tienda', label: 'Tienda' }
+        { key: 'tienda', label: 'Tienda' },
+        { key: 'trastienda', label: 'Trastienda' }
       ]
     },
     {
@@ -544,7 +649,8 @@ export default function App() {
     recetas: Recetas,
     produccion: Produccion,
     ventas: Ventas,
-    tienda: Tienda,
+    tienda: () => <Tienda modo="tienda" />,
+    trastienda: () => <Tienda modo="trastienda" />,
     utensilios: Utensilios,
     'admin-usuarios': AdminUsuarios
   };
@@ -586,17 +692,11 @@ export default function App() {
 
     return (
       <div className="app" style={{ minHeight: '100vh', padding: '20px' }} onContextMenu={abrirMenuTrastienda}>
-        <Tienda />
-
-        <button
-          type="button"
-          className="botonAccesoSistemaOculto"
-          onClick={registrarToqueLogo}
-          title="Acceso al sistema"
-          aria-label="Acceso al sistema"
-        >
-          <img src="/images/logo.png" alt="Acceso" className="logoAccesoSistemaOculto" />
-        </button>
+        <Tienda
+          modo="tienda"
+          mostrarLogoAccesoSistema
+          onClickLogoAccesoSistema={registrarToqueLogo}
+        />
 
         {menuContextoTrastienda.visible && (
           <div

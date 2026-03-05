@@ -5,6 +5,7 @@ import { mostrarConfirmacion } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
+import { fetchAPIJSON } from '../../utils/api.jsx';
 
 export default function Ventas() {
   useEffect(() => {
@@ -134,7 +135,7 @@ async function cargarVentas() {
         <td>$${Number(venta.costo_produccion || 0).toFixed(2)}</td>
         <td>$${(Number(venta.precio_venta || 0) * Number(venta.cantidad || 0)).toFixed(2)}</td>
         <td>$${Number(venta.ganancia || 0).toFixed(2)}</td>
-        <td><button onclick="window.ventas.eliminarVenta(${venta.id})" class="botonPequeno botonDanger">🗑️</button></td>
+        <td><button onclick="window.ventas.eliminarVenta(${venta.id})" class="botonPequeno botonDanger">🗑️ Eliminar</button></td>
       `;
       cuerpo.appendChild(fila);
     });
@@ -186,32 +187,21 @@ async function cargarCortesias() {
 }
 
 async function eliminarVenta(id) {
-  const motivo = prompt('¿Cuál es el motivo de la eliminación?');
-  if (!motivo || motivo.trim() === '') {
-    mostrarNotificacion('❌ Debes indicar un motivo', 'error');
-    return;
-  }
-
-  const ok = await mostrarConfirmacion('¿Confirmas eliminar esta venta?', 'Eliminar venta');
+  const ok = await mostrarConfirmacion('¿Confirmas eliminar esta venta? Esta acción no se puede deshacer.', 'Eliminar venta');
   if (!ok) return;
 
   try {
-    const respuesta = await fetch(`${API}/ventas/${id}`, {
+    await fetchAPIJSON(`${API}/ventas/${id}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ motivo })
+      body: {}
     });
 
-    if (respuesta.ok) {
-      mostrarNotificacion('✅ Venta eliminada exitosamente', 'exito');
-      cargarVentas();
-      cargarEstadisticasVentas(periodoVentaActual);
-    } else {
-      mostrarNotificacion('❌ Error al eliminar venta', 'error');
-    }
+    mostrarNotificacion('Venta eliminada exitosamente', 'exito');
+    cargarVentas();
+    cargarEstadisticasVentas(periodoVentaActual);
   } catch (error) {
     console.error('Error eliminando venta:', error);
-    mostrarNotificacion('❌ Error de conexión', 'error');
+    mostrarNotificacion(error?.message || 'Error al eliminar venta', 'error');
   }
 }
 

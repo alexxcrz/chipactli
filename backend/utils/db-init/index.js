@@ -560,15 +560,15 @@ export function inicializarBdAdmin(bdAdmin, bdInventario) {
                 return;
               }
 
-              const username = 'alecruz';
-              const passwordTemporal = 'Chipactli2026!';
-              const nombre = 'Alejandro Cruz';
-              const rol = 'ceo';
+              const username = String(process.env.MASTER_USERNAME || 'maestro').trim().toLowerCase();
+              const passwordTemporal = String(process.env.MASTER_PASSWORD || 'ChipactliMaster2026!');
+              const nombre = String(process.env.MASTER_NOMBRE || 'Usuario Maestro').trim() || 'Usuario Maestro';
+              const rol = 'maestro';
               bcrypt.hash(passwordTemporal, 10, (hashErr, hash) => {
                 if (hashErr) return;
                 bdAdmin.run(
-                  `INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, 1)`,
-                  [username, hash, nombre, rol, serializarPermisos(null, rol)]
+                  `INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, 0)`,
+                  [username, hash, nombre, rol, serializarPermisos(null, 'usuario')]
                 );
               });
             }

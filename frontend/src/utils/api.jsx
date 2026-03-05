@@ -47,8 +47,8 @@ export async function fetchAPIJSON(endpoint, options = {}) {
       error = null;
     }
     const mensajeError = error?.mensaje || error?.error || `Error HTTP ${respuesta.status}`;
-    const esLogin = /\/auth\/login$/i.test(endpoint);
-    if (respuesta.status === 401 && !esLogin) {
+    const esAuthPublico = /\/auth\/(login|configuracion-inicial)$/i.test(endpoint);
+    if (respuesta.status === 401 && !esAuthPublico) {
       notificarSesionInvalida(mensajeError);
     }
     throw new Error(mensajeError);

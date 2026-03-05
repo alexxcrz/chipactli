@@ -258,6 +258,54 @@ app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res)
   }
 });
 
+async function extraerTextoArchivoListaPrecios(file) {
+  if (!file || !file.buffer) return '';
+  const mime = String(file.mimetype || '').toLowerCase();
+  const nombre = String(file.originalname || '').toLowerCase();
+
+  try {
+    if (mime === 'application/pdf' || nombre.endsWith('.pdf')) {
+      const mod = await import('pdf-parse');
+      const pdfParse = mod.default || mod;
+      const salida = await pdfParse(file.buffer);
+      return String(salida?.text || '').replace(/\s+/g, ' ').slice(0, 200000);
+    }
+
+    if (
+      mime.includes('excel')
+      || mime.includes('spreadsheet')
+      || nombre.endsWith('.xlsx')
+      || nombre.endsWith('.xls')
+    ) {
+      const mod = await import('xlsx');
+      const XLSX = mod.default || mod;
+      const wb = XLSX.read(file.buffer, { type: 'buffer' });
+      const bloques = [];
+      for (const sheetName of wb.SheetNames || []) {
+        const hoja = wb.Sheets[sheetName];
+        if (!hoja) continue;
+        const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '' });
+        const texto = (filas || [])
+          .map((fila) => Array.isArray(fila) ? fila.join(' ') : String(fila || ''))
+          .join('\n');
+        bloques.push(`Hoja ${sheetName}: ${texto}`);
+      }
+      return bloques.join('\n').replace(/\s+/g, ' ').slice(0, 200000);
+    }
+
+    if (mime.includes('csv') || nombre.endsWith('.csv') || mime.startsWith('text/')) {
+      return String(file.buffer.toString('utf8') || '').replace(/\s+/g, ' ').slice(0, 200000);
+    }
+  } catch {
+    // Fallback a texto simple.
+  }
+
+  return String(file.buffer.toString('utf8') || '')
+    .replace(/\u0000/g, ' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 200000);
+}
+
 app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
@@ -282,10 +330,7 @@ app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (
 
     await fs.writeFile(destino, req.file.buffer);
 
-    const textoExtraido = String(req.file.buffer.toString('utf8') || '')
-      .replace(/\u0000/g, ' ')
-      .replace(/\s+/g, ' ')
-      .slice(0, 200000);
+    const textoExtraido = await extraerTextoArchivoListaPrecios(req.file);
 
     const base = `${req.protocol}://${req.get('host')}`;
     return res.json({
@@ -339,6 +384,68 @@ app.get("/api/backup/listar", async (req, res) => {
   if (!validarAdmin(req, res)) return;
   const backups = await listarBackups();
   res.json({ backups });
+});
+
+app.get("/api/backup/estado", async (req, res) => {
+  if (!validarAdmin(req, res)) return;
+
+  const dbOne = (db, sql) => new Promise((resolve, reject) => {
+    db.get(sql, [], (err, row) => (err ? reject(err) : resolve(row || {})));
+  });
+
+  const archivos = {
+    inventario: path.join(dbDir, "inventario.db"),
+    recetas: path.join(dbDir, "recetas.db"),
+    produccion: path.join(dbDir, "produccion.db"),
+    ventas: path.join(dbDir, "ventas.db"),
+    admin: path.join(dbDir, "admin.db")
+  };
+
+  try {
+    const [inv, rec, prod, tc, tp, users] = await Promise.all([
+      dbOne(bdInventario, "SELECT COUNT(*) AS c FROM inventario"),
+      dbOne(bdRecetas, "SELECT COUNT(*) AS c FROM recetas"),
+      dbOne(bdProduccion, "SELECT COUNT(*) AS c FROM produccion"),
+      dbOne(bdVentas, "SELECT COUNT(*) AS c FROM tienda_catalogo"),
+      dbOne(bdVentas, "SELECT COUNT(*) AS c FROM tienda_puntos_entrega"),
+      dbOne(bdAdmin, "SELECT COUNT(*) AS c FROM usuarios")
+    ]);
+
+    const estadoArchivos = {};
+    for (const [clave, rutaArchivo] of Object.entries(archivos)) {
+      try {
+        const stat = await fs.stat(rutaArchivo);
+        estadoArchivos[clave] = {
+          existe: true,
+          bytes: stat.size,
+          modificado_en: stat.mtime.toISOString(),
+          ruta: rutaArchivo
+        };
+      } catch {
+        estadoArchivos[clave] = {
+          existe: false,
+          bytes: 0,
+          ruta: rutaArchivo
+        };
+      }
+    }
+
+    return res.json({
+      exito: true,
+      db_dir: dbDir,
+      archivos: estadoArchivos,
+      conteos: {
+        inventario: Number(inv?.c || 0),
+        recetas: Number(rec?.c || 0),
+        produccion: Number(prod?.c || 0),
+        tienda_catalogo: Number(tc?.c || 0),
+        tienda_puntos_entrega: Number(tp?.c || 0),
+        usuarios: Number(users?.c || 0)
+      }
+    });
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: "No se pudo obtener estado de bases de datos" });
+  }
 });
 
 app.post("/api/backup/restaurar", async (req, res) => {
@@ -1146,6 +1253,11 @@ if (usarBuildReact && frontendPath) {
     res.sendFile(indexHtml);
   });
 } else {
+  if (esProduccion || enRender) {
+    app.get('*', (req, res) => {
+      res.status(500).send('Build de React no disponible en producción. Verifique frontend/dist y configuración de Render.');
+    });
+  } else {
   // No hay build de React: intentar proxy a Vite dev server (http://localhost:5173)
   // Esto permite trabajar en modo desarrollo sin generar la build.
   const VITE_HOST = process.env.VITE_DEV_HOST || 'localhost';
@@ -1189,6 +1301,7 @@ if (usarBuildReact && frontendPath) {
     if (req.path && req.path.startsWith('/api')) return next();
     proxyToVite(req, res);
   });
+  }
 }
 
 // Iniciar servidor

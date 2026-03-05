@@ -107,6 +107,21 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [configInicial, setConfigInicial] = useState({
+    visible: false,
+    tokenConfiguracion: '',
+    maestroUsername: '',
+    loading: false,
+    error: '',
+    form: {
+      ceo_username: '',
+      ceo_nombre: 'Director General',
+      ceo_password: '',
+      admin_username: '',
+      admin_nombre: 'Administrador',
+      admin_password: ''
+    }
+  });
   const [proveedoresPendientes, setProveedoresPendientes] = useState({
     visible: false,
     cargando: false,
@@ -341,6 +356,50 @@ export default function App() {
     }
   }, [fichasProveedorPendientes.pendientes, fichasProveedorPendientes.drafts, cargarFichasProveedorPendientes]);
 
+  const completarConfiguracionInicial = async (event) => {
+    event.preventDefault();
+    if (!configInicial.tokenConfiguracion) {
+      setConfigInicial((prev) => ({ ...prev, error: 'Token de configuracion inicial no disponible' }));
+      return;
+    }
+
+    setConfigInicial((prev) => ({ ...prev, loading: true, error: '' }));
+    try {
+      const res = await fetchAPIJSON('/api/auth/configuracion-inicial', {
+        method: 'POST',
+        body: {
+          token_configuracion: configInicial.tokenConfiguracion,
+          ...configInicial.form
+        }
+      });
+
+      setConfigInicial((prev) => ({
+        ...prev,
+        visible: false,
+        loading: false,
+        tokenConfiguracion: '',
+        maestroUsername: '',
+        error: '',
+        form: {
+          ceo_username: '',
+          ceo_nombre: 'Director General',
+          ceo_password: '',
+          admin_username: '',
+          admin_nombre: 'Administrador',
+          admin_password: ''
+        }
+      }));
+
+      setLoginForm({
+        username: String(configInicial.form.ceo_username || '').trim().toLowerCase(),
+        password: ''
+      });
+      setLoginError(res?.mensaje || 'Configuracion inicial lista. Inicia sesion con CEO o administrador.');
+    } catch (error) {
+      setConfigInicial((prev) => ({ ...prev, loading: false, error: error.message || 'No se pudo completar la configuracion inicial' }));
+    }
+  };
+
   const iniciarSesion = async (event) => {
     event.preventDefault();
     setLoginError('');
@@ -353,6 +412,18 @@ export default function App() {
           password: loginForm.password
         }
       });
+      if (res?.requiere_configuracion_inicial && res?.token_configuracion) {
+        setConfigInicial((prev) => ({
+          ...prev,
+          visible: true,
+          tokenConfiguracion: res.token_configuracion,
+          maestroUsername: res.usuario_maestro || loginForm.username,
+          loading: false,
+          error: ''
+        }));
+        return;
+      }
+
       if (!res?.exito || !res?.token) {
         throw new Error(res?.mensaje || 'No se pudo iniciar sesión');
       }
@@ -718,7 +789,7 @@ export default function App() {
         )}
 
         {showAccesoSistema && (
-          <div className="accesoSistemaOverlay" onClick={() => setShowAccesoSistema(false)}>
+          <div className="accesoSistemaOverlay" onClick={() => { if (!configInicial.visible) setShowAccesoSistema(false); }}>
             <div className="loginCard" onClick={(e) => e.stopPropagation()}>
               <img className="loginLogo" src="/images/logo.png" alt="logo" />
               <h1 className="loginTitulo">CHIPACTLI</h1>
@@ -744,10 +815,111 @@ export default function App() {
                 <button className="loginBoton" type="submit" disabled={loginLoading}>
                   {loginLoading ? 'Ingresando...' : 'Entrar'}
                 </button>
-                <button type="button" className="boton" onClick={() => setShowAccesoSistema(false)}>
+                <button type="button" className="boton" disabled={configInicial.visible} onClick={() => setShowAccesoSistema(false)}>
                   Cerrar
                 </button>
               </form>
+
+              {configInicial.visible && (
+                <div className="configInicialBloque">
+                  <h3 className="configInicialTitulo">Configuracion Inicial</h3>
+                  <p className="configInicialTexto">
+                    Usuario maestro: <strong>{configInicial.maestroUsername || 'maestro'}</strong>. Este acceso se desactiva despues de crear CEO y administrador.
+                  </p>
+                  <form onSubmit={completarConfiguracionInicial} className="loginFormulario">
+                    <input
+                      className="loginInput"
+                      type="text"
+                      placeholder="Usuario CEO"
+                      value={configInicial.form.ceo_username}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, ceo_username: value }
+                        }));
+                      }}
+                      required
+                    />
+                    <input
+                      className="loginInput"
+                      type="text"
+                      placeholder="Nombre CEO"
+                      value={configInicial.form.ceo_nombre}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, ceo_nombre: value }
+                        }));
+                      }}
+                      required
+                    />
+                    <input
+                      className="loginInput"
+                      type="password"
+                      placeholder="Contrasena CEO"
+                      value={configInicial.form.ceo_password}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, ceo_password: value }
+                        }));
+                      }}
+                      minLength={8}
+                      required
+                    />
+                    <input
+                      className="loginInput"
+                      type="text"
+                      placeholder="Usuario Administrador"
+                      value={configInicial.form.admin_username}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, admin_username: value }
+                        }));
+                      }}
+                      required
+                    />
+                    <input
+                      className="loginInput"
+                      type="text"
+                      placeholder="Nombre Administrador"
+                      value={configInicial.form.admin_nombre}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, admin_nombre: value }
+                        }));
+                      }}
+                      required
+                    />
+                    <input
+                      className="loginInput"
+                      type="password"
+                      placeholder="Contrasena Administrador"
+                      value={configInicial.form.admin_password}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setConfigInicial((prev) => ({
+                          ...prev,
+                          form: { ...prev.form, admin_password: value }
+                        }));
+                      }}
+                      minLength={8}
+                      required
+                    />
+                    {configInicial.error && <div className="loginError">{configInicial.error}</div>}
+                    <button className="loginBoton" type="submit" disabled={configInicial.loading}>
+                      {configInicial.loading ? 'Guardando...' : 'Crear CEO y Administrador'}
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           </div>
         )}

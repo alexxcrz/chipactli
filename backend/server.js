@@ -1213,24 +1213,46 @@ app.post("/api/importar/produccion", async (req, res) => {
 app.post("/api/importar/ventas", async (req, res) => {
   const payload = req.body;
 
+  const normalizarLista = (valor) => (Array.isArray(valor) ? valor : []);
+  const idValido = (valor) => Number.isFinite(Number(valor)) && Number(valor) > 0;
+
+  const recogerListasVentas = (origen) => {
+    if (!origen || typeof origen !== 'object') return { ventas: [], cortesias: [] };
+
+    const ventas = [
+      normalizarLista(origen.ventas),
+      normalizarLista(origen.datos),
+      normalizarLista(origen?.datos?.ventas)
+    ].find((arr) => arr.length > 0) || [];
+
+    const cortesias = [
+      normalizarLista(origen.cortesias),
+      normalizarLista(origen?.datos?.cortesias)
+    ].find((arr) => arr.length > 0) || [];
+
+    return { ventas, cortesias };
+  };
+
   let ventasDatos = [];
   let cortesiasDatos = [];
 
   if (Array.isArray(payload)) {
     ventasDatos = payload;
   } else if (payload && typeof payload === 'object') {
-    if (Array.isArray(payload.ventas)) {
-      ventasDatos = payload.ventas;
-    } else if (Array.isArray(payload.datos)) {
-      ventasDatos = payload.datos;
-    } else if (payload.datos && typeof payload.datos === 'object' && Array.isArray(payload.datos.ventas)) {
-      ventasDatos = payload.datos.ventas;
-    }
+    const listas = recogerListasVentas(payload);
+    ventasDatos = listas.ventas;
+    cortesiasDatos = listas.cortesias;
 
-    if (Array.isArray(payload.cortesias)) {
-      cortesiasDatos = payload.cortesias;
-    } else if (payload.datos && typeof payload.datos === 'object' && Array.isArray(payload.datos.cortesias)) {
-      cortesiasDatos = payload.datos.cortesias;
+    // Compatibilidad para archivos anidados con llaves como "contenido" o "backup".
+    if (!ventasDatos.length && !cortesiasDatos.length) {
+      const listasContenido = recogerListasVentas(payload.contenido);
+      ventasDatos = listasContenido.ventas;
+      cortesiasDatos = listasContenido.cortesias;
+    }
+    if (!ventasDatos.length && !cortesiasDatos.length) {
+      const listasBackup = recogerListasVentas(payload.backup);
+      ventasDatos = listasBackup.ventas;
+      cortesiasDatos = listasBackup.cortesias;
     }
   }
 
@@ -1250,60 +1272,70 @@ app.post("/api/importar/ventas", async (req, res) => {
         ? Number(item.ganancia) || 0
         : ((precioVenta * cantidad) - costoProduccion);
 
-      await new Promise((resolve, reject) => {
-        bdVentas.run(
+      const nombreReceta = item.nombre_receta || item.pedido || item.id_orden || 'Sin receta';
+      const fechaProduccion = item.fecha_produccion || item.fecha_venta || new Date().toISOString();
+      const fechaVenta = item.fecha_venta || new Date().toISOString();
+      const numeroPedido = item.numero_pedido || item.pedido || '';
+
+      if (idValido(item.id)) {
+        await dbRunAsync(
+          bdVentas,
           `INSERT INTO ventas (id, nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
-           nombre_receta=excluded.nombre_receta, cantidad=excluded.cantidad, fecha_produccion=excluded.fecha_produccion,
-           fecha_venta=excluded.fecha_venta, costo_produccion=excluded.costo_produccion, precio_venta=excluded.precio_venta,
-           ganancia=excluded.ganancia, numero_pedido=excluded.numero_pedido`,
-          [
-            item.id,
-            item.nombre_receta || item.pedido || item.id_orden || 'Sin receta',
-            cantidad,
-            item.fecha_produccion || item.fecha_venta || new Date().toISOString(),
-            item.fecha_venta || new Date().toISOString(),
-            costoProduccion,
-            precioVenta,
-            ganancia,
-            item.numero_pedido || item.pedido || ''
-          ],
-          (err) => {
-            if (err) reject(err);
-            else {
-              importadosVentas++;
-              resolve();
-            }
-          }
+             nombre_receta=excluded.nombre_receta,
+             cantidad=excluded.cantidad,
+             fecha_produccion=excluded.fecha_produccion,
+             fecha_venta=excluded.fecha_venta,
+             costo_produccion=excluded.costo_produccion,
+             precio_venta=excluded.precio_venta,
+             ganancia=excluded.ganancia,
+             numero_pedido=excluded.numero_pedido`,
+          [Number(item.id), nombreReceta, cantidad, fechaProduccion, fechaVenta, costoProduccion, precioVenta, ganancia, numeroPedido]
         );
-      });
+      } else {
+        await dbRunAsync(
+          bdVentas,
+          `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [nombreReceta, cantidad, fechaProduccion, fechaVenta, costoProduccion, precioVenta, ganancia, numeroPedido]
+        );
+      }
+
+      importadosVentas += 1;
     }
 
     for (const item of cortesiasDatos) {
       const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
+      const nombreReceta = item.nombre_receta || item.pedido || 'Sin receta';
+      const fechaCortesia = item.fecha_cortesia || item.fecha_venta || new Date().toISOString();
+      const numeroPedido = item.numero_pedido || item.pedido || '';
+      const motivo = item.motivo || '';
+      const paraQuien = item.para_quien || '';
 
-      await dbRunAsync(
-        bdVentas,
-        `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           nombre_receta=excluded.nombre_receta,
-           cantidad=excluded.cantidad,
-           fecha_cortesia=excluded.fecha_cortesia,
-           numero_pedido=excluded.numero_pedido,
-           motivo=excluded.motivo,
-           para_quien=excluded.para_quien`,
-        [
-          item.id,
-          item.nombre_receta || item.pedido || 'Sin receta',
-          cantidad,
-          item.fecha_cortesia || item.fecha_venta || new Date().toISOString(),
-          item.numero_pedido || item.pedido || '',
-          item.motivo || '',
-          item.para_quien || ''
-        ]
-      );
+      if (idValido(item.id)) {
+        await dbRunAsync(
+          bdVentas,
+          `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             nombre_receta=excluded.nombre_receta,
+             cantidad=excluded.cantidad,
+             fecha_cortesia=excluded.fecha_cortesia,
+             numero_pedido=excluded.numero_pedido,
+             motivo=excluded.motivo,
+             para_quien=excluded.para_quien`,
+          [Number(item.id), nombreReceta, cantidad, fechaCortesia, numeroPedido, motivo, paraQuien]
+        );
+      } else {
+        await dbRunAsync(
+          bdVentas,
+          `INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [nombreReceta, cantidad, fechaCortesia, numeroPedido, motivo, paraQuien]
+        );
+      }
+
       importadosCortesias += 1;
     }
 
@@ -1324,6 +1356,8 @@ app.post("/api/importar/ventas", async (req, res) => {
 app.post('/api/importar/cortesias', async (req, res) => {
   const payload = req.body;
 
+  const idValido = (valor) => Number.isFinite(Number(valor)) && Number(valor) > 0;
+
   let cortesiasDatos = [];
   if (Array.isArray(payload)) {
     cortesiasDatos = payload;
@@ -1343,27 +1377,36 @@ app.post('/api/importar/cortesias', async (req, res) => {
     let importados = 0;
     for (const item of cortesiasDatos) {
       const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
-      await dbRunAsync(
-        bdVentas,
-        `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           nombre_receta=excluded.nombre_receta,
-           cantidad=excluded.cantidad,
-           fecha_cortesia=excluded.fecha_cortesia,
-           numero_pedido=excluded.numero_pedido,
-           motivo=excluded.motivo,
-           para_quien=excluded.para_quien`,
-        [
-          item.id,
-          item.nombre_receta || item.pedido || 'Sin receta',
-          cantidad,
-          item.fecha_cortesia || item.fecha_venta || new Date().toISOString(),
-          item.numero_pedido || item.pedido || '',
-          item.motivo || '',
-          item.para_quien || ''
-        ]
-      );
+
+      const nombreReceta = item.nombre_receta || item.pedido || 'Sin receta';
+      const fechaCortesia = item.fecha_cortesia || item.fecha_venta || new Date().toISOString();
+      const numeroPedido = item.numero_pedido || item.pedido || '';
+      const motivo = item.motivo || '';
+      const paraQuien = item.para_quien || '';
+
+      if (idValido(item.id)) {
+        await dbRunAsync(
+          bdVentas,
+          `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             nombre_receta=excluded.nombre_receta,
+             cantidad=excluded.cantidad,
+             fecha_cortesia=excluded.fecha_cortesia,
+             numero_pedido=excluded.numero_pedido,
+             motivo=excluded.motivo,
+             para_quien=excluded.para_quien`,
+          [Number(item.id), nombreReceta, cantidad, fechaCortesia, numeroPedido, motivo, paraQuien]
+        );
+      } else {
+        await dbRunAsync(
+          bdVentas,
+          `INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [nombreReceta, cantidad, fechaCortesia, numeroPedido, motivo, paraQuien]
+        );
+      }
+
       importados += 1;
     }
 

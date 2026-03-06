@@ -106,14 +106,18 @@ export function registrarRutasAuth(app, bdAdmin) {
     const adminNombre = String(admin_nombre || "").trim() || "Administrador";
     const ceoPassword = String(ceo_password || "");
     const adminPassword = String(admin_password || "");
+    const crearAdmin = Boolean(adminUsername || adminPassword || String(admin_nombre || "").trim());
 
-    if (!ceoUsername || !adminUsername || !ceoPassword || !adminPassword) {
-      return res.status(400).json({ exito: false, mensaje: "Completa todos los campos requeridos" });
+    if (!ceoUsername || !ceoPassword) {
+      return res.status(400).json({ exito: false, mensaje: "Completa usuario y contrasena del CEO" });
     }
-    if (ceoUsername === adminUsername) {
+    if (crearAdmin && (!adminUsername || !adminPassword)) {
+      return res.status(400).json({ exito: false, mensaje: "Si capturas administrador, completa usuario y contrasena" });
+    }
+    if (crearAdmin && ceoUsername === adminUsername) {
       return res.status(400).json({ exito: false, mensaje: "CEO y administrador deben tener usuarios distintos" });
     }
-    if (ceoPassword.length < 8 || adminPassword.length < 8) {
+    if (ceoPassword.length < 8 || (crearAdmin && adminPassword.length < 8)) {
       return res.status(400).json({ exito: false, mensaje: "Las contrasenas deben tener al menos 8 caracteres" });
     }
 
@@ -136,7 +140,7 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
 
       const ceoHash = await bcrypt.hash(ceoPassword, 10);
-      const adminHash = await bcrypt.hash(adminPassword, 10);
+      const adminHash = crearAdmin ? await bcrypt.hash(adminPassword, 10) : null;
 
       await dbRun(bdAdmin, "BEGIN TRANSACTION");
       await dbRun(
@@ -145,12 +149,14 @@ export function registrarRutasAuth(app, bdAdmin) {
          VALUES (?, ?, ?, 'ceo', ?, 0)`,
         [ceoUsername, ceoHash, ceoNombre, JSON.stringify(normalizarPermisosUsuario(null, 'ceo'))]
       );
-      await dbRun(
-        bdAdmin,
-        `INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password)
-         VALUES (?, ?, ?, 'admin', ?, 0)`,
-        [adminUsername, adminHash, adminNombre, JSON.stringify(normalizarPermisosUsuario(null, 'admin'))]
-      );
+      if (crearAdmin) {
+        await dbRun(
+          bdAdmin,
+          `INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password)
+           VALUES (?, ?, ?, 'admin', ?, 0)`,
+          [adminUsername, adminHash, adminNombre, JSON.stringify(normalizarPermisosUsuario(null, 'admin'))]
+        );
+      }
       await dbRun(
         bdAdmin,
         "DELETE FROM usuarios WHERE username = ? AND rol = 'maestro'",
@@ -160,7 +166,9 @@ export function registrarRutasAuth(app, bdAdmin) {
 
       return res.json({
         exito: true,
-        mensaje: "Configuracion inicial completada. Usa tu usuario CEO o administrador para iniciar sesion."
+        mensaje: crearAdmin
+          ? "Configuracion inicial completada. Usa tu usuario CEO o administrador para iniciar sesion."
+          : "Configuracion inicial completada. Usa tu usuario CEO para iniciar sesion."
       });
     } catch (error) {
       try {

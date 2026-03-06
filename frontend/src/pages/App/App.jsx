@@ -113,6 +113,7 @@ export default function App() {
     maestroUsername: '',
     loading: false,
     error: '',
+    crearAdmin: false,
     form: {
       ceo_username: '',
       ceo_nombre: 'Director General',
@@ -369,9 +370,40 @@ export default function App() {
         method: 'POST',
         body: {
           token_configuracion: configInicial.tokenConfiguracion,
-          ...configInicial.form
+          ceo_username: configInicial.form.ceo_username,
+          ceo_nombre: configInicial.form.ceo_nombre,
+          ceo_password: configInicial.form.ceo_password,
+          admin_username: configInicial.crearAdmin ? configInicial.form.admin_username : '',
+          admin_nombre: configInicial.crearAdmin ? configInicial.form.admin_nombre : '',
+          admin_password: configInicial.crearAdmin ? configInicial.form.admin_password : ''
         }
       });
+
+      const loginRes = await fetchAPIJSON('/api/auth/login', {
+        method: 'POST',
+        body: {
+          username: String(configInicial.form.ceo_username || '').trim().toLowerCase(),
+          password: configInicial.form.ceo_password
+        }
+      });
+
+      if (!loginRes?.exito || !loginRes?.token) {
+        throw new Error('Configuracion guardada, pero no se pudo iniciar sesion automaticamente');
+      }
+
+      const usuario = {
+        username: String(configInicial.form.ceo_username || '').trim().toLowerCase(),
+        nombre: loginRes.nombre || configInicial.form.ceo_nombre || 'CEO',
+        rol: loginRes.rol || 'ceo',
+        permisos: normalizarPermisos(loginRes.permisos, loginRes.rol || 'ceo')
+      };
+
+      localStorage.setItem('token', loginRes.token);
+      localStorage.setItem('usuario', JSON.stringify(usuario));
+      setToken(loginRes.token);
+      setCurrentUser(usuario);
+      setShowAccesoSistema(false);
+      setPage(getPageFromHash());
 
       setConfigInicial((prev) => ({
         ...prev,
@@ -380,6 +412,7 @@ export default function App() {
         tokenConfiguracion: '',
         maestroUsername: '',
         error: '',
+        crearAdmin: false,
         form: {
           ceo_username: '',
           ceo_nombre: 'Director General',
@@ -389,12 +422,9 @@ export default function App() {
           admin_password: ''
         }
       }));
-
-      setLoginForm({
-        username: String(configInicial.form.ceo_username || '').trim().toLowerCase(),
-        password: ''
-      });
-      setLoginError(res?.mensaje || 'Configuracion inicial lista. Inicia sesion con CEO o administrador.');
+      setLoginForm({ username: '', password: '' });
+      setLoginError('');
+      mostrarNotificacion(res?.mensaje || 'Configuracion inicial completada', 'exito');
     } catch (error) {
       setConfigInicial((prev) => ({ ...prev, loading: false, error: error.message || 'No se pudo completar la configuracion inicial' }));
     }
@@ -824,7 +854,7 @@ export default function App() {
                 <div className="configInicialBloque">
                   <h3 className="configInicialTitulo">Configuracion Inicial</h3>
                   <p className="configInicialTexto">
-                    Usuario maestro: <strong>{configInicial.maestroUsername || 'maestro'}</strong>. Este acceso se desactiva despues de crear CEO y administrador.
+                    Usuario maestro: <strong>{configInicial.maestroUsername || 'maestro'}</strong>. Este acceso se desactiva despues de crear el CEO.
                   </p>
                   <form onSubmit={completarConfiguracionInicial} className="loginFormulario">
                     <input
@@ -870,52 +900,77 @@ export default function App() {
                       minLength={8}
                       required
                     />
-                    <input
-                      className="loginInput"
-                      type="text"
-                      placeholder="Usuario Administrador"
-                      value={configInicial.form.admin_username}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setConfigInicial((prev) => ({
-                          ...prev,
-                          form: { ...prev.form, admin_username: value }
-                        }));
-                      }}
-                      required
-                    />
-                    <input
-                      className="loginInput"
-                      type="text"
-                      placeholder="Nombre Administrador"
-                      value={configInicial.form.admin_nombre}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setConfigInicial((prev) => ({
-                          ...prev,
-                          form: { ...prev.form, admin_nombre: value }
-                        }));
-                      }}
-                      required
-                    />
-                    <input
-                      className="loginInput"
-                      type="password"
-                      placeholder="Contrasena Administrador"
-                      value={configInicial.form.admin_password}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setConfigInicial((prev) => ({
-                          ...prev,
-                          form: { ...prev.form, admin_password: value }
-                        }));
-                      }}
-                      minLength={8}
-                      required
-                    />
+                    <label className="configInicialToggle">
+                      <input
+                        type="checkbox"
+                        checked={configInicial.crearAdmin}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setConfigInicial((prev) => ({
+                            ...prev,
+                            crearAdmin: checked,
+                            form: {
+                              ...prev.form,
+                              admin_username: checked ? prev.form.admin_username : '',
+                              admin_nombre: checked ? prev.form.admin_nombre : 'Administrador',
+                              admin_password: checked ? prev.form.admin_password : ''
+                            }
+                          }));
+                        }}
+                      />
+                      Crear usuario administrador tambien (opcional)
+                    </label>
+
+                    {configInicial.crearAdmin && (
+                      <>
+                        <input
+                          className="loginInput"
+                          type="text"
+                          placeholder="Usuario Administrador"
+                          value={configInicial.form.admin_username}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setConfigInicial((prev) => ({
+                              ...prev,
+                              form: { ...prev.form, admin_username: value }
+                            }));
+                          }}
+                          required
+                        />
+                        <input
+                          className="loginInput"
+                          type="text"
+                          placeholder="Nombre Administrador"
+                          value={configInicial.form.admin_nombre}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setConfigInicial((prev) => ({
+                              ...prev,
+                              form: { ...prev.form, admin_nombre: value }
+                            }));
+                          }}
+                          required
+                        />
+                        <input
+                          className="loginInput"
+                          type="password"
+                          placeholder="Contrasena Administrador"
+                          value={configInicial.form.admin_password}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setConfigInicial((prev) => ({
+                              ...prev,
+                              form: { ...prev.form, admin_password: value }
+                            }));
+                          }}
+                          minLength={8}
+                          required
+                        />
+                      </>
+                    )}
                     {configInicial.error && <div className="loginError">{configInicial.error}</div>}
                     <button className="loginBoton" type="submit" disabled={configInicial.loading}>
-                      {configInicial.loading ? 'Guardando...' : 'Crear CEO y Administrador'}
+                      {configInicial.loading ? 'Guardando...' : (configInicial.crearAdmin ? 'Crear CEO y Administrador' : 'Crear CEO y Entrar')}
                     </button>
                   </form>
                 </div>

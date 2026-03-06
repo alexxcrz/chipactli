@@ -259,6 +259,8 @@ export default function Tienda({
   const [whatsForm, setWhatsForm] = useState({ nombre: '', mensaje: '' });
   const [editorProducto, setEditorProducto] = useState(null);
   const bloqueoAperturaCarritoRef = useRef(0);
+  const detalleTouchStartRef = useRef({ x: 0, y: 0 });
+  const detalleTouchTrackingRef = useRef(false);
 
   const opcionesMetodoPago = [
     { value: 'efectivo', label: 'Efectivo contra entrega' },
@@ -1151,6 +1153,44 @@ export default function Tienda({
     });
   }
 
+  function moverImagenDetallePorPaso(paso) {
+    setSeleccionado((prev) => {
+      if (!prev) return prev;
+      const galeriaBase = Array.isArray(prev?.galeria) ? prev.galeria : [];
+      const galeria = Array.from(new Set([
+        String(prev?.imagen_activa || '').trim(),
+        ...galeriaBase.map((item) => String(item || '').trim())
+      ].filter(Boolean)));
+      if (galeria.length < 2) return prev;
+
+      const actual = String(prev?.imagen_activa || '').trim();
+      const idxActual = Math.max(0, galeria.findIndex((img) => img === actual));
+      const siguiente = (idxActual + paso + galeria.length) % galeria.length;
+      return { ...prev, imagen_activa: galeria[siguiente] };
+    });
+  }
+
+  function iniciarSwipeDetalle(event) {
+    const touch = event?.changedTouches?.[0];
+    if (!touch) return;
+    detalleTouchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    detalleTouchTrackingRef.current = true;
+  }
+
+  function finalizarSwipeDetalle(event) {
+    if (!detalleTouchTrackingRef.current) return;
+    detalleTouchTrackingRef.current = false;
+    const touch = event?.changedTouches?.[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - Number(detalleTouchStartRef.current?.x || 0);
+    const dy = touch.clientY - Number(detalleTouchStartRef.current?.y || 0);
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    if (!horizontal || Math.abs(dx) < 34) return;
+
+    moverImagenDetallePorPaso(dx < 0 ? 1 : -1);
+  }
+
   function agregarAlCarrito(producto, variante = '') {
     const variantes = normalizarVariantes(producto?.variantes);
     const varianteEncontrada = variantes.find((v) => v.nombre === variante) || null;
@@ -1373,12 +1413,6 @@ export default function Tienda({
         </div>
         <div className="tiendaHeaderCentroShop" aria-label="VITRINA">VITRINA</div>
         <div className="tiendaHeaderAcciones">
-          <input
-            className="cajaBusqueda"
-            placeholder="🔍 Buscar producto..."
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-          />
           {!clienteToken ? (
             <>
               <button className="boton" onClick={() => { setModoAuth('login'); setMostrarModalAuthCliente(true); }}>Iniciar sesión</button>
@@ -1392,8 +1426,16 @@ export default function Tienda({
           )}
           <button className="tiendaCartBtn" onClick={abrirCarrito}>
             🛒
-            <span className="tiendaCartCount">{carrito.length}</span>
+            {carrito.length > 0 && <span className="tiendaCartCount">{carrito.length}</span>}
           </button>
+        </div>
+        <div className="tiendaHeaderBusquedaWrap tiendaSoloMovil">
+          <input
+            className="cajaBusqueda"
+            placeholder="🔍 Buscar producto..."
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+          />
         </div>
       </div>
       )}
@@ -1427,6 +1469,14 @@ export default function Tienda({
             {seleccionado?.nombre_receta || 'Detalle'}
           </button>
         )}
+        <div className="tiendaCategoriasBusqueda tiendaSoloDesktop">
+          <input
+            className="cajaBusqueda"
+            placeholder="🔍 Buscar producto..."
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+          />
+        </div>
       </div>
       )}
 
@@ -2115,7 +2165,15 @@ export default function Tienda({
         <section className="tarjeta tiendaCatalogo tiendaInfoTab">
           <div className="tiendaInfoTabHeader">
             <h2>{infoSeleccionada?.titulo || 'Información'}</h2>
-            <button className="boton" onClick={() => setVistaActiva('tienda')}>Volver a productos</button>
+            <button
+              className="boton tiendaBotonVolverMini"
+              type="button"
+              aria-label="Volver a productos"
+              title="Volver a productos"
+              onClick={() => setVistaActiva('tienda')}
+            >
+              ←
+            </button>
           </div>
           <div className="tiendaInfoTabBody">
             {String(infoSeleccionada?.texto || '').trim()}
@@ -2153,11 +2211,23 @@ export default function Tienda({
                     <h3>{seleccionado.nombre_receta}</h3>
                     <div className="tiendaDetallePresentacionActiva">{seleccionado.nombre_receta}</div>
                   </div>
-                  <button className="boton" onClick={() => setVistaActiva('tienda')}>Volver a productos</button>
+                  <button
+                    className="boton tiendaBotonVolverMini"
+                    type="button"
+                    aria-label="Volver a productos"
+                    title="Volver a productos"
+                    onClick={() => setVistaActiva('tienda')}
+                  >
+                    ←
+                  </button>
                 </div>
                 <div className="tiendaDetalleLayout">
                   <div className="tiendaDetalleLateralImagen">
-                    <div className="tiendaDetalleColImagen">
+                    <div
+                      className="tiendaDetalleColImagen"
+                      onTouchStart={iniciarSwipeDetalle}
+                      onTouchEnd={finalizarSwipeDetalle}
+                    >
                       {String(seleccionado?.imagen_activa || '').trim() ? (
                         <img src={seleccionado.imagen_activa} alt={seleccionado.nombre_receta} />
                       ) : (

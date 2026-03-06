@@ -18,28 +18,92 @@ function obtenerURLAPI() {
   return '';
 }
 
+function descargarJson(datos, tipo) {
+  const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  const fecha = new Date().toISOString().split('T')[0];
+  a.download = `chipactli-${tipo}-${fecha}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function extraerCortesiasDesdeArchivo(datos) {
+  if (Array.isArray(datos)) return datos;
+  if (!datos || typeof datos !== 'object') return [];
+
+  if (Array.isArray(datos.cortesias)) return datos.cortesias;
+  if (Array.isArray(datos.datos)) return datos.datos;
+  if (datos.datos && typeof datos.datos === 'object' && Array.isArray(datos.datos.cortesias)) {
+    return datos.datos.cortesias;
+  }
+  if (datos.contenido && typeof datos.contenido === 'object' && Array.isArray(datos.contenido.cortesias)) {
+    return datos.contenido.cortesias;
+  }
+  if (datos.backup && typeof datos.backup === 'object' && Array.isArray(datos.backup.cortesias)) {
+    return datos.backup.cortesias;
+  }
+
+  return [];
+}
+
+function extraerVentasDesdeArchivo(datos) {
+  if (Array.isArray(datos)) return datos;
+  if (!datos || typeof datos !== 'object') return [];
+
+  if (Array.isArray(datos.ventas)) return datos.ventas;
+  if (Array.isArray(datos.datos)) return datos.datos;
+  if (datos.datos && typeof datos.datos === 'object' && Array.isArray(datos.datos.ventas)) {
+    return datos.datos.ventas;
+  }
+  if (datos.contenido && typeof datos.contenido === 'object' && Array.isArray(datos.contenido.ventas)) {
+    return datos.contenido.ventas;
+  }
+  if (datos.backup && typeof datos.backup === 'object' && Array.isArray(datos.backup.ventas)) {
+    return datos.backup.ventas;
+  }
+
+  return [];
+}
+
 /**
  * Exportar datos de una sección específica
  * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias'
  */
 export async function exportarDatos(tipo) {
   try {
+    if (tipo === 'cortesias') {
+      try {
+        const endpointCortesias = `${obtenerURLAPI()}/api/exportar/cortesias`;
+        const datosCortesias = await fetchAPIJSON(endpointCortesias);
+        descargarJson(datosCortesias, tipo);
+        mostrarNotificacion(`✅ ${tipo} exportado correctamente`, 'exito');
+        return;
+      } catch (errorCortesias) {
+        const es404 = /404/.test(String(errorCortesias?.message || ''));
+        if (!es404) throw errorCortesias;
+
+        // Compatibilidad con backend viejo: usar exportar ventas y extraer cortesias.
+        const endpointVentas = `${obtenerURLAPI()}/api/exportar/ventas`;
+        const datosVentas = await fetchAPIJSON(endpointVentas);
+        const lista = extraerCortesiasDesdeArchivo(datosVentas);
+        if (!lista.length) {
+          throw new Error('Tu backend no soporta /api/exportar/cortesias todavia. Reinicia o despliega la version nueva.');
+        }
+
+        descargarJson({ tipo: 'cortesias', datos: lista, total: lista.length }, tipo);
+        mostrarNotificacion('✅ cortesias exportadas desde respaldo de ventas', 'exito');
+        return;
+      }
+    }
+
     const endpoint = `${obtenerURLAPI()}/api/exportar/${tipo}`;
     const datos = await fetchAPIJSON(endpoint);
-    
-    // Crear archivo JSON
-    const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    // Descargar archivo
-    const a = document.createElement('a');
-    a.href = url;
-    const fecha = new Date().toISOString().split('T')[0];
-    a.download = `chipactli-${tipo}-${fecha}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    descargarJson(datos, tipo);
     
     mostrarNotificacion(`✅ ${tipo} exportado correctamente`, 'exito');
   } catch (error) {
@@ -76,12 +140,58 @@ export async function importarDatos(tipo, input) {
       throw new Error('El archivo está vacío');
     }
     
-    // Enviar al servidor
-    const endpoint = `${obtenerURLAPI()}/api/importar/${tipo}`;
-    const resultado = await fetchAPIJSON(endpoint, {
-      method: 'POST',
-      body: datos
-    });
+    let resultado = null;
+
+    if (tipo === 'cortesias') {
+      const listaCortesias = extraerCortesiasDesdeArchivo(datos);
+      if (!listaCortesias.length) {
+        throw new Error('El archivo no contiene cortesias para importar');
+      }
+
+      try {
+        const endpointCortesias = `${obtenerURLAPI()}/api/importar/cortesias`;
+        resultado = await fetchAPIJSON(endpointCortesias, {
+          method: 'POST',
+          body: { cortesias: listaCortesias }
+        });
+      } catch (errorCortesias) {
+        const es404 = /404/.test(String(errorCortesias?.message || ''));
+        if (!es404) throw errorCortesias;
+
+        const endpointVentas = `${obtenerURLAPI()}/api/importar/ventas`;
+        resultado = await fetchAPIJSON(endpointVentas, {
+          method: 'POST',
+          body: { cortesias: listaCortesias }
+        });
+      }
+    } else if (tipo === 'ventas') {
+      const listaVentas = extraerVentasDesdeArchivo(datos);
+      const listaCortesias = extraerCortesiasDesdeArchivo(datos);
+
+      if (!listaVentas.length && !listaCortesias.length) {
+        throw new Error('El archivo no contiene ventas ni cortesias para importar');
+      }
+
+      // Compatibilidad con backend viejo: siempre enviar "datos" como arreglo de ventas.
+      const payloadVentas = {
+        datos: listaVentas,
+        ventas: listaVentas,
+        cortesias: listaCortesias
+      };
+
+      const endpoint = `${obtenerURLAPI()}/api/importar/ventas`;
+      resultado = await fetchAPIJSON(endpoint, {
+        method: 'POST',
+        body: payloadVentas
+      });
+    } else {
+      // Enviar al servidor
+      const endpoint = `${obtenerURLAPI()}/api/importar/${tipo}`;
+      resultado = await fetchAPIJSON(endpoint, {
+        method: 'POST',
+        body: datos
+      });
+    }
     
     const importados = resultado?.importados;
     const totalImportados = (typeof importados === 'number')

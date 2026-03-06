@@ -103,13 +103,17 @@ const ejecutandoEnRender = Boolean(
   || process.env.RENDER_INSTANCE_ID
 );
 
+const rutaBaseDiscoRender = '/opt/render/data';
+const discoRenderDisponible = existsSync(rutaBaseDiscoRender);
+
 const dbDir = process.env.DB_DIR
   ? path.resolve(process.env.DB_DIR)
-  : (ejecutandoEnRender ? '/opt/render/data/backend' : __dirname);
+  : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
 
 console.log('[DB] NODE_ENV=', process.env.NODE_ENV || '(vacío)');
 console.log('[DB] Render detectado=', ejecutandoEnRender ? 'sí' : 'no');
+console.log('[DB] Disco Render detectado=', discoRenderDisponible ? 'sí' : 'no');
 console.log('[DB] DB_DIR efectivo=', dbDir);
 
 configurarBackup({

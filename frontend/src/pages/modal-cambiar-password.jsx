@@ -1,4 +1,6 @@
 // modal-cambiar-password.js
+import { mostrarNotificacion } from '../utils/notificaciones.jsx';
+
 export function mostrarModalCambiarPassword(username) {
   if (document.getElementById('modalCambiarPassword')) return;
   const modal = document.createElement('div');
@@ -13,15 +15,30 @@ export function mostrarModalCambiarPassword(username) {
       <form id="formCambiarPassword" class="cajaFormulario">
         <div class="grupoFormulario">
           <label>Contraseña actual</label>
-          <input type="password" name="password_actual" placeholder="Contraseña actual" required>
+          <div class="passwordInputWrap">
+            <input class="passwordInputField" type="password" name="password_actual" placeholder="Contraseña actual" required>
+            <button type="button" class="passwordToggleBtn" data-password-toggle="password_actual" aria-label="Mostrar contraseña" title="Mostrar contraseña">
+              &#128065;
+            </button>
+          </div>
         </div>
         <div class="grupoFormulario">
           <label>Nueva contraseña</label>
-          <input type="password" name="password_nueva" placeholder="Nueva contraseña" required>
+          <div class="passwordInputWrap">
+            <input class="passwordInputField" type="password" name="password_nueva" placeholder="Nueva contraseña" required>
+            <button type="button" class="passwordToggleBtn" data-password-toggle="password_nueva" aria-label="Mostrar contraseña" title="Mostrar contraseña">
+              &#128065;
+            </button>
+          </div>
         </div>
         <div class="grupoFormulario">
           <label>Repite nueva contraseña</label>
-          <input type="password" name="password_nueva2" placeholder="Repite nueva contraseña" required>
+          <div class="passwordInputWrap">
+            <input class="passwordInputField" type="password" name="password_nueva2" placeholder="Repite nueva contraseña" required>
+            <button type="button" class="passwordToggleBtn" data-password-toggle="password_nueva2" aria-label="Mostrar contraseña" title="Mostrar contraseña">
+              &#128065;
+            </button>
+          </div>
         </div>
         <button type="submit" class="boton botonCambioPassword">Guardar</button>
       </form>
@@ -29,6 +46,21 @@ export function mostrarModalCambiarPassword(username) {
     </div>
   `;
   document.body.appendChild(modal);
+
+  Array.from(modal.querySelectorAll('[data-password-toggle]')).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const inputName = btn.getAttribute('data-password-toggle');
+      if (!inputName) return;
+      const input = modal.querySelector(`input[name="${inputName}"]`);
+      if (!input) return;
+
+      const isPassword = input.type === 'password';
+      input.type = isPassword ? 'text' : 'password';
+      btn.setAttribute('aria-label', isPassword ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      btn.setAttribute('title', isPassword ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    });
+  });
+
   document.getElementById('formCambiarPassword').onsubmit = async function(e) {
     e.preventDefault();
     const password_actual = this.password_actual.value;
@@ -50,7 +82,7 @@ export function mostrarModalCambiarPassword(username) {
       });
       const data = await res.json();
       if (!data.exito) throw new Error(data.mensaje);
-      alert('Contraseña cambiada.');
+      mostrarNotificacion('Contraseña cambiada.', 'exito');
       document.getElementById('modalCambiarPassword').remove();
       window.location.reload();
     } catch (err) {

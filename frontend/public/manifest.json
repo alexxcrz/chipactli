@@ -1,11 +1,28 @@
 {
   "name": "Chipactli",
   "short_name": "Chipactli",
+  "id": "/",
+  "lang": "es-MX",
+  "description": "Gestion integral de inventario, recetas, produccion y ventas para CHIPACTLI.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#ffffff",
   "theme_color": "#4CAF50",
   "icons": [
+    {
+      "src": "/images/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
     {
       "src": "/images/favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",

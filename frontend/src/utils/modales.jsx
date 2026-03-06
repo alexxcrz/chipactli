@@ -215,6 +215,35 @@ export function inicializarCierreModalConEsc() {
   });
 
   document.addEventListener('keydown', (evento) => {
+    if (evento.key === 'Enter') {
+      const modalActivo = obtenerModalSuperior();
+      if (!modalActivo) return;
+
+      if (modalActivo.id === 'modalNotificacion') {
+        evento.preventDefault();
+        if (typeof window.cerrarNotificacion === 'function') {
+          window.cerrarNotificacion();
+        } else {
+          const fondoNotificacion = document.getElementById('fondoNotificacion');
+          modalActivo.style.display = 'none';
+          if (fondoNotificacion) fondoNotificacion.style.display = 'none';
+        }
+        actualizarEnSiguienteFrame();
+        actualizarClaseModalAbierto();
+        return;
+      }
+
+      if (modalActivo.id === 'modalConfirmacion') {
+        const btnAceptar = document.getElementById('btnConfirmacionAceptar');
+        if (btnAceptar) {
+          evento.preventDefault();
+          btnAceptar.click();
+          actualizarEnSiguienteFrame();
+        }
+      }
+      return;
+    }
+
     if (evento.key !== 'Escape') return;
 
     const modalActivo = obtenerModalSuperior();
@@ -227,9 +256,13 @@ export function inicializarCierreModalConEsc() {
     }
 
     if (modalActivo.id === 'modalNotificacion') {
-      const fondoNotificacion = document.getElementById('fondoNotificacion');
-      modalActivo.style.display = 'none';
-      if (fondoNotificacion) fondoNotificacion.style.display = 'none';
+      if (typeof window.cerrarNotificacion === 'function') {
+        window.cerrarNotificacion();
+      } else {
+        const fondoNotificacion = document.getElementById('fondoNotificacion');
+        modalActivo.style.display = 'none';
+        if (fondoNotificacion) fondoNotificacion.style.display = 'none';
+      }
       actualizarEnSiguienteFrame();
       actualizarClaseModalAbierto();
       return;

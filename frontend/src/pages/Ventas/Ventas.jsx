@@ -79,7 +79,14 @@ export default function Ventas() {
       </div>
 
       <div className="tarjeta">
-        <h2>Historial de Cortesías</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
+          <h2>Historial de Cortesías</h2>
+          <div className="botonesImportarExportar">
+            <button className="botonImportar" onClick={() => document.getElementById('importarCortesias')?.click()}>📥 Importar cortesías</button>
+            <input type="file" id="importarCortesias" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('cortesias', e.target)} />
+            <button className="botonExportar" onClick={() => exportarDatos('cortesias')}>📤 Exportar cortesías</button>
+          </div>
+        </div>
         <table>
           <thead>
             <tr><th>Receta</th><th>Cantidad</th><th>Pedido</th><th>Motivo</th><th>Para quién</th><th>Fecha y hora</th></tr>

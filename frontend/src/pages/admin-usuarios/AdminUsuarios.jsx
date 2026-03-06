@@ -3,6 +3,7 @@ import './AdminUsuarios.css';
 import { fetchAPIJSON } from "../../utils/api.jsx";
 import { mostrarNotificacion } from "../../utils/notificaciones.jsx";
 import { normalizarTextoBusqueda } from "../../utils/texto.jsx";
+import PasswordInput from '../../components/PasswordInput.jsx';
 
 const DEFINICION_PERMISOS = {
   inventario: {
@@ -562,8 +563,7 @@ export default function AdminUsuarios() {
             {tabModal === 'password' && (
               <div className="tabPanelAdminUsuarios">
                 <label>Contraseña temporal</label>
-                <input
-                  type="text"
+                <PasswordInput
                   placeholder="Escribe una contraseña temporal"
                   value={modalEditar.passwordTemporal}
                   onChange={(e) => actualizarCampoModal('passwordTemporal', e.target.value)}

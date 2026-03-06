@@ -20,7 +20,7 @@ function obtenerURLAPI() {
 
 /**
  * Exportar datos de una sección específica
- * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas'
+ * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias'
  */
 export async function exportarDatos(tipo) {
   try {
@@ -50,7 +50,7 @@ export async function exportarDatos(tipo) {
 
 /**
  * Importar datos de un archivo JSON
- * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas'
+ * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias'
  * @param {HTMLInputElement} input - Input file element
  */
 export async function importarDatos(tipo, input) {
@@ -131,9 +131,13 @@ export function recargarSeccion(tipo) {
       break;
     case 'ventas':
       if (window.ventas?.cargarVentas) window.ventas.cargarVentas();
+      if (window.ventas?.cargarCortesias) window.ventas.cargarCortesias();
       if (window.ventas?.cargarEstadisticasVentas) {
         window.ventas.cargarEstadisticasVentas('mes');
       }
+      break;
+    case 'cortesias':
+      if (window.ventas?.cargarCortesias) window.ventas.cargarCortesias();
       break;
   }
 }

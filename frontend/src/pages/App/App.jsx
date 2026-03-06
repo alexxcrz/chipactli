@@ -17,6 +17,7 @@ import Ventas from '../Ventas/Ventas.jsx';
 import Tienda from '../Tienda/Tienda.jsx';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import AdminUsuarios from '../admin-usuarios/AdminUsuarios.jsx';
+import PasswordInput from '../../components/PasswordInput.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 import { mostrarModalCambiarPassword } from '../modal-cambiar-password.jsx';
 import { inicializarCierreModalConEsc } from '../../utils/modales.jsx';
@@ -107,6 +108,8 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [eventoInstalacionPwa, setEventoInstalacionPwa] = useState(null);
+  const [mostrarInstalarPwa, setMostrarInstalarPwa] = useState(false);
   const [configInicial, setConfigInicial] = useState({
     visible: false,
     tokenConfiguracion: '',
@@ -504,6 +507,62 @@ export default function App() {
   }, [cerrarSesion]);
 
   React.useEffect(() => {
+    const enModoStandalone = () => {
+      if (typeof window === 'undefined') return false;
+      const porDisplayMode = window.matchMedia?.('(display-mode: standalone)')?.matches;
+      const porIos = window.navigator?.standalone === true;
+      return Boolean(porDisplayMode || porIos);
+    };
+
+    if (enModoStandalone()) {
+      setMostrarInstalarPwa(false);
+      setEventoInstalacionPwa(null);
+      return undefined;
+    }
+
+    const onBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      setEventoInstalacionPwa(event);
+      setMostrarInstalarPwa(true);
+    };
+
+    const onAppInstalled = () => {
+      setEventoInstalacionPwa(null);
+      setMostrarInstalarPwa(false);
+      mostrarNotificacion('App instalada correctamente', 'exito');
+    };
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+    window.addEventListener('appinstalled', onAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', onAppInstalled);
+    };
+  }, []);
+
+  const instalarAppPwa = async () => {
+    const evento = eventoInstalacionPwa;
+    if (!evento) {
+      mostrarNotificacion('Tu navegador no permite instalacion directa en este momento', 'advertencia');
+      return;
+    }
+
+    evento.prompt();
+    try {
+      const resultado = await evento.userChoice;
+      if (resultado?.outcome === 'accepted') {
+        mostrarNotificacion('Instalacion iniciada', 'exito');
+      }
+    } catch {
+      // Ignorar errores de browsers sin userChoice estable.
+    }
+
+    setEventoInstalacionPwa(null);
+    setMostrarInstalarPwa(false);
+  };
+
+  React.useEffect(() => {
     if (!isAuthenticated) {
       cerrarWebSocket();
       return;
@@ -625,6 +684,10 @@ export default function App() {
 
     // notification/alert helpers used by legacy scripts
     window.mostrarNotificacion = mostrarNotificacion;
+    const nativeAlert = window.alert;
+    window.alert = (mensaje) => {
+      mostrarNotificacion(String(mensaje ?? ''), 'advertencia');
+    };
     window.cerrarNotificacion = cerrarNotificacion;
     window.agregarAlerta = agregarAlerta;
     window.removerAlertaPorClave = removerAlertaPorClave;
@@ -648,6 +711,10 @@ export default function App() {
       agregarAlerta,
       removerAlertaPorClave,
       actualizarUIAlertas
+    };
+
+    return () => {
+      window.alert = nativeAlert;
     };
   }, []);
 
@@ -833,9 +900,8 @@ export default function App() {
                   onChange={(e) => setLoginForm(prev => ({ ...prev, username: e.target.value }))}
                   required
                 />
-                <input
+                <PasswordInput
                   className="loginInput"
-                  type="password"
                   placeholder="Contraseña"
                   value={loginForm.password}
                   onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
@@ -885,9 +951,8 @@ export default function App() {
                       }}
                       required
                     />
-                    <input
+                    <PasswordInput
                       className="loginInput"
-                      type="password"
                       placeholder="Contrasena CEO"
                       value={configInicial.form.ceo_password}
                       onChange={(e) => {
@@ -951,9 +1016,8 @@ export default function App() {
                           }}
                           required
                         />
-                        <input
+                        <PasswordInput
                           className="loginInput"
-                          type="password"
                           placeholder="Contrasena Administrador"
                           value={configInicial.form.admin_password}
                           onChange={(e) => {
@@ -977,6 +1041,12 @@ export default function App() {
               )}
             </div>
           </div>
+        )}
+
+        {mostrarInstalarPwa && (
+          <button type="button" className="botonInstalarPwa" onClick={instalarAppPwa}>
+            Instalar app
+          </button>
         )}
         </div>
     );
@@ -1330,6 +1400,12 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {mostrarInstalarPwa && (
+        <button type="button" className="botonInstalarPwa" onClick={instalarAppPwa}>
+          Instalar app
+        </button>
       )}
     </div>
   );

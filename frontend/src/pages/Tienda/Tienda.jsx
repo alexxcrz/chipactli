@@ -3,6 +3,7 @@ import './Tienda.css';
 import { API } from '../../utils/config.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { mostrarConfirmacion } from '../../utils/modales.jsx';
+import PasswordInput from '../../components/PasswordInput.jsx';
 
 const API_TIENDA = import.meta.env.DEV
   ? (import.meta.env.VITE_BACKEND_URL || '')
@@ -2487,8 +2488,7 @@ export default function Tienda({
                     onChange={(e) => setCredenciales((p) => ({ ...p, email: e.target.value }))}
                     required
                   />
-                  <input
-                    type="password"
+                  <PasswordInput
                     placeholder="Contraseña"
                     value={credenciales.password}
                     onChange={(e) => setCredenciales((p) => ({ ...p, password: e.target.value }))}
@@ -2524,15 +2524,13 @@ export default function Tienda({
                   )}
                   {pasoRegistro === 3 && (
                     <>
-                      <input
-                        type="password"
+                      <PasswordInput
                         placeholder="Contraseña"
                         value={credenciales.password}
                         onChange={(e) => setCredenciales((p) => ({ ...p, password: e.target.value }))}
                         required
                       />
-                      <input
-                        type="password"
+                      <PasswordInput
                         placeholder="Confirmar contraseña"
                         value={credenciales.confirmarPassword}
                         onChange={(e) => setCredenciales((p) => ({ ...p, confirmarPassword: e.target.value }))}

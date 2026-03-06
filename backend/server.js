@@ -97,10 +97,20 @@ const upload = multer({
 
 // Configuración de directorios para las bases de datos.
 // Prioridad: DB_DIR (si se define) > ruta persistente por defecto en Render > directorio local.
+const ejecutandoEnRender = Boolean(
+  process.env.RENDER
+  || process.env.RENDER_EXTERNAL_URL
+  || process.env.RENDER_INSTANCE_ID
+);
+
 const dbDir = process.env.DB_DIR
   ? path.resolve(process.env.DB_DIR)
-  : (process.env.NODE_ENV === 'production' ? '/opt/render/data/backend' : __dirname);
+  : (ejecutandoEnRender ? '/opt/render/data/backend' : __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
+
+console.log('[DB] NODE_ENV=', process.env.NODE_ENV || '(vacío)');
+console.log('[DB] Render detectado=', ejecutandoEnRender ? 'sí' : 'no');
+console.log('[DB] DB_DIR efectivo=', dbDir);
 
 configurarBackup({
   dbDir,
@@ -191,6 +201,8 @@ const reglasPermisos = [
   { metodos: ['POST'], exacto: '/api/importar/produccion', pestana: 'produccion', accion: 'importar' },
   { metodos: ['GET'], exacto: '/api/exportar/ventas', pestana: 'ventas', accion: 'exportar' },
   { metodos: ['POST'], exacto: '/api/importar/ventas', pestana: 'ventas', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/cortesias', pestana: 'ventas', accion: 'exportar' },
+  { metodos: ['POST'], exacto: '/api/importar/cortesias', pestana: 'ventas', accion: 'importar' },
   { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', pestana: 'ventas', accion: 'editar' },
   { metodos: ['GET'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'ver' },
   { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'editar' }
@@ -678,14 +690,35 @@ app.get("/api/exportar/produccion", (req, res) => {
   });
 });
 
-// Exportar datos de ventas
-app.get("/api/exportar/ventas", (req, res) => {
-  bdVentas.all("SELECT * FROM ventas", [], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ exito: false, mensaje: "Error al exportar ventas" });
-    }
-    res.json({ tipo: "ventas", datos: rows, total: rows.length });
-  });
+// Exportar datos de ventas (incluye cortesias para respaldo completo)
+app.get("/api/exportar/ventas", async (req, res) => {
+  try {
+    const ventas = await dbAllAsync(bdVentas, "SELECT * FROM ventas");
+    const cortesias = await dbAllAsync(bdVentas, "SELECT * FROM cortesias");
+    res.json({
+      tipo: "ventas",
+      datos: ventas,
+      ventas,
+      cortesias,
+      total: ventas.length,
+      totales: {
+        ventas: ventas.length,
+        cortesias: cortesias.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: "Error al exportar ventas", detalle: error.message });
+  }
+});
+
+// Exportar datos de cortesias
+app.get("/api/exportar/cortesias", async (req, res) => {
+  try {
+    const cortesias = await dbAllAsync(bdVentas, "SELECT * FROM cortesias");
+    res.json({ tipo: "cortesias", datos: cortesias, total: cortesias.length });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: "Error al exportar cortesias", detalle: error.message });
+  }
 });
 
 // Importar datos de inventario
@@ -1178,16 +1211,38 @@ app.post("/api/importar/produccion", async (req, res) => {
 
 // Importar datos de ventas
 app.post("/api/importar/ventas", async (req, res) => {
-  const { datos } = req.body;
-  
-  if (!Array.isArray(datos)) {
+  const payload = req.body;
+
+  let ventasDatos = [];
+  let cortesiasDatos = [];
+
+  if (Array.isArray(payload)) {
+    ventasDatos = payload;
+  } else if (payload && typeof payload === 'object') {
+    if (Array.isArray(payload.ventas)) {
+      ventasDatos = payload.ventas;
+    } else if (Array.isArray(payload.datos)) {
+      ventasDatos = payload.datos;
+    } else if (payload.datos && typeof payload.datos === 'object' && Array.isArray(payload.datos.ventas)) {
+      ventasDatos = payload.datos.ventas;
+    }
+
+    if (Array.isArray(payload.cortesias)) {
+      cortesiasDatos = payload.cortesias;
+    } else if (payload.datos && typeof payload.datos === 'object' && Array.isArray(payload.datos.cortesias)) {
+      cortesiasDatos = payload.datos.cortesias;
+    }
+  }
+
+  if (!ventasDatos.length && !cortesiasDatos.length) {
     return res.status(400).json({ exito: false, mensaje: "Formato de datos inválido" });
   }
-  
+
   try {
-    let importados = 0;
-    
-    for (const item of datos) {
+    let importadosVentas = 0;
+    let importadosCortesias = 0;
+
+    for (const item of ventasDatos) {
       const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
       const costoProduccion = Number(item.costo_produccion) || Number(item.costo_unitario) || 0;
       const precioVenta = Number(item.precio_venta) || Number(item.precio_venta_unitario) || 0;
@@ -1217,17 +1272,104 @@ app.post("/api/importar/ventas", async (req, res) => {
           (err) => {
             if (err) reject(err);
             else {
-              importados++;
+              importadosVentas++;
               resolve();
             }
           }
         );
       });
     }
-    
-    res.json({ exito: true, mensaje: "Ventas importadas", importados });
+
+    for (const item of cortesiasDatos) {
+      const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
+
+      await dbRunAsync(
+        bdVentas,
+        `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           nombre_receta=excluded.nombre_receta,
+           cantidad=excluded.cantidad,
+           fecha_cortesia=excluded.fecha_cortesia,
+           numero_pedido=excluded.numero_pedido,
+           motivo=excluded.motivo,
+           para_quien=excluded.para_quien`,
+        [
+          item.id,
+          item.nombre_receta || item.pedido || 'Sin receta',
+          cantidad,
+          item.fecha_cortesia || item.fecha_venta || new Date().toISOString(),
+          item.numero_pedido || item.pedido || '',
+          item.motivo || '',
+          item.para_quien || ''
+        ]
+      );
+      importadosCortesias += 1;
+    }
+
+    res.json({
+      exito: true,
+      mensaje: 'Ventas y cortesias importadas',
+      importados: {
+        ventas: importadosVentas,
+        cortesias: importadosCortesias
+      }
+    });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: "Error al importar ventas: " + error.message });
+  }
+});
+
+// Importar datos de cortesias
+app.post('/api/importar/cortesias', async (req, res) => {
+  const payload = req.body;
+
+  let cortesiasDatos = [];
+  if (Array.isArray(payload)) {
+    cortesiasDatos = payload;
+  } else if (payload && typeof payload === 'object') {
+    if (Array.isArray(payload.cortesias)) {
+      cortesiasDatos = payload.cortesias;
+    } else if (Array.isArray(payload.datos)) {
+      cortesiasDatos = payload.datos;
+    }
+  }
+
+  if (!Array.isArray(cortesiasDatos)) {
+    return res.status(400).json({ exito: false, mensaje: 'Formato de datos inválido' });
+  }
+
+  try {
+    let importados = 0;
+    for (const item of cortesiasDatos) {
+      const cantidad = Number(item.cantidad) || Number(item.cantidad_vendida) || 0;
+      await dbRunAsync(
+        bdVentas,
+        `INSERT INTO cortesias (id, nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           nombre_receta=excluded.nombre_receta,
+           cantidad=excluded.cantidad,
+           fecha_cortesia=excluded.fecha_cortesia,
+           numero_pedido=excluded.numero_pedido,
+           motivo=excluded.motivo,
+           para_quien=excluded.para_quien`,
+        [
+          item.id,
+          item.nombre_receta || item.pedido || 'Sin receta',
+          cantidad,
+          item.fecha_cortesia || item.fecha_venta || new Date().toISOString(),
+          item.numero_pedido || item.pedido || '',
+          item.motivo || '',
+          item.para_quien || ''
+        ]
+      );
+      importados += 1;
+    }
+
+    res.json({ exito: true, mensaje: 'Cortesias importadas', importados });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: 'Error al importar cortesias: ' + error.message });
   }
 });
 

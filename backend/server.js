@@ -207,6 +207,8 @@ const reglasPermisos = [
   { metodos: ['POST'], exacto: '/api/importar/ventas', pestana: 'ventas', accion: 'importar' },
   { metodos: ['GET'], exacto: '/api/exportar/cortesias', pestana: 'ventas', accion: 'exportar' },
   { metodos: ['POST'], exacto: '/api/importar/cortesias', pestana: 'ventas', accion: 'importar' },
+  { metodos: ['GET'], exacto: '/api/exportar/todo', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/api/importar/todo', pestana: 'admin_usuarios', accion: 'editar_usuario' },
   { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', pestana: 'ventas', accion: 'editar' },
   { metodos: ['GET'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'ver' },
   { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'editar' }
@@ -555,6 +557,184 @@ function dbRunAsync(db, sql, params = []) {
 function toArrayMaybe(valor) {
   return Array.isArray(valor) ? valor : [];
 }
+
+function normalizarEntradaImportacionTodo(payload) {
+  const base = payload?.dbs || payload?.datos?.dbs || payload?.datos || payload;
+  if (!base || typeof base !== 'object' || Array.isArray(base)) return null;
+
+  const normalizado = { ...base };
+  const ventasBase = (normalizado.ventas && typeof normalizado.ventas === 'object') ? { ...normalizado.ventas } : {};
+  const tablasVentas = (ventasBase.tablas && typeof ventasBase.tablas === 'object') ? { ...ventasBase.tablas } : {};
+
+  const posiblesTrastiendaConfig = [
+    payload?.trastienda_config,
+    payload?.tienda_config,
+    payload?.datos?.trastienda_config,
+    payload?.datos?.tienda_config
+  ];
+  const trastiendaArray = posiblesTrastiendaConfig
+    .map((valor) => toArrayMaybe(valor))
+    .find((arr) => Array.isArray(arr) && arr.length) || [];
+
+  if (!Array.isArray(tablasVentas.tienda_config) || !tablasVentas.tienda_config.length) {
+    if (Array.isArray(trastiendaArray) && trastiendaArray.length) {
+      tablasVentas.tienda_config = trastiendaArray;
+    } else {
+      const configObjeto = payload?.config_tienda || payload?.trastienda?.config || payload?.tienda?.config;
+      if (configObjeto && typeof configObjeto === 'object' && !Array.isArray(configObjeto)) {
+        tablasVentas.tienda_config = Object.entries(configObjeto).map(([clave, valor]) => ({
+          clave: String(clave || '').trim(),
+          valor: valor == null ? '' : String(valor)
+        })).filter((row) => row.clave);
+      }
+    }
+  }
+
+  normalizado.ventas = {
+    ...ventasBase,
+    tablas: tablasVentas
+  };
+
+  return normalizado;
+}
+
+function escaparIdentificadorSql(nombre) {
+  return `"${String(nombre || '').replaceAll('"', '""')}"`;
+}
+
+async function listarTablasUsuario(db) {
+  const rows = await dbAllAsync(
+    db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  );
+  return rows.map((r) => String(r.name || '')).filter(Boolean);
+}
+
+async function obtenerColumnasTabla(db, tabla) {
+  const pragma = await dbAllAsync(db, `PRAGMA table_info(${escaparIdentificadorSql(tabla)})`);
+  return pragma.map((col) => String(col.name || '')).filter(Boolean);
+}
+
+const MAPA_DATABASES = {
+  inventario: bdInventario,
+  recetas: bdRecetas,
+  produccion: bdProduccion,
+  ventas: bdVentas,
+  admin: bdAdmin
+};
+
+// Exportar respaldo completo de todas las tablas de todas las DBs.
+app.get('/api/exportar/todo', async (req, res) => {
+  try {
+    const salida = {
+      tipo: 'todo',
+      version: 1,
+      generado_en: new Date().toISOString(),
+      dbs: {}
+    };
+
+    const total = {};
+
+    for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
+      const tablas = await listarTablasUsuario(db);
+      const dbPayload = { tablas: {} };
+      const totalDb = {};
+
+      for (const tabla of tablas) {
+        const rows = await dbAllAsync(db, `SELECT * FROM ${escaparIdentificadorSql(tabla)}`);
+        dbPayload.tablas[tabla] = rows;
+        totalDb[tabla] = rows.length;
+      }
+
+      salida.dbs[nombreDb] = dbPayload;
+      total[nombreDb] = totalDb;
+    }
+
+    const trastiendaConfig = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_config);
+
+    res.json({
+      ...salida,
+      total,
+      trastienda_config: trastiendaConfig,
+      incluye_trastienda_config: true
+    });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: 'Error al exportar TODO', detalle: error.message });
+  }
+});
+
+// Importar respaldo completo (todas las tablas de todas las DBs).
+app.post('/api/importar/todo', async (req, res) => {
+  const payload = req.body;
+
+  const dbsEntrada = normalizarEntradaImportacionTodo(payload);
+  if (!dbsEntrada || typeof dbsEntrada !== 'object' || Array.isArray(dbsEntrada)) {
+    return res.status(400).json({ exito: false, mensaje: 'Formato de datos inválido para importación total' });
+  }
+
+  const resultado = {};
+
+  try {
+    for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
+      const origenDb = dbsEntrada[nombreDb];
+      const tablasEntrada = origenDb?.tablas || null;
+      if (!tablasEntrada || typeof tablasEntrada !== 'object') continue;
+
+      const tablasExistentes = await listarTablasUsuario(db);
+      const setTablasExistentes = new Set(tablasExistentes);
+      const tablasObjetivo = Object.keys(tablasEntrada).filter((t) => setTablasExistentes.has(t));
+
+      if (!tablasObjetivo.length) continue;
+
+      resultado[nombreDb] = {};
+
+      await dbRunAsync(db, 'PRAGMA foreign_keys = OFF');
+      await dbRunAsync(db, 'BEGIN TRANSACTION');
+
+      try {
+        for (const tabla of tablasObjetivo) {
+          const rows = toArrayMaybe(tablasEntrada[tabla]);
+          const columnasExistentes = await obtenerColumnasTabla(db, tabla);
+          const setColumnas = new Set(columnasExistentes);
+
+          await dbRunAsync(db, `DELETE FROM ${escaparIdentificadorSql(tabla)}`);
+
+          let importados = 0;
+          for (const row of rows) {
+            if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+
+            const columnasRow = Object.keys(row).filter((c) => setColumnas.has(c));
+            if (!columnasRow.length) continue;
+
+            const columnasSql = columnasRow.map(escaparIdentificadorSql).join(', ');
+            const placeholders = columnasRow.map(() => '?').join(', ');
+            const valores = columnasRow.map((c) => (row[c] === undefined ? null : row[c]));
+
+            await dbRunAsync(
+              db,
+              `INSERT INTO ${escaparIdentificadorSql(tabla)} (${columnasSql}) VALUES (${placeholders})`,
+              valores
+            );
+            importados += 1;
+          }
+
+          resultado[nombreDb][tabla] = importados;
+        }
+
+        await dbRunAsync(db, 'COMMIT');
+      } catch (errorTabla) {
+        await dbRunAsync(db, 'ROLLBACK');
+        throw errorTabla;
+      } finally {
+        await dbRunAsync(db, 'PRAGMA foreign_keys = ON');
+      }
+    }
+
+    res.json({ exito: true, mensaje: 'Respaldo total importado', importados: resultado });
+  } catch (error) {
+    res.status(500).json({ exito: false, mensaje: 'Error al importar TODO: ' + error.message });
+  }
+});
 
 // Exportar datos de inventario
 app.get("/api/exportar/inventario", async (req, res) => {

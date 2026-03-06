@@ -3,6 +3,7 @@ import './AdminUsuarios.css';
 import { fetchAPIJSON } from "../../utils/api.jsx";
 import { mostrarNotificacion } from "../../utils/notificaciones.jsx";
 import { normalizarTextoBusqueda } from "../../utils/texto.jsx";
+import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
 
 const DEFINICION_PERMISOS = {
@@ -412,6 +413,20 @@ export default function AdminUsuarios() {
     <div className="contenidoAdmin adminUsuariosCard">
       <h2>Administración de Usuarios</h2>
       <div className="adminActualInfo">Administrador: {adminActual?.nombre || adminActual?.username || 'N/D'}</div>
+      <div className="respaldoTotalAdminUsuarios">
+        <span className="respaldoTotalLeyenda">Respaldo total (incluye trastienda/configuración tienda)</span>
+        <div className="respaldoTotalAcciones">
+          <button className="botonImportar" onClick={() => document.getElementById('importarTodoAdminUsuarios')?.click()}>Importar TODO</button>
+          <input
+            type="file"
+            id="importarTodoAdminUsuarios"
+            className="inputArchivoOculto"
+            accept=".json"
+            onChange={(e) => importarDatos('todo', e.target)}
+          />
+          <button className="botonExportar" onClick={() => exportarDatos('todo')}>Exportar TODO</button>
+        </div>
+      </div>
       <form onSubmit={submit} style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:18 }}>
         <input placeholder="Usuario" required value={form.username} onChange={e=>setForm({...form,username:e.target.value})} style={{flex:'1 1 120px'}} />
         <input placeholder="Nombre" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})} style={{flex:'2 1 180px'}} />

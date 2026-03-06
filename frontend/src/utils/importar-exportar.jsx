@@ -72,10 +72,18 @@ function extraerVentasDesdeArchivo(datos) {
 
 /**
  * Exportar datos de una sección específica
- * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias'
+ * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias', 'todo'
  */
 export async function exportarDatos(tipo) {
   try {
+    if (tipo === 'todo') {
+      const endpointTodo = `${obtenerURLAPI()}/api/exportar/todo`;
+      const datosTodo = await fetchAPIJSON(endpointTodo);
+      descargarJson(datosTodo, tipo);
+      mostrarNotificacion('✅ Respaldo TOTAL exportado correctamente', 'exito');
+      return;
+    }
+
     if (tipo === 'cortesias') {
       try {
         const endpointCortesias = `${obtenerURLAPI()}/api/exportar/cortesias`;
@@ -114,7 +122,7 @@ export async function exportarDatos(tipo) {
 
 /**
  * Importar datos de un archivo JSON
- * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias'
+ * @param {string} tipo - 'inventario', 'utensilios', 'recetas', 'produccion', 'ventas', 'cortesias', 'todo'
  * @param {HTMLInputElement} input - Input file element
  */
 export async function importarDatos(tipo, input) {
@@ -142,7 +150,13 @@ export async function importarDatos(tipo, input) {
     
     let resultado = null;
 
-    if (tipo === 'cortesias') {
+    if (tipo === 'todo') {
+      const endpointTodo = `${obtenerURLAPI()}/api/importar/todo`;
+      resultado = await fetchAPIJSON(endpointTodo, {
+        method: 'POST',
+        body: datos
+      });
+    } else if (tipo === 'cortesias') {
       const listaCortesias = extraerCortesiasDesdeArchivo(datos);
       if (!listaCortesias.length) {
         throw new Error('El archivo no contiene cortesias para importar');
@@ -200,10 +214,14 @@ export async function importarDatos(tipo, input) {
         ? Object.values(importados).reduce((acc, v) => acc + (Number(v) || 0), 0)
         : 0;
 
-    mostrarNotificacion(
-      `✅ ${totalImportados} registros importados correctamente`,
-      'exito'
-    );
+    if (tipo === 'todo') {
+      mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
+    } else {
+      mostrarNotificacion(
+        `✅ ${totalImportados} registros importados correctamente`,
+        'exito'
+      );
+    }
     
     // Recargar la sección correspondiente
     recargarSeccion(tipo);
@@ -248,6 +266,9 @@ export function recargarSeccion(tipo) {
       break;
     case 'cortesias':
       if (window.ventas?.cargarCortesias) window.ventas.cargarCortesias();
+      break;
+    case 'todo':
+      window.location.reload();
       break;
   }
 }

@@ -36,6 +36,32 @@
   color: #2f4f3c;
 }
 
+.respaldoTotalAdminUsuarios {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px dashed #b7ad9a;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.respaldoTotalLeyenda {
+  color: #5d513b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.respaldoTotalAcciones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .tablaUsuariosAdmin th,
 .tablaUsuariosAdmin td {
   text-align: left;

@@ -28,7 +28,28 @@ function dbAll(db, sql, params = []) {
   });
 }
 
-export function registrarRutasInventario(app, bdInventario) {
+export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
+  const sincronizarIngredienteReceta = (idInsumo, nombre, proveedor, callback = () => {}) => {
+    if (!bdRecetas) {
+      callback(0);
+      return;
+    }
+
+    const id = Number(idInsumo || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      callback(0);
+      return;
+    }
+
+    bdRecetas.run(
+      "UPDATE ingredientes_receta SET nombre_insumo=?, proveedor=? WHERE id_insumo=?",
+      [String(nombre || '').trim(), String(proveedor || '').trim(), id],
+      function onSync() {
+        callback(Number(this?.changes || 0));
+      }
+    );
+  };
+
   app.get('/inventario', (req, res) => {
     const termino = (req.query.busqueda || '').trim();
     const select = 'id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente';
@@ -1060,18 +1081,24 @@ export function registrarRutasInventario(app, bdInventario) {
       }
 
       bdInventario.run(updateQuery, updateParams, () => {
+        const nombreFinal = String(nombre || '').trim();
+        const proveedorFinal = String(proveedor || '').trim();
+
+        const finalizar = () => {
+          transmitir({ tipo: 'inventario_actualizado' });
+          res.json({ ok: true });
+        };
+
+        const sincronizar = () => sincronizarIngredienteReceta(id, nombreFinal, proveedorFinal, () => finalizar());
+
         if (deltaCantidad !== 0 || deltaCosto !== 0) {
           bdInventario.run(
             'INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)',
             [id, new Date().toISOString(), deltaCantidad, deltaCosto],
-            () => {
-              transmitir({ tipo: 'inventario_actualizado' });
-              res.json({ ok: true });
-            }
+            () => sincronizar()
           );
         } else {
-          transmitir({ tipo: 'inventario_actualizado' });
-          res.json({ ok: true });
+          sincronizar();
         }
       });
     });

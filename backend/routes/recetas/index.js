@@ -546,7 +546,7 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
           let pendientes = ingredientes.length;
           ingredientes.forEach(ing => {
             bdInventario.get(
-              "SELECT nombre, pendiente FROM inventario WHERE id=?",
+              "SELECT nombre, proveedor, pendiente FROM inventario WHERE id=?",
               [ing.id_insumo],
               (errInv, insumo) => {
                 const finalizar = () => {
@@ -558,12 +558,21 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
                 };
 
                 const nombreGuardado = String(ing.nombre_insumo || '').trim();
+                const proveedorGuardado = String(ing.proveedor || '').trim();
                 if (insumo) {
-                  ing.nombre = String(insumo.nombre || '').trim() || nombreGuardado || 'Insumo';
+                  const nombreActual = String(insumo.nombre || '').trim() || nombreGuardado || 'Insumo';
+                  const proveedorActual = String(insumo.proveedor || '').trim() || proveedorGuardado;
+                  ing.nombre = nombreActual;
+                  ing.proveedor = proveedorActual;
                   ing.pendiente = insumo.pendiente === 1 || insumo.pendiente === true;
                   ing.eliminado = false;
-                  if (!nombreGuardado && ing.nombre) {
-                    bdRecetas.run("UPDATE ingredientes_receta SET nombre_insumo=? WHERE id=?", [ing.nombre, ing.id]);
+                  const nombreDesactualizado = nombreActual && nombreGuardado !== nombreActual;
+                  const proveedorDesactualizado = proveedorGuardado !== proveedorActual;
+                  if (nombreDesactualizado || proveedorDesactualizado) {
+                    bdRecetas.run(
+                      "UPDATE ingredientes_receta SET nombre_insumo=?, proveedor=? WHERE id=?",
+                      [nombreActual, proveedorActual, ing.id]
+                    );
                   }
                   finalizar();
                   return;

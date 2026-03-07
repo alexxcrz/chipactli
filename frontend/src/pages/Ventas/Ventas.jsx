@@ -3,7 +3,6 @@ import './Ventas.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { mostrarConfirmacion } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
-import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 
@@ -41,18 +40,11 @@ export default function Ventas() {
       <div className="tarjeta">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
           <h2>Análisis de Ventas</h2>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <div className="botonesImportarExportar">
-              <button className="botonImportar" onClick={() => document.getElementById('importarVentas')?.click()}>📥 Importar</button>
-              <input type="file" id="importarVentas" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('ventas', e.target)} />
-              <button className="botonExportar" onClick={() => exportarDatos('ventas')}>📤 Exportar</button>
-            </div>
-            <div className="selectorPeriodo">
-              <button className="boton" onClick={() => cargarEstadisticasVentas('dia')}>Hoy</button>
-              <button className="boton" onClick={() => cargarEstadisticasVentas('semana')}>Esta Semana</button>
-              <button className="boton" onClick={() => cargarEstadisticasVentas('quincena')}>Quincena</button>
-              <button className="boton" onClick={() => cargarEstadisticasVentas('mes')}>Este Mes</button>
-            </div>
+          <div className="selectorPeriodo">
+            <button className="boton" onClick={() => cargarEstadisticasVentas('dia')}>Hoy</button>
+            <button className="boton" onClick={() => cargarEstadisticasVentas('semana')}>Esta Semana</button>
+            <button className="boton" onClick={() => cargarEstadisticasVentas('quincena')}>Quincena</button>
+            <button className="boton" onClick={() => cargarEstadisticasVentas('mes')}>Este Mes</button>
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
@@ -81,11 +73,6 @@ export default function Ventas() {
       <div className="tarjeta">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
           <h2>Historial de Cortesías</h2>
-          <div className="botonesImportarExportar">
-            <button className="botonImportar" onClick={() => document.getElementById('importarCortesias')?.click()}>📥 Importar cortesías</button>
-            <input type="file" id="importarCortesias" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('cortesias', e.target)} />
-            <button className="botonExportar" onClick={() => exportarDatos('cortesias')}>📤 Exportar cortesías</button>
-          </div>
         </div>
         <table>
           <thead>

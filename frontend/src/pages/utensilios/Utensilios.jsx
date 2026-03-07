@@ -3,7 +3,6 @@ import './Utensilios.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
-import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
 export default function Utensilios() {
@@ -45,11 +44,6 @@ export default function Utensilios() {
           <h2>Inventario de Utensilios</h2>
           <div style={{ display: 'flex', gap: '10px' }}>
             <input type="text" className="cajaBusqueda" id="busquedaUtensilios" placeholder="🔍 Buscar utensilio..." onChange={e => filtrarUtensilios(e.target.value)} />
-            <div className="botonesImportarExportar">
-              <button className="botonImportar" onClick={() => document.getElementById('importarUtensilios')?.click()}>📥 Importar</button>
-              <input type="file" id="importarUtensilios" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('utensilios', e.target)} />
-              <button className="botonExportar" onClick={() => exportarDatos('utensilios')}>📤 Exportar</button>
-            </div>
             <button className="boton" onClick={() => abrirModal('modalUtensilio')}>➥ Agregar Utensilio</button>
           </div>
         </div>

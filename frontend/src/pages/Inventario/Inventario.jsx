@@ -3,7 +3,6 @@ import './inventario.css';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
-import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { API } from '../../utils/config.jsx';
 import { fetchAPI, fetchAPIJSON } from '../../utils/api.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
@@ -1657,11 +1656,6 @@ export default function Inventario() {
         <h2>Inventario</h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
           <input type="text" className="cajaBusqueda" id="busquedaInventario" placeholder="🔍 Buscar insumo..." onChange={(e) => filtrarInventario(e.target.value)} style={{ width: '220px' }} />
-          <div className="botonesImportarExportar">
-            <button className="botonImportar" onClick={() => document.getElementById('importarInventario').click()}>📥 Importar</button>
-            <input type="file" id="importarInventario" className="inputArchivoOculto" accept=".json" onChange={(e) => importarDatos('inventario', e.target)} />
-            <button className="botonExportar" onClick={() => exportarDatos('inventario')}>📤 Exportar</button>
-          </div>
           <button className="boton" onClick={() => abrirModalAgregarInsumo()}>➥ Agregar Insumo</button>
           <button className="boton" onClick={() => mostrarHistorialInversion()}>📊 Historial Inversión</button>
         </div>

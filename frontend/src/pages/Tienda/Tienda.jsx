@@ -201,7 +201,9 @@ function guardarCarritoGuardado(items, creadoEn) {
 export default function Tienda({
   modo = 'tienda',
   mostrarLogoAccesoSistema = false,
-  onClickLogoAccesoSistema = null
+  onClickLogoAccesoSistema = null,
+  mostrarAccesoRapidoPwa = false,
+  onActivarAccesoRapidoPwa = null
 }) {
   const esVistaTrastienda = modo === 'trastienda';
   const [productos, setProductos] = useState([]);
@@ -411,12 +413,12 @@ export default function Tienda({
 
   const redesDisponibles = useMemo(() => {
     const redes = [
-      { clave: 'facebook', label: 'Facebook', icono: 'f' },
-      { clave: 'instagram', label: 'Instagram', icono: 'ig' },
-      { clave: 'tiktok', label: 'TikTok', icono: 'tt' },
-      { clave: 'youtube', label: 'YouTube', icono: 'yt' },
-      { clave: 'x', label: 'X', icono: 'x' },
-      { clave: 'linkedin', label: 'LinkedIn', icono: 'in' }
+      { clave: 'facebook', label: 'Facebook', icono: 'f', logo: '/images/facebook.png' },
+      { clave: 'instagram', label: 'Instagram', icono: 'ig', logo: '/images/instagram.png' },
+      { clave: 'tiktok', label: 'TikTok', icono: 'tt', logo: '/images/tiktok.png' },
+      { clave: 'youtube', label: 'YouTube', icono: 'yt', logo: '/images/youtube.png' },
+      { clave: 'x', label: 'X', icono: 'x', logo: '' },
+      { clave: 'linkedin', label: 'LinkedIn', icono: 'in', logo: '' }
     ];
 
     return redes.filter((red) => {
@@ -995,40 +997,6 @@ export default function Tienda({
     }
   }
 
-  async function cambiarVisibilidadPublica(producto, marcado) {
-    const recetaNombre = String(producto?.nombre_receta || '').trim();
-    if (!recetaNombre) return;
-    setGuardandoClasificacion(recetaNombre);
-    try {
-      const variantes = normalizarVariantes(producto?.variantes);
-      const recetasObjetivo = Array.from(new Set(
-        (variantes.length
-          ? variantes.map((v) => String(v?.receta_nombre || '').trim()).filter(Boolean)
-          : [recetaNombre])
-      ));
-
-      await Promise.all(recetasObjetivo.map((nombre) => fetchAdmin('/tienda/catalogo/upsert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receta_nombre: nombre,
-          activo: Boolean(marcado)
-        })
-      })));
-
-      setProductos((prev) => prev.map((item) => (
-        item.nombre_receta === recetaNombre
-          ? { ...item, visible_publico: Boolean(marcado) }
-          : item
-      )));
-      mostrarNotificacion(`Producto ${marcado ? 'visible' : 'oculto'} para público`, 'exito');
-    } catch (error) {
-      mostrarNotificacion(error?.message || 'No se pudo actualizar visibilidad', 'error');
-    } finally {
-      setGuardandoClasificacion('');
-    }
-  }
-
   function toggleClasificacionProducto(recetaNombre, campo) {
     setProductos((prev) => prev.map((item) => {
       if (item.nombre_receta !== recetaNombre) return item;
@@ -1414,6 +1382,16 @@ export default function Tienda({
         </div>
         <div className="tiendaHeaderCentroShop" aria-label="VITRINA">VITRINA</div>
         <div className="tiendaHeaderAcciones">
+          {mostrarAccesoRapidoPwa && typeof onActivarAccesoRapidoPwa === 'function' && (
+            <button
+              type="button"
+              className="boton tiendaAccesoRapidoBtn"
+              onClick={onActivarAccesoRapidoPwa}
+              title="Guardar acceso rápido en este dispositivo"
+            >
+              Acceso rápido
+            </button>
+          )}
           {!clienteToken ? (
             <>
               <button className="boton" onClick={() => { setModoAuth('login'); setMostrarModalAuthCliente(true); }}>Iniciar sesión</button>
@@ -1547,16 +1525,6 @@ export default function Tienda({
                       <div className={disponible ? 'tiendaEstadoActivo' : 'tiendaEstadoInactivo'}>
                         {disponible ? 'Activo para venta' : 'Pendiente de producción'}
                       </div>
-                      <label className="tiendaSwitchCard tiendaSwitchToggle">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(producto?.visible_publico)}
-                          disabled={guardandoClasificacion === producto.nombre_receta}
-                          onChange={(e) => cambiarVisibilidadPublica(producto, e.target.checked)}
-                        />
-                        <span className="tiendaSwitchSlider"></span>
-                        Visible al público
-                      </label>
                     </>
                   )}
                   <div className="tiendaAccionesCard">
@@ -2598,7 +2566,9 @@ export default function Tienda({
                   title={red.label}
                   aria-label={red.label}
                 >
-                  {red.icono}
+                  {red.logo
+                    ? <img src={red.logo} alt={red.label} className="tiendaRedSocialImg" />
+                    : red.icono}
                 </a>
               ))}
             </div>

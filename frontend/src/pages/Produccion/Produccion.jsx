@@ -2,7 +2,6 @@
 import './Produccion.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
-import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
@@ -35,11 +34,6 @@ export default function Produccion() {
               placeholder="🔍 Buscar producción..."
               onChange={e => filtrarProduccion(e.target.value)}
             />
-            <div className="botonesImportarExportar">
-              <button className="botonImportar" type="button" onClick={() => document.getElementById('importarProduccion')?.click()}>📥 Importar</button>
-              <input type="file" id="importarProduccion" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('produccion', e.target)} />
-              <button className="botonExportar" type="button" onClick={() => exportarDatos('produccion')}>📤 Exportar</button>
-            </div>
           </div>
         </div>
 

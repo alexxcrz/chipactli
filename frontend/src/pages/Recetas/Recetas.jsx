@@ -3,7 +3,6 @@ import './Recetas.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
-import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
 const OC_SUGERIDOS_KEY = 'chipactli_oc_sugeridos';
@@ -63,6 +62,8 @@ export default function Recetas() {
       ,iniciarArrastreImagenGaleria
       ,soltarImagenGaleria
       ,permitirDropImagenGaleria
+      ,cambiarVisibleRecetaTienda
+      ,toggleIngredienteTiendaVisible
     };
 
     window.agregarIngrediente = () => agregarIngrediente(false);
@@ -105,11 +106,6 @@ export default function Recetas() {
       <div className="encabezadoTarjeta">
         <h2>Gestión de Recetas</h2>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <div className="botonesImportarExportar">
-            <button className="botonImportar" onClick={() => document.getElementById('importarRecetas')?.click()}>📥 Importar</button>
-            <input type="file" id="importarRecetas" className="inputArchivoOculto" accept=".json" onChange={e => importarDatos('recetas', e.target)} />
-            <button className="botonExportar" onClick={() => exportarDatos('recetas')}>📤 Exportar</button>
-          </div>
           <button className="boton" onClick={() => abrirModalEscaladoCategoria()}>📋 Escalar por categoría</button>
           <button className="boton" onClick={() => abrirModalArchivadoRecetas()}>🗂️ Archivar recetas</button>
           <button className="boton" onClick={() => abrirModal('modalCategoria')}>➕ Nueva Categoría</button>
@@ -119,10 +115,6 @@ export default function Recetas() {
 
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '15px' }}>
         <input type="text" className="cajaBusqueda" id="busquedaRecetas" placeholder="🔍 Buscar receta..." onChange={e => filtrarRecetas(e.target.value)} style={{ width: '220px' }} />
-      </div>
-
-      <div className="tabsSubseccionRecetas">
-        <button id="btnSubTabRecetas" type="button" className="boton activo" onClick={() => cambiarSubpestanaRecetas('recetas')}>📚 Recetas</button>
       </div>
 
       <div id="panelSubpestanaRecetas">
@@ -275,22 +267,25 @@ export default function Recetas() {
       </div>
 
       <div id="modalFichaTiendaReceta" className="modal" onClick={() => cerrarModal('modalFichaTiendaReceta')}>
-        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
+        <div className="contenidoModal modalFichaTiendaCompacta" onClick={e => e.stopPropagation()}>
           <div className="encabezadoModal"><h3>Ficha para tienda</h3><button className="cerrarModal" onClick={() => cerrarModal('modalFichaTiendaReceta')}>&times;</button></div>
-          <div className="cajaFormulario">
+          <div className="cajaFormulario fichaTiendaFormularioCompacta">
             <input id="fichaTiendaNombreReceta" type="text" readOnly />
-            <label>Imagen principal</label>
-            <input id="fichaTiendaImagenPrincipal" type="file" accept="image/*" />
-            <div id="fichaTiendaPreviewPrincipal" className="fichaTiendaPreviewPrincipal"></div>
-            <label>Otras imágenes (galería)</label>
-            <input id="fichaTiendaImagenesSecundarias" type="file" accept="image/*" multiple />
-            <div id="fichaTiendaGaleria" className="fichaTiendaGaleria"></div>
-            <textarea id="fichaTiendaDescripcion" rows="3" placeholder="Descripción (se comparte entre variantes)"></textarea>
-            <input id="fichaTiendaPrecioPublico" type="number" min="0" step="0.01" placeholder="Precio venta público" />
-            <textarea id="fichaTiendaModoUso" rows="3" placeholder="Modo de uso"></textarea>
-            <textarea id="fichaTiendaCuidados" rows="3" placeholder="Cuidados del producto"></textarea>
-            <textarea id="fichaTiendaIngredientes" rows="4" placeholder="Ingredientes para tienda (uno por línea)"></textarea>
-            <button className="boton botonExito" type="button" onClick={() => guardarFichaTiendaReceta()}>Guardar ficha tienda</button>
+            <div>
+              <label htmlFor="fichaTiendaPrecioPublico">Precio público (opcional)</label>
+              <input id="fichaTiendaPrecioPublico" type="number" min="0" step="0.01" placeholder="Ej. 120" />
+            </div>
+            <label className="fichaSpan2">Imágenes del producto (la primera será la principal)</label>
+            <input id="fichaTiendaImagenes" className="fichaSpan2" type="file" accept="image/*" multiple />
+            <div id="fichaTiendaGaleria" className="fichaTiendaGaleria fichaSpan2"></div>
+            <textarea id="fichaTiendaDescripcion" className="fichaSpan2" rows="2" placeholder="Descripción (se comparte entre variantes)"></textarea>
+            <textarea id="fichaTiendaModoUso" rows="4" placeholder="Modo de uso"></textarea>
+            <textarea id="fichaTiendaCuidados" rows="4" placeholder="Cuidados del producto"></textarea>
+            <div className="fichaSpan2 fichaIngredientesBloque">
+              <label>Ingredientes para tienda</label>
+              <div id="fichaTiendaListaIngredientes" className="fichaTiendaListaIngredientes"></div>
+            </div>
+            <button className="boton botonExito fichaSpan2" type="button" onClick={() => guardarFichaTiendaReceta()}>Guardar ficha tienda</button>
           </div>
         </div>
       </div>
@@ -352,7 +347,7 @@ export default function Recetas() {
               <input id="nuevoGramajeEscaladoCategoria" type="number" min="0.01" step="0.01" placeholder="Nuevo gramaje" />
             </div>
             <label className="selectorTodasEscalado">
-              <span>Seleccionar todas</span>
+              <span className="selectorTodasEscaladoTexto">Seleccionar todas</span>
               <span className="switchMini">
                 <input id="seleccionarTodasEscalado" type="checkbox" onChange={toggleSeleccionTodasEscalado} />
                 <span className="switchMiniSlider"></span>
@@ -386,7 +381,7 @@ export default function Recetas() {
 
             <div id="panelArchivarRecetas">
               <label className="selectorTodasEscalado">
-                <span>Seleccionar todas</span>
+                <span className="selectorTodasEscaladoTexto">Seleccionar todas</span>
                 <span className="switchMini">
                   <input id="seleccionarTodasArchivar" type="checkbox" onChange={toggleSeleccionTodasArchivar} />
                   <span className="switchMiniSlider"></span>
@@ -398,7 +393,7 @@ export default function Recetas() {
 
             <div id="panelArchivadasRecetas" style={{ display: 'none' }}>
               <label className="selectorTodasEscalado">
-                <span>Seleccionar todas</span>
+                <span className="selectorTodasEscaladoTexto">Seleccionar todas</span>
                 <span className="switchMini">
                   <input id="seleccionarTodasDesarchivar" type="checkbox" onChange={toggleSeleccionTodasArchivadas} />
                   <span className="switchMiniSlider"></span>
@@ -436,8 +431,8 @@ let insumosOrdenCompraRecetas = [];
 let itemsOrdenCompraRecetasTemporales = [];
 let sugerenciasAutoOrdenCompraRecetas = [];
 let recetaTiendaEditando = null;
-let fichaTiendaImagenPrincipalActual = '';
 let fichaTiendaGaleriaActual = [];
+let fichaTiendaIngredientesActual = [];
 let indiceDragGaleriaTienda = -1;
 
 function getAbrev(unidad) {
@@ -1191,7 +1186,7 @@ async function cargarRecetasEscaladoCategoria() {
 
     lista.innerHTML = recetasEscaladoActual.map((receta) => `
       <label class="itemRecetaEscalado">
-        <span>${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
+        <span class="itemRecetaEscaladoTexto">${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
         <span class="switchMini">
           <input class="checkRecetaEscalado" type="checkbox" value="${receta.id}" />
           <span class="switchMiniSlider"></span>
@@ -1360,7 +1355,7 @@ async function cargarRecetasArchivado() {
 
     lista.innerHTML = recetasArchivadoActual.map((receta) => `
       <label class="itemRecetaEscalado">
-        <span>${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
+        <span class="itemRecetaEscaladoTexto">${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
         <span class="switchMini">
           <input class="checkRecetaArchivar" type="checkbox" value="${receta.id}" />
           <span class="switchMiniSlider"></span>
@@ -1395,7 +1390,7 @@ async function cargarRecetasArchivadas() {
 
     lista.innerHTML = recetasArchivadasActual.map((receta) => `
       <label class="itemRecetaEscalado">
-        <span>${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
+        <span class="itemRecetaEscaladoTexto">${receta.nombre} ${receta.gramaje ? `• ${receta.gramaje}g` : '• sin gramaje'}</span>
         <span class="switchMini">
           <input class="checkRecetaDesarchivar" type="checkbox" value="${receta.id}" />
           <span class="switchMiniSlider"></span>
@@ -1586,7 +1581,17 @@ async function cargarListadoRecetas() {
               <h3 style="margin:0 0 5px 0;color:#1a1a1a;font-size:16px">${receta.nombre}</h3>
               <p style="margin:0;color:#666;font-size:11px">🌿 ${receta.categoria || 'Sin categoría'} ${receta.gramaje ? `• ${receta.gramaje}g` : ''}</p>
             </div>
-            <button onclick="window.recetas.eliminarReceta(${receta.id})" class="botonPequeno botonDanger" title="Eliminar receta" style="margin-left:8px">🗑️</button>
+            <div class="recetaAccionesTop">
+              <label class="switchMini" title="Mostrar en tienda">
+                <input
+                  type="checkbox"
+                  ${Boolean(receta.visible_publico) ? 'checked' : ''}
+                  onchange="window.recetas.cambiarVisibleRecetaTienda(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}', this.checked, this)"
+                />
+                <span class="switchMiniSlider"></span>
+              </label>
+              <button onclick="window.recetas.eliminarReceta(${receta.id})" class="botonPequeno botonDanger" title="Eliminar receta">🗑️</button>
+            </div>
           </div>
           <div style="background:#f8f9fa;padding:10px;border-radius:8px;margin-bottom:12px">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px">
@@ -1612,6 +1617,34 @@ async function cargarListadoRecetas() {
     console.error('Error cargando recetas:', error);
   } finally {
     cargandoRecetas = false;
+  }
+}
+
+async function cambiarVisibleRecetaTienda(idReceta, nombreReceta, visible, inputEl = null) {
+  try {
+    const respuestaDetalle = await fetch(`${API}/recetas/${idReceta}`);
+    if (!respuestaDetalle.ok) throw new Error('No se pudo leer la receta');
+
+    const receta = await respuestaDetalle.json();
+    const recetaNombre = String(nombreReceta || receta?.nombre || '').trim();
+    if (!recetaNombre) throw new Error('Receta inválida');
+
+    const respuesta = await fetch(`${API}/tienda/catalogo/upsert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receta_nombre: recetaNombre, activo: Boolean(visible) })
+    });
+
+    if (!respuesta.ok) {
+      const err = await respuesta.json().catch(() => ({}));
+      throw new Error(err?.error || 'No se pudo actualizar visibilidad en tienda');
+    }
+
+    mostrarNotificacion(`Receta ${visible ? 'visible' : 'oculta'} en tienda`, 'exito');
+  } catch (error) {
+    console.error('Error actualizando visibilidad de receta en tienda:', error);
+    if (inputEl) inputEl.checked = !Boolean(visible);
+    mostrarNotificacion(error?.message || 'Error al actualizar visibilidad', 'error');
   }
 }
 
@@ -1950,14 +1983,45 @@ async function abrirFichaTiendaReceta(idReceta) {
 
     const receta = await respuesta.json();
     recetaTiendaEditando = receta;
-    const ingredientesAuto = Array.isArray(receta.ingredientes)
-      ? receta.ingredientes.map((ing) => String(ing?.nombre || '').trim()).filter(Boolean)
-      : [];
+    const ingredientesOrdenados = (Array.isArray(receta.ingredientes) ? receta.ingredientes : [])
+      .map((ing) => ({
+        nombre: String(ing?.nombre || '').trim(),
+        cantidad: Number.parseFloat(String(ing?.cantidad ?? 0).replace(',', '.')) || 0
+      }))
+      .filter((item) => Boolean(item.nombre))
+      .sort((a, b) => {
+        if (b.cantidad !== a.cantidad) return b.cantidad - a.cantidad;
+        return a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' });
+      });
 
-    const ingredientesTexto = String(receta?.tienda_ingredientes || '').trim()
-      || Array.from(new Set(ingredientesAuto)).join('\n');
+    const ingredientesAuto = [];
+    const vistosIngredientes = new Set();
+    ingredientesOrdenados.forEach((item) => {
+      const clave = item.nombre.toLowerCase();
+      if (vistosIngredientes.has(clave)) return;
+      vistosIngredientes.add(clave);
+      ingredientesAuto.push(item.nombre);
+    });
+    const ingredientesVisibles = new Set(
+      String(receta?.tienda_ingredientes || '')
+        .split(/\r?\n|,/) 
+        .map((linea) => String(linea || '').trim())
+        .filter(Boolean)
+    );
 
-    fichaTiendaImagenPrincipalActual = String(receta?.tienda_image_url || '').trim();
+    const baseIngredientes = ingredientesAuto.length
+      ? ingredientesAuto
+      : Array.from(ingredientesVisibles);
+
+    const hayCoincidenciaVisible = baseIngredientes.some((nombre) => ingredientesVisibles.has(nombre));
+
+    fichaTiendaIngredientesActual = baseIngredientes.map((nombre) => ({
+      nombre,
+      visible: (ingredientesVisibles.size && hayCoincidenciaVisible)
+        ? ingredientesVisibles.has(nombre)
+        : true
+    }));
+
     const galeriaReceta = Array.isArray(receta?.tienda_galeria)
       ? receta.tienda_galeria
       : (() => {
@@ -1968,27 +2032,35 @@ async function abrirFichaTiendaReceta(idReceta) {
             return [];
           }
         })();
-    fichaTiendaGaleriaActual = galeriaReceta.map((item) => String(item || '').trim()).filter(Boolean);
+
+    const principal = String(receta?.tienda_image_url || '').trim();
+    const sec = galeriaReceta.map((item) => String(item || '').trim()).filter(Boolean);
+    const combinada = [];
+    if (principal) combinada.push(principal);
+    sec.forEach((url) => {
+      if (!combinada.includes(url)) combinada.push(url);
+    });
+    fichaTiendaGaleriaActual = combinada;
 
     const campoNombre = document.getElementById('fichaTiendaNombreReceta');
-    const campoImagenPrincipal = document.getElementById('fichaTiendaImagenPrincipal');
-    const campoImagenesSecundarias = document.getElementById('fichaTiendaImagenesSecundarias');
+    const campoImagenes = document.getElementById('fichaTiendaImagenes');
     const campoDescripcion = document.getElementById('fichaTiendaDescripcion');
     const campoPrecioPublico = document.getElementById('fichaTiendaPrecioPublico');
     const campoModoUso = document.getElementById('fichaTiendaModoUso');
     const campoCuidados = document.getElementById('fichaTiendaCuidados');
-    const campoIngredientes = document.getElementById('fichaTiendaIngredientes');
 
     if (campoNombre) campoNombre.value = receta?.nombre || '';
-    if (campoImagenPrincipal) campoImagenPrincipal.value = '';
-    if (campoImagenesSecundarias) campoImagenesSecundarias.value = '';
+    if (campoImagenes) campoImagenes.value = '';
     if (campoDescripcion) campoDescripcion.value = receta?.tienda_descripcion || '';
-    if (campoPrecioPublico) campoPrecioPublico.value = Number(receta?.tienda_precio_publico) || 0;
+    if (campoPrecioPublico) {
+      const precio = Number(receta?.tienda_precio_publico) || 0;
+      campoPrecioPublico.value = precio > 0 ? precio : '';
+    }
     if (campoModoUso) campoModoUso.value = receta?.tienda_modo_uso || '';
     if (campoCuidados) campoCuidados.value = receta?.tienda_cuidados || '';
-    if (campoIngredientes) campoIngredientes.value = ingredientesTexto;
 
     renderFichaTiendaPreviews();
+    renderFichaTiendaIngredientes();
 
     abrirModal('modalFichaTiendaReceta');
   } catch (error) {
@@ -2000,22 +2072,26 @@ async function abrirFichaTiendaReceta(idReceta) {
 async function guardarFichaTiendaReceta() {
   if (!recetaTiendaEditando?.id) return;
   try {
-    const inputPrincipal = document.getElementById('fichaTiendaImagenPrincipal');
-    const inputSecundarias = document.getElementById('fichaTiendaImagenesSecundarias');
-
-    const archivoPrincipal = inputPrincipal?.files?.[0] || null;
-    if (archivoPrincipal) {
-      fichaTiendaImagenPrincipalActual = await subirImagenTienda(archivoPrincipal);
-    }
-
-    const archivosSecundarios = Array.from(inputSecundarias?.files || []);
-    if (archivosSecundarios.length) {
-      for (const archivo of archivosSecundarios) {
+    const inputImagenes = document.getElementById('fichaTiendaImagenes');
+    const archivosNuevos = Array.from(inputImagenes?.files || []);
+    if (archivosNuevos.length) {
+      for (const archivo of archivosNuevos) {
         const url = await subirImagenTienda(archivo);
         if (url) fichaTiendaGaleriaActual.push(url);
       }
       fichaTiendaGaleriaActual = Array.from(new Set(fichaTiendaGaleriaActual));
     }
+
+    const galeriaOrdenada = fichaTiendaGaleriaActual
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+    const imagenPrincipal = galeriaOrdenada[0] || '';
+    const galeriaSecundaria = galeriaOrdenada.slice(1);
+
+    const ingredientesVisibles = fichaTiendaIngredientesActual
+      .filter((item) => Boolean(item?.visible))
+      .map((item) => String(item?.nombre || '').trim())
+      .filter(Boolean);
 
     const payload = {
       nombre: recetaTiendaEditando.nombre,
@@ -2028,13 +2104,13 @@ async function guardarFichaTiendaReceta() {
         cantidad: ing.cantidad,
         unidad: ing.unidad
       })),
-      tienda_image_url: fichaTiendaImagenPrincipalActual,
-      tienda_galeria: fichaTiendaGaleriaActual,
+      tienda_image_url: imagenPrincipal,
+      tienda_galeria: galeriaSecundaria,
       tienda_descripcion: document.getElementById('fichaTiendaDescripcion')?.value || '',
       tienda_precio_publico: Number(document.getElementById('fichaTiendaPrecioPublico')?.value) || 0,
       tienda_modo_uso: document.getElementById('fichaTiendaModoUso')?.value || '',
       tienda_cuidados: document.getElementById('fichaTiendaCuidados')?.value || '',
-      tienda_ingredientes: document.getElementById('fichaTiendaIngredientes')?.value || ''
+      tienda_ingredientes: ingredientesVisibles.join('\n')
     };
 
     const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}`, {
@@ -2100,22 +2176,16 @@ function soltarImagenGaleria(indiceDestino) {
 }
 
 function renderFichaTiendaPreviews() {
-  const contPrincipal = document.getElementById('fichaTiendaPreviewPrincipal');
-  if (contPrincipal) {
-    contPrincipal.innerHTML = fichaTiendaImagenPrincipalActual
-      ? `<img src="${fichaTiendaImagenPrincipalActual}" alt="Principal" />`
-      : '<span style="color:#777;font-size:12px">Sin imagen principal</span>';
-  }
-
   const contGaleria = document.getElementById('fichaTiendaGaleria');
   if (contGaleria) {
     if (!fichaTiendaGaleriaActual.length) {
-      contGaleria.innerHTML = '<span style="color:#777;font-size:12px">Sin imágenes secundarias</span>';
+      contGaleria.innerHTML = '<span style="color:#777;font-size:12px">Sin imágenes todavía</span>';
       return;
     }
     contGaleria.innerHTML = fichaTiendaGaleriaActual.map((url, idx) => `
       <div class="fichaTiendaGaleriaItem" draggable="true" ondragstart="window.recetas.iniciarArrastreImagenGaleria(${idx})" ondragover="window.recetas.permitirDropImagenGaleria(event)" ondrop="window.recetas.soltarImagenGaleria(${idx})">
         <img src="${url}" alt="Galería ${idx + 1}" />
+        ${idx === 0 ? '<div class="fichaTiendaBadgePrincipal">Principal</div>' : ''}
         <div class="fichaTiendaGaleriaAcciones">
           <button type="button" class="botonPequeno" onclick="window.recetas.moverImagenGaleriaTienda(${idx}, 'izq')" title="Mover a la izquierda">←</button>
           <button type="button" class="botonPequeno" onclick="window.recetas.moverImagenGaleriaTienda(${idx}, 'der')" title="Mover a la derecha">→</button>
@@ -2124,6 +2194,35 @@ function renderFichaTiendaPreviews() {
       </div>
     `).join('');
   }
+}
+
+function toggleIngredienteTiendaVisible(indice) {
+  const idx = Number(indice);
+  if (!Number.isFinite(idx) || idx < 0 || idx >= fichaTiendaIngredientesActual.length) return;
+  fichaTiendaIngredientesActual[idx].visible = !Boolean(fichaTiendaIngredientesActual[idx].visible);
+  renderFichaTiendaIngredientes();
+}
+
+function renderFichaTiendaIngredientes() {
+  const cont = document.getElementById('fichaTiendaListaIngredientes');
+  if (!cont) return;
+
+  if (!Array.isArray(fichaTiendaIngredientesActual) || !fichaTiendaIngredientesActual.length) {
+    cont.innerHTML = '<div class="fichaIngredienteVacio">Esta receta no tiene ingredientes registrados.</div>';
+    return;
+  }
+
+  cont.innerHTML = fichaTiendaIngredientesActual.map((item, idx) => `
+    <label class="fichaIngredienteItem">
+      <span class="fichaIngredienteNombre">${String(item?.nombre || '').trim()}</span>
+      <span class="fichaIngredienteSwitchWrap">
+        <span class="switchMini">
+          <input type="checkbox" ${Boolean(item?.visible) ? 'checked' : ''} onchange="window.recetas.toggleIngredienteTiendaVisible(${idx})" />
+          <span class="switchMiniSlider"></span>
+        </span>
+      </span>
+    </label>
+  `).join('');
 }
 
 async function subirImagenTienda(archivo) {

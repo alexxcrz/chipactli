@@ -110,6 +110,73 @@ const dbDir = process.env.DB_DIR
   ? path.resolve(process.env.DB_DIR)
   : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
+const backupDir = path.join(dbDir, 'backups');
+const DB_FILES = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
+
+async function buscarBackupMasReciente(nombreDb) {
+  try {
+    const archivos = await fs.readdir(backupDir);
+    const candidatos = (archivos || [])
+      .filter((f) => f.startsWith(`${nombreDb}.`) && f.endsWith('.backup'))
+      .sort()
+      .reverse();
+    return candidatos.length ? path.join(backupDir, candidatos[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function restaurarDbSiFalta(nombreDb) {
+  const destino = path.join(dbDir, nombreDb);
+  try {
+    const stat = await fs.stat(destino);
+    if (stat.size > 0) return false;
+  } catch {
+    // No existe o no es legible: intentar restaurar desde backup.
+  }
+
+  const backupReciente = await buscarBackupMasReciente(nombreDb);
+  if (!backupReciente) return false;
+
+  await fs.copyFile(backupReciente, destino);
+  return true;
+}
+
+async function reforzarPersistenciaDb() {
+  const enProduccion = esProduccion || enRender || ejecutandoEnRender;
+  const rutaPersistenteRender = path.resolve('/opt/render/data');
+  const rutaDbActual = path.resolve(dbDir);
+  const usandoRutaPersistenteRender = rutaDbActual.startsWith(rutaPersistenteRender);
+
+  if (enProduccion && ejecutandoEnRender && !usandoRutaPersistenteRender && process.env.ALLOW_EPHEMERAL_DB !== '1') {
+    throw new Error(
+      `[DB] Configuración insegura: DB_DIR=${rutaDbActual}. En Render debe usar /opt/render/data. `
+      + 'Define DB_DIR persistente o ALLOW_EPHEMERAL_DB=1 bajo tu propio riesgo.'
+    );
+  }
+
+  await fs.mkdir(dbDir, { recursive: true });
+  await fs.mkdir(backupDir, { recursive: true });
+
+  // Verifica que realmente se puede escribir en disco antes de abrir SQLite.
+  const marcaPrueba = path.join(dbDir, '.db-write-test');
+  await fs.writeFile(marcaPrueba, `${Date.now()}`, 'utf8');
+  await fs.unlink(marcaPrueba);
+
+  const restauradas = [];
+  for (const nombreDb of DB_FILES) {
+    try {
+      const restaurada = await restaurarDbSiFalta(nombreDb);
+      if (restaurada) restauradas.push(nombreDb);
+    } catch (error) {
+      console.error(`[DB] Error restaurando ${nombreDb}:`, error?.message || error);
+    }
+  }
+
+  if (restauradas.length) {
+    console.warn('[DB] Bases restauradas automáticamente desde backup:', restauradas.join(', '));
+  }
+}
 
 console.log('[DB] NODE_ENV=', process.env.NODE_ENV || '(vacío)');
 console.log('[DB] Render detectado=', ejecutandoEnRender ? 'sí' : 'no');
@@ -118,13 +185,12 @@ console.log('[DB] DB_DIR efectivo=', dbDir);
 
 configurarBackup({
   dbDir,
-  backupDir: path.join(dbDir, 'backups'),
+  backupDir,
   maxBackups: 5,
 });
 
-// Crear directorio de bases de datos si no existe
-// ...existing code...
-await fs.mkdir(dbDir, { recursive: true });
+// Endurecer almacenamiento y recuperar DBs faltantes desde backups locales.
+await reforzarPersistenciaDb();
 await fs.mkdir(path.join(uploadsDir, 'tienda'), { recursive: true });
 
 app.use('/uploads', express.static(uploadsDir));
@@ -135,6 +201,34 @@ const bdRecetas = new Database(path.join(dbDir, "recetas.db"));
 const bdProduccion = new Database(path.join(dbDir, "produccion.db"));
 const bdVentas = new Database(path.join(dbDir, "ventas.db"));
 const bdAdmin = new Database(path.join(dbDir, "admin.db"));
+
+function aplicarPragmasDurabilidad(db, nombreDb) {
+  return new Promise((resolve) => {
+    db.exec(
+      [
+        'PRAGMA journal_mode = WAL',
+        'PRAGMA synchronous = FULL',
+        'PRAGMA foreign_keys = ON',
+        'PRAGMA temp_store = MEMORY',
+        'PRAGMA busy_timeout = 10000'
+      ].join('; '),
+      (err) => {
+        if (err) {
+          console.warn(`[DB] No se pudieron aplicar PRAGMA en ${nombreDb}:`, err?.message || err);
+        }
+        resolve();
+      }
+    );
+  });
+}
+
+await Promise.all([
+  aplicarPragmasDurabilidad(bdInventario, 'inventario'),
+  aplicarPragmasDurabilidad(bdRecetas, 'recetas'),
+  aplicarPragmasDurabilidad(bdProduccion, 'produccion'),
+  aplicarPragmasDurabilidad(bdVentas, 'ventas'),
+  aplicarPragmasDurabilidad(bdAdmin, 'admin')
+]);
 
 inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas);
 inicializarBdAdmin(bdAdmin, bdInventario);
@@ -382,7 +476,7 @@ function cerrarBase(db) {
 
 // Registrar rutas
 registrarRutasUsuarios(app, bdAdmin);
-registrarRutasInventario(app, bdInventario);
+registrarRutasInventario(app, bdInventario, bdRecetas);
 registrarRutasUtensilios(app, bdInventario);
 registrarRutasCategorias(app, bdRecetas);
 registrarRutasRecetas(app, bdRecetas, bdInventario);
@@ -448,9 +542,21 @@ app.get("/api/backup/estado", async (req, res) => {
       }
     }
 
+    const backupsDisponibles = await listarBackups();
+    const rutaDbActual = path.resolve(dbDir);
+    const rutaPersistenteRender = path.resolve('/opt/render/data');
+
     return res.json({
       exito: true,
       db_dir: dbDir,
+      backup_dir: backupDir,
+      diagnostico_storage: {
+        ejecutando_en_render: ejecutandoEnRender,
+        disco_render_detectado: discoRenderDisponible,
+        usando_ruta_persistente_render: rutaDbActual.startsWith(rutaPersistenteRender),
+        backups_disponibles_total: backupsDisponibles.length,
+        ultimo_backup: backupsDisponibles[0] || null
+      },
       archivos: estadoArchivos,
       conteos: {
         inventario: Number(inv?.c || 0),

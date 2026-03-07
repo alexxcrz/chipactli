@@ -73,6 +73,20 @@ function lineasTexto(valor = "") {
     .filter(Boolean);
 }
 
+function claveIngrediente(texto = "") {
+  return String(texto || "").trim().toLowerCase();
+}
+
+function ordenarIngredientesPorCantidad(lista = [], mapaCantidad = new Map()) {
+  const items = Array.isArray(lista) ? lista.map((v) => String(v || "").trim()).filter(Boolean) : [];
+  return items.sort((a, b) => {
+    const ca = Number(mapaCantidad.get(claveIngrediente(a)) || 0);
+    const cb = Number(mapaCantidad.get(claveIngrediente(b)) || 0);
+    if (cb !== ca) return cb - ca;
+    return a.localeCompare(b, 'es', { sensitivity: 'base' });
+  });
+}
+
 function etiquetaGramaje(gramaje, nombreReceta = "") {
   const gram = Number(gramaje);
   if (Number.isFinite(gram) && gram > 0) return `${gram}g`;
@@ -260,10 +274,14 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     if (!Number.isFinite(idReceta) || idReceta <= 0) continue;
     const nombreInsumo = String(ing?.nombre_insumo || '').trim();
     if (!nombreInsumo) continue;
+    const cantidadInsumo = Number(ing?.cantidad) || 0;
     if (!mapaIngredientesReceta.has(idReceta)) {
       mapaIngredientesReceta.set(idReceta, []);
     }
-    mapaIngredientesReceta.get(idReceta).push(nombreInsumo);
+    mapaIngredientesReceta.get(idReceta).push({
+      nombre: nombreInsumo,
+      cantidad: cantidadInsumo
+    });
   }
 
   const producidos = await dbAll(
@@ -331,8 +349,24 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     if (!visibleCatalogo && !incluirOcultos) continue;
 
     const stock = Number(prod?.stock) || 0;
-    const ingredientesAuto = Array.from(new Set(mapaIngredientesReceta.get(Number(receta?.id)) || []));
-    const ingredientesTienda = lineasTexto(receta?.tienda_ingredientes);
+    const ingredientesRecetaLista = mapaIngredientesReceta.get(Number(receta?.id)) || [];
+    const mapaCantidadIngredientes = new Map();
+    ingredientesRecetaLista.forEach((ing) => {
+      const nombre = String(ing?.nombre || '').trim();
+      if (!nombre) return;
+      const clave = claveIngrediente(nombre);
+      const cantidad = Number(ing?.cantidad) || 0;
+      const anterior = Number(mapaCantidadIngredientes.get(clave) || 0);
+      if (!mapaCantidadIngredientes.has(clave) || cantidad > anterior) {
+        mapaCantidadIngredientes.set(clave, cantidad);
+      }
+    });
+
+    const ingredientesAuto = ordenarIngredientesPorCantidad(
+      Array.from(new Set(ingredientesRecetaLista.map((ing) => String(ing?.nombre || '').trim()).filter(Boolean))),
+      mapaCantidadIngredientes
+    );
+    const ingredientesTienda = ordenarIngredientesPorCantidad(lineasTexto(receta?.tienda_ingredientes), mapaCantidadIngredientes);
     const galeriaTienda = parseJSON(receta?.tienda_galeria, []);
     const galeria = Array.isArray(galeriaTienda) ? galeriaTienda.map((item) => String(item || '').trim()).filter(Boolean) : [];
     const imagenPrincipal = String(receta?.tienda_image_url || catalogo?.image_url || galeria[0] || "");
@@ -361,7 +395,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       cuidados: String(receta?.tienda_cuidados || ""),
       image_url: imagenPrincipal,
       galeria,
-      ingredientes: ingredientesTienda.length ? ingredientesTienda : parseJSON(catalogo?.ingredientes, ingredientesAuto),
+      ingredientes: ingredientesTienda.length
+        ? ingredientesTienda
+        : ordenarIngredientesPorCantidad(parseJSON(catalogo?.ingredientes, ingredientesAuto), mapaCantidadIngredientes),
       variantes: parseJSON(catalogo?.variantes, []),
       es_lanzamiento: Number(catalogo?.es_lanzamiento) === 1,
       es_favorito: Number(catalogo?.es_favorito) === 1,

@@ -149,15 +149,22 @@ async function limpiarBackupsAntiguos() {
  * Programa backups automáticos cada 6 horas
  */
 export function programarBackupsAutomaticos() {
+  const horas = Number(process.env.BACKUP_INTERVAL_HOURS);
+  const delaySec = Number(process.env.BACKUP_INITIAL_DELAY_SEC);
+  const intervaloHoras = Number.isFinite(horas) && horas > 0 ? horas : 6;
+  const demoraInicialMs = Number.isFinite(delaySec) && delaySec >= 0
+    ? delaySec * 1000
+    : 60000;
+
   // Backup inicial
   setTimeout(() => {
     crearBackup();
-  }, 60000); // Primer backup después de 1 minuto
+  }, demoraInicialMs);
 
-  // Backups cada 6 horas
+  // Backups periódicos
   setInterval(() => {
     crearBackup();
-  }, 6 * 60 * 60 * 1000);
+  }, intervaloHoras * 60 * 60 * 1000);
   
-  console.log('📦 Sistema de backups automáticos activado');
+  console.log(`📦 Backups automáticos activados (cada ${intervaloHoras}h, inicio en ${Math.round(demoraInicialMs / 1000)}s)`);
 }

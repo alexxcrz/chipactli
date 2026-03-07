@@ -817,7 +817,13 @@ export default function App() {
     recetas: Recetas,
     produccion: Produccion,
     ventas: Ventas,
-    tienda: () => <Tienda modo="tienda" />,
+    tienda: () => (
+      <Tienda
+        modo="tienda"
+        mostrarAccesoRapidoPwa={mostrarInstalarPwa}
+        onActivarAccesoRapidoPwa={instalarAppPwa}
+      />
+    ),
     trastienda: () => <Tienda modo="trastienda" />,
     utensilios: Utensilios,
     'admin-usuarios': AdminUsuarios
@@ -864,6 +870,8 @@ export default function App() {
           modo="tienda"
           mostrarLogoAccesoSistema
           onClickLogoAccesoSistema={registrarToqueLogo}
+          mostrarAccesoRapidoPwa={mostrarInstalarPwa}
+          onActivarAccesoRapidoPwa={instalarAppPwa}
         />
 
         {menuContextoTrastienda.visible && (
@@ -1042,12 +1050,6 @@ export default function App() {
             </div>
           </div>
         )}
-
-        {mostrarInstalarPwa && (
-          <button type="button" className="botonInstalarPwa" onClick={instalarAppPwa}>
-            Instalar app
-          </button>
-        )}
         </div>
     );
   }
@@ -1083,6 +1085,16 @@ export default function App() {
           })}
         </nav>
         <div className="menuAcciones">
+          {mostrarInstalarPwa && (
+            <button
+              type="button"
+              className="botonInstalarAccesoRapidoMenu"
+              onClick={instalarAppPwa}
+              title="Guarda un acceso rápido de esta página en tu dispositivo"
+            >
+              Activar acceso rápido
+            </button>
+          )}
           <button className="botonSalir botonSalirMenu" onClick={cerrarSesion} title="Cerrar sesión">Salir</button>
         </div>
       </aside>
@@ -1400,12 +1412,6 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
-
-      {mostrarInstalarPwa && (
-        <button type="button" className="botonInstalarPwa" onClick={instalarAppPwa}>
-          Instalar app
-        </button>
       )}
     </div>
   );

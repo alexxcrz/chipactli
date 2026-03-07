@@ -9,6 +9,10 @@ services:
         value: production
       - key: DB_DIR
         value: /opt/render/data/backend
+      - key: BACKUP_INTERVAL_HOURS
+        value: "1"
+      - key: BACKUP_INITIAL_DELAY_SEC
+        value: "30"
     # Disco persistente para que las bases de datos no se borren
     disk:
       name: chipactli-data

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import './App.css';
 
 // legacy helpers that old scripts expect on window
@@ -100,6 +100,8 @@ export default function App() {
   const [toquesLogoAcceso, setToquesLogoAcceso] = useState(0);
   const [trastiendaDesbloqueada, setTrastiendaDesbloqueada] = useState(false);
   const [menuContextoTrastienda, setMenuContextoTrastienda] = useState({ visible: false, x: 0, y: 0 });
+  const [importacionTodoPendiente, setImportacionTodoPendiente] = useState(null);
+  const inputImportarTodoMenuRef = useRef(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showPendientes, setShowPendientes] = useState(false);
   const [showAlertas, setShowAlertas] = useState(false);
@@ -473,6 +475,23 @@ export default function App() {
       setShowAccesoSistema(false);
       setLoginForm({ username: '', password: '' });
       setPage(getPageFromHash());
+
+      if (importacionTodoPendiente?.datos) {
+        try {
+          await fetchAPIJSON('/api/importar/todo', {
+            method: 'POST',
+            body: importacionTodoPendiente.datos
+          });
+          setImportacionTodoPendiente(null);
+          mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
+          window.location.reload();
+          return;
+        } catch (errorImportar) {
+          setImportacionTodoPendiente(null);
+          mostrarNotificacion(`❌ Error al importar respaldo: ${errorImportar?.message || 'Error desconocido'}`, 'error');
+        }
+      }
+
       if (res.debe_cambiar_password) {
         setTimeout(() => mostrarModalCambiarPassword(usuario.username), 150);
       }
@@ -831,6 +850,52 @@ export default function App() {
   const PageComponent = pageComponents[page] || (() => null);
 
   if (!isAuthenticated) {
+    const ejecutarImportacionTodoDesdeMenu = async (datosImportar) => {
+      await fetchAPIJSON('/api/importar/todo', {
+        method: 'POST',
+        body: datosImportar
+      });
+      mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
+      window.location.reload();
+    };
+
+    const onArchivoImportarTodoMenu = async (event) => {
+      const input = event.target;
+      const archivo = input?.files?.[0];
+      if (!archivo) return;
+
+      try {
+        if (!String(archivo?.name || '').toLowerCase().endsWith('.json')) {
+          throw new Error('El archivo debe ser JSON');
+        }
+
+        const contenido = await archivo.text();
+        const datos = JSON.parse(contenido);
+        if (!datos || (Array.isArray(datos) && !datos.length)) {
+          throw new Error('El archivo está vacío');
+        }
+
+        setMenuContextoTrastienda({ visible: false, x: 0, y: 0 });
+
+        const tokenActual = localStorage.getItem('token') || '';
+        if (!tokenActual) {
+          setImportacionTodoPendiente({
+            datos,
+            nombreArchivo: String(archivo?.name || '').trim()
+          });
+          setShowAccesoSistema(true);
+          mostrarNotificacion('Archivo listo. Inicia sesión para importar TODO.', 'advertencia');
+          return;
+        }
+
+        await ejecutarImportacionTodoDesdeMenu(datos);
+      } catch (error) {
+        mostrarNotificacion(`❌ Error al importar: ${error?.message || 'Error desconocido'}`, 'error');
+      } finally {
+        if (input) input.value = '';
+      }
+    };
+
     const registrarToqueLogo = (event) => {
       const el = event.currentTarget;
       const rect = el.getBoundingClientRect();
@@ -890,8 +955,23 @@ export default function App() {
             >
               Entrar a trastienda
             </button>
+            <button
+              type="button"
+              className="menuContextoTrastiendaItem"
+              onClick={() => inputImportarTodoMenuRef.current?.click()}
+            >
+              Importar TODO
+            </button>
           </div>
         )}
+
+        <input
+          ref={inputImportarTodoMenuRef}
+          type="file"
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={onArchivoImportarTodoMenu}
+        />
 
         {showAccesoSistema && (
           <div className="accesoSistemaOverlay" onClick={() => { if (!configInicial.visible) setShowAccesoSistema(false); }}>

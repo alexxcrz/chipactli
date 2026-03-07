@@ -183,18 +183,22 @@ export function registrarRutasUtensilios(app, bdInventario) {
 
         filas.forEach(fila => {
           bdInventario.all(
-            `SELECT TIME(hu.fecha_cambio) as hora, u.codigo, u.nombre, u.unidad, hu.cambio_cantidad, hu.cambio_costo
+            `SELECT hu.fecha_cambio as hora, u.codigo, u.nombre, u.unidad, hu.cambio_cantidad, hu.cambio_costo
              FROM historial_utensilios hu
              LEFT JOIN utensilios u ON hu.id_utensilio = u.id
              WHERE DATE(hu.fecha_cambio) = ? AND hu.cambio_costo > 0
              ORDER BY hu.fecha_cambio DESC`,
             [fila.fecha],
             (err2, utensilios) => {
+              const lista = (utensilios || []).map((item) => ({
+                ...item,
+                hora: item?.hora ? new Date(item.hora).toLocaleTimeString('es-MX', { hour12: false }) : ''
+              }));
               respuesta.push({
                 fecha: fila.fecha,
                 total_utensilios: fila.total_utensilios || 0,
                 total_costo: fila.total_costo || 0,
-                utensilios: utensilios || []
+                utensilios: lista
               });
               procesados++;
               if (procesados === filas.length) {

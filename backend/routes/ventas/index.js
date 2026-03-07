@@ -124,18 +124,39 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
     const idCategoria = req.query.categoria || "";
 
     let filtroFecha = "";
+    const paramsFecha = [];
+    const ahora = new Date();
+
+    const inicioDelDia = (fecha) => {
+      const d = new Date(fecha);
+      d.setUTCHours(0, 0, 0, 0);
+      return d;
+    };
+
     if (periodo === "dia" || periodo === "hoy") {
-      const hoy = new Date().toISOString().split("T")[0];
-      filtroFecha = `WHERE DATE(fecha_venta) = '${hoy}'`;
+      const desde = inicioDelDia(ahora);
+      const hasta = new Date(desde);
+      hasta.setUTCDate(hasta.getUTCDate() + 1);
+      filtroFecha = "WHERE fecha_venta >= ? AND fecha_venta < ?";
+      paramsFecha.push(desde.toISOString(), hasta.toISOString());
     } else if (periodo === "semana") {
-      filtroFecha = "WHERE DATE(fecha_venta) >= DATE('now', '-7 days')";
+      const desde = new Date(ahora);
+      desde.setUTCDate(desde.getUTCDate() - 7);
+      filtroFecha = "WHERE fecha_venta >= ?";
+      paramsFecha.push(desde.toISOString());
     } else if (periodo === "quincena") {
-      filtroFecha = "WHERE DATE(fecha_venta) >= DATE('now', '-15 days')";
+      const desde = new Date(ahora);
+      desde.setUTCDate(desde.getUTCDate() - 15);
+      filtroFecha = "WHERE fecha_venta >= ?";
+      paramsFecha.push(desde.toISOString());
     } else if (periodo === "mes") {
-      filtroFecha = "WHERE DATE(fecha_venta) >= DATE('now', '-30 days')";
+      const desde = new Date(ahora);
+      desde.setUTCDate(desde.getUTCDate() - 30);
+      filtroFecha = "WHERE fecha_venta >= ?";
+      paramsFecha.push(desde.toISOString());
     }
 
-    bdVentas.all(`SELECT * FROM ventas ${filtroFecha}`, (err, ventas) => {
+    bdVentas.all(`SELECT * FROM ventas ${filtroFecha}`, paramsFecha, (err, ventas) => {
       if (!ventas || ventas.length === 0) {
         return res.json({ total_sales: 0, total_units: 0, total_cost: 0, total_revenue: 0, total_profit: 0 });
       }

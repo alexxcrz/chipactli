@@ -427,7 +427,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
         `SELECT id, nombre, proveedor, url, tipo, creado_en
          FROM lista_precios_archivos
          ${where}
-         ORDER BY datetime(COALESCE(creado_en, '1970-01-01T00:00:00Z')) DESC, id DESC`,
+         ORDER BY COALESCE(creado_en, CURRENT_TIMESTAMP) DESC, id DESC`,
         params
       );
       res.json({ archivos: archivos || [] });
@@ -591,7 +591,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
         const resultado = [];
         dias.forEach((dia) => {
           bdInventario.all(
-            `SELECT h.id_inventario, h.fecha_cambio, time(h.fecha_cambio, 'localtime') as hora, h.cambio_cantidad, h.cambio_costo,
+            `SELECT h.id_inventario, h.fecha_cambio, h.fecha_cambio as hora, h.cambio_cantidad, h.cambio_costo,
                     COALESCE(i.codigo, '') as codigo, COALESCE(i.nombre, 'Insumo eliminado') as nombre, COALESCE(i.unidad, '') as unidad
              FROM historial_inventario h
              LEFT JOIN inventario i ON i.id = h.id_inventario
@@ -599,7 +599,13 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
              ORDER BY h.fecha_cambio DESC`,
             [dia.fecha],
             (errItems, items) => {
-              resultado.push({ fecha: dia.fecha, total_insumos: dia.total_insumos || 0, total_costo: dia.total_costo || 0, insumos: errItems ? [] : (items || []) });
+              const insumos = errItems
+                ? []
+                : (items || []).map((item) => ({
+                    ...item,
+                    hora: item?.hora ? new Date(item.hora).toLocaleTimeString('es-MX', { hour12: false }) : ''
+                  }));
+              resultado.push({ fecha: dia.fecha, total_insumos: dia.total_insumos || 0, total_costo: dia.total_costo || 0, insumos });
               pendientes -= 1;
               if (pendientes === 0) {
                 resultado.sort((a, b) => b.fecha.localeCompare(a.fecha));

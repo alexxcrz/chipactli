@@ -51,7 +51,13 @@ function resolverNombreInsumoEliminado(bdInventario, idInsumo, callback) {
       const limpio = String(nombreBackup || '').trim();
       if (limpio) {
         bdInventario.run(
-          "INSERT OR REPLACE INTO insumos_eliminados (id_inventario, codigo, nombre, unidad, eliminado_en) VALUES (?,?,?,?,?)",
+          `INSERT INTO insumos_eliminados (id_inventario, codigo, nombre, unidad, eliminado_en)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(id_inventario) DO UPDATE SET
+             codigo=excluded.codigo,
+             nombre=excluded.nombre,
+             unidad=excluded.unidad,
+             eliminado_en=excluded.eliminado_en`,
           [idInsumo, '', limpio, '', new Date().toISOString()],
           () => callback(limpio)
         );

@@ -11,6 +11,8 @@ import { promises as fs } from "fs";
 import { existsSync, readFileSync } from "fs";
 import multer from "multer";
 import jwt from "jsonwebtoken";
+import { Client } from "pg";
+import { crearPgSqliteCompat } from "./utils/pg-sqlite-compat/index.js";
 
 function cargarDotEnvLocal() {
   try {
@@ -202,6 +204,181 @@ const bdProduccion = new Database(path.join(dbDir, "produccion.db"));
 const bdVentas = new Database(path.join(dbDir, "ventas.db"));
 const bdAdmin = new Database(path.join(dbDir, "admin.db"));
 
+async function crearConexionAdminAuth() {
+  const usarPgAdminAuth = String(process.env.PG_ADMIN_AUTH || "0").trim() === "1";
+  if (!usarPgAdminAuth) {
+    return { db: bdAdmin, usandoPg: false };
+  }
+
+  const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    console.warn("[DB] PG_ADMIN_AUTH=1, pero falta DATABASE_URL. Se usara SQLite para auth/admin.");
+    return { db: bdAdmin, usandoPg: false };
+  }
+
+  const useSsl = String(process.env.PG_SSL || "1").trim() !== "0";
+  const schemaDefault = `${String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase()}_admin`;
+  const schema = String(process.env.PG_ADMIN_SCHEMA || schemaDefault).trim().toLowerCase();
+
+  const clientePg = new Client({
+    connectionString: databaseUrl,
+    ssl: useSsl ? { rejectUnauthorized: false } : false
+  });
+
+  try {
+    await clientePg.connect();
+    await clientePg.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    await clientePg.query(`SET search_path TO "${schema}", public`);
+    await clientePg.query(`
+      CREATE TABLE IF NOT EXISTS usuarios (
+        id BIGSERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        nombre TEXT,
+        rol TEXT DEFAULT 'usuario',
+        permisos TEXT,
+        debe_cambiar_password INTEGER DEFAULT 1,
+        creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await clientePg.query(`
+      CREATE TABLE IF NOT EXISTS auditoria_admin (
+        id BIGSERIAL PRIMARY KEY,
+        accion TEXT NOT NULL,
+        detalle TEXT,
+        usuario TEXT,
+        fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log(`[DB] Auth/Admin usando PostgreSQL (schema: ${schema})`);
+    return { db: clientePg, usandoPg: true };
+  } catch (error) {
+    console.warn("[DB] No se pudo activar PostgreSQL en auth/admin. Se usara SQLite:", error?.message || error);
+    try {
+      await clientePg.end();
+    } catch {
+      // Ignorar cierre fallido.
+    }
+    return { db: bdAdmin, usandoPg: false };
+  }
+}
+
+async function crearConexionInventarioRutas() {
+  const usarPgInventario = String(process.env.PG_INVENTARIO || "0").trim() === "1";
+  if (!usarPgInventario) {
+    return { db: bdInventario, usandoPg: false };
+  }
+
+  const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    console.warn("[DB] PG_INVENTARIO=1, pero falta DATABASE_URL. Se usara SQLite para inventario.");
+    return { db: bdInventario, usandoPg: false };
+  }
+
+  const useSsl = String(process.env.PG_SSL || "1").trim() !== "0";
+  const schemaDefault = `${String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase()}_inventario`;
+  const schema = String(process.env.PG_INVENTARIO_SCHEMA || schemaDefault).trim().toLowerCase();
+
+  try {
+    const { db } = await crearPgSqliteCompat({
+      databaseUrl,
+      schema,
+      useSsl
+    });
+
+    console.log(`[DB] Inventario/Utensilios usando PostgreSQL (schema: ${schema})`);
+    return { db, usandoPg: true };
+  } catch (error) {
+    console.warn("[DB] No se pudo activar PostgreSQL en inventario/utensilios. Se usara SQLite:", error?.message || error);
+    return { db: bdInventario, usandoPg: false };
+  }
+}
+
+async function crearConexionRecetasRutas() {
+  const usarPgRecetas = String(process.env.PG_RECETAS || "0").trim() === "1";
+  if (!usarPgRecetas) {
+    return { db: bdRecetas, usandoPg: false };
+  }
+
+  const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    console.warn("[DB] PG_RECETAS=1, pero falta DATABASE_URL. Se usara SQLite para recetas.");
+    return { db: bdRecetas, usandoPg: false };
+  }
+
+  const useSsl = String(process.env.PG_SSL || "1").trim() !== "0";
+  const schemaDefault = `${String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase()}_recetas`;
+  const schema = String(process.env.PG_RECETAS_SCHEMA || schemaDefault).trim().toLowerCase();
+
+  try {
+    const { db } = await crearPgSqliteCompat({
+      databaseUrl,
+      schema,
+      useSsl
+    });
+
+    console.log(`[DB] Recetas usando PostgreSQL (schema: ${schema})`);
+    return { db, usandoPg: true };
+  } catch (error) {
+    console.warn("[DB] No se pudo activar PostgreSQL en recetas. Se usara SQLite:", error?.message || error);
+    return { db: bdRecetas, usandoPg: false };
+  }
+}
+
+async function crearConexionProduccionRutas() {
+  const usarPgProduccion = String(process.env.PG_PRODUCCION || "0").trim() === "1";
+  if (!usarPgProduccion) {
+    return { db: bdProduccion, usandoPg: false };
+  }
+
+  const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    console.warn("[DB] PG_PRODUCCION=1, pero falta DATABASE_URL. Se usara SQLite para produccion.");
+    return { db: bdProduccion, usandoPg: false };
+  }
+
+  const useSsl = String(process.env.PG_SSL || "1").trim() !== "0";
+  const schemaDefault = `${String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase()}_produccion`;
+  const schema = String(process.env.PG_PRODUCCION_SCHEMA || schemaDefault).trim().toLowerCase();
+
+  try {
+    const { db } = await crearPgSqliteCompat({ databaseUrl, schema, useSsl });
+    console.log(`[DB] Produccion usando PostgreSQL (schema: ${schema})`);
+    return { db, usandoPg: true };
+  } catch (error) {
+    console.warn("[DB] No se pudo activar PostgreSQL en produccion. Se usara SQLite:", error?.message || error);
+    return { db: bdProduccion, usandoPg: false };
+  }
+}
+
+async function crearConexionVentasRutas() {
+  const usarPgVentas = String(process.env.PG_VENTAS || "0").trim() === "1";
+  if (!usarPgVentas) {
+    return { db: bdVentas, usandoPg: false };
+  }
+
+  const databaseUrl = String(process.env.DATABASE_URL || "").trim();
+  if (!databaseUrl) {
+    console.warn("[DB] PG_VENTAS=1, pero falta DATABASE_URL. Se usara SQLite para ventas/tienda.");
+    return { db: bdVentas, usandoPg: false };
+  }
+
+  const useSsl = String(process.env.PG_SSL || "1").trim() !== "0";
+  const schemaDefault = `${String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase()}_ventas`;
+  const schema = String(process.env.PG_VENTAS_SCHEMA || schemaDefault).trim().toLowerCase();
+
+  try {
+    const { db } = await crearPgSqliteCompat({ databaseUrl, schema, useSsl });
+    console.log(`[DB] Ventas/Tienda usando PostgreSQL (schema: ${schema})`);
+    return { db, usandoPg: true };
+  } catch (error) {
+    console.warn("[DB] No se pudo activar PostgreSQL en ventas/tienda. Se usara SQLite:", error?.message || error);
+    return { db: bdVentas, usandoPg: false };
+  }
+}
+
 function aplicarPragmasDurabilidad(db, nombreDb) {
   return new Promise((resolve) => {
     db.exec(
@@ -233,8 +410,20 @@ await Promise.all([
 inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas);
 inicializarBdAdmin(bdAdmin, bdInventario);
 
+const conexionAdminAuth = await crearConexionAdminAuth();
+const conexionInventarioRutas = await crearConexionInventarioRutas();
+const conexionRecetasRutas = await crearConexionRecetasRutas();
+const conexionProduccionRutas = await crearConexionProduccionRutas();
+const conexionVentasRutas = await crearConexionVentasRutas();
+
+const { db: bdAdminAuth, usandoPg: usandoPgAdminAuth } = conexionAdminAuth;
+const { db: bdInventarioRutas, usandoPg: usandoPgInventario } = conexionInventarioRutas;
+const { db: bdRecetasRutas, usandoPg: usandoPgRecetas } = conexionRecetasRutas;
+const { db: bdProduccionRutas, usandoPg: usandoPgProduccion } = conexionProduccionRutas;
+const { db: bdVentasRutas, usandoPg: usandoPgVentas } = conexionVentasRutas;
+
 // Registrar rutas de autenticación
-registrarRutasAuth(app, bdAdmin);
+registrarRutasAuth(app, bdAdminAuth);
 
 const reglasPermisos = [
   { metodos: ['GET'], exacto: '/inventario/estadisticas', pestana: 'inventario', accion: 'ver_estadisticas' },
@@ -478,15 +667,15 @@ function cerrarBase(db) {
 }
 
 // Registrar rutas
-registrarRutasUsuarios(app, bdAdmin);
-registrarRutasInventario(app, bdInventario, bdRecetas);
-registrarRutasUtensilios(app, bdInventario);
-registrarRutasCategorias(app, bdRecetas);
-registrarRutasRecetas(app, bdRecetas, bdInventario);
-registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventario);
-registrarRutasCortesias(app, bdVentas, bdProduccion);
-registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas);
-registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario);
+registrarRutasUsuarios(app, bdAdminAuth);
+registrarRutasInventario(app, bdInventarioRutas, bdRecetasRutas);
+registrarRutasUtensilios(app, bdInventarioRutas);
+registrarRutasCategorias(app, bdRecetasRutas);
+registrarRutasRecetas(app, bdRecetasRutas, bdInventarioRutas);
+registrarRutasProduccion(app, bdProduccionRutas, bdRecetasRutas, bdInventarioRutas);
+registrarRutasCortesias(app, bdVentasRutas, bdProduccionRutas);
+registrarRutasVentas(app, bdVentasRutas, bdProduccionRutas, bdInventarioRutas, bdRecetasRutas);
+registrarRutasTienda(app, bdProduccionRutas, bdRecetasRutas, bdVentasRutas, bdInventarioRutas);
 
 // Rutas de backup
 app.post("/api/backup/crear", async (req, res) => {
@@ -553,6 +742,13 @@ app.get("/api/backup/estado", async (req, res) => {
       exito: true,
       db_dir: dbDir,
       backup_dir: backupDir,
+      runtime_db: {
+        auth_admin: usandoPgAdminAuth ? 'postgres' : 'sqlite',
+        inventario_utensilios: usandoPgInventario ? 'postgres' : 'sqlite',
+        recetas: usandoPgRecetas ? 'postgres' : 'sqlite',
+        produccion: usandoPgProduccion ? 'postgres' : 'sqlite',
+        ventas_tienda_cortesias: usandoPgVentas ? 'postgres' : 'sqlite'
+      },
       diagnostico_storage: {
         ejecutando_en_render: ejecutandoEnRender,
         disco_render_detectado: discoRenderDisponible,

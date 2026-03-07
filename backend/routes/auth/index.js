@@ -1,77 +1,63 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { normalizarPermisosUsuario } from "../../utils/permisos/index.js";
-
-function dbGet(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
-  });
-}
-
-function dbRun(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function onRun(err) {
-      if (err) return reject(err);
-      return resolve(this);
-    });
-  });
-}
+import { dbGet, dbRun } from "../../utils/db-adapter/index.js";
 
 export function registrarRutasAuth(app, bdAdmin) {
   // Login
-  app.post("/api/auth/login", (req, res) => {
-    const { username, password } = req.body;
-    bdAdmin.get(
-      "SELECT * FROM usuarios WHERE username = ?",
-      [username],
-      async (err, user) => {
-        if (err || !user) {
-          return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
-        }
-        const match = await bcrypt.compare(password, user.password_hash);
-        if (!match) {
-          return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
-        }
-        if (user.rol === "maestro") {
-          bdAdmin.get(
-            "SELECT COUNT(*) AS total FROM usuarios WHERE rol IN ('ceo','admin')",
-            [],
-            (countErr, rowCount) => {
-              if (countErr) {
-                return res.status(500).json({ exito: false, mensaje: "No se pudo validar estado del usuario maestro" });
-              }
+  app.post("/api/auth/login", async (req, res) => {
+    const { username, password } = req.body || {};
 
-              if (Number(rowCount?.total || 0) > 0) {
-                return res.status(401).json({ exito: false, mensaje: "El usuario maestro ya no esta disponible" });
-              }
-
-              const tokenConfiguracion = jwt.sign(
-                { id: user.id, username: user.username, tipo: "configuracion_inicial" },
-                process.env.JWT_SECRET || "chipactli_jwt_secret",
-                { expiresIn: "20m" }
-              );
-
-              return res.json({
-                exito: true,
-                requiere_configuracion_inicial: true,
-                token_configuracion: tokenConfiguracion,
-                usuario_maestro: user.username,
-                mensaje: "Configura los usuarios CEO y administrador para continuar"
-              });
-            }
-          );
-          return;
-        }
-
-        const permisos = normalizarPermisosUsuario(user.permisos, user.rol);
-        const token = jwt.sign(
-          { id: user.id, username: user.username, rol: user.rol, permisos },
-          process.env.JWT_SECRET || "chipactli_jwt_secret",
-          { expiresIn: "12h" }
-        );
-        res.json({ exito: true, token, debe_cambiar_password: !!user.debe_cambiar_password, rol: user.rol, nombre: user.nombre, permisos });
+    try {
+      const user = await dbGet(bdAdmin, "SELECT * FROM usuarios WHERE username = ?", [username]);
+      if (!user) {
+        return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
       }
-    );
+
+      const match = await bcrypt.compare(String(password || ""), String(user.password_hash || ""));
+      if (!match) {
+        return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
+      }
+
+      if (user.rol === "maestro") {
+        const rowCount = await dbGet(bdAdmin, "SELECT COUNT(*) AS total FROM usuarios WHERE rol IN ('ceo','admin')");
+        if (Number(rowCount?.total || 0) > 0) {
+          return res.status(401).json({ exito: false, mensaje: "El usuario maestro ya no esta disponible" });
+        }
+
+        const tokenConfiguracion = jwt.sign(
+          { id: user.id, username: user.username, tipo: "configuracion_inicial" },
+          process.env.JWT_SECRET || "chipactli_jwt_secret",
+          { expiresIn: "20m" }
+        );
+
+        return res.json({
+          exito: true,
+          requiere_configuracion_inicial: true,
+          token_configuracion: tokenConfiguracion,
+          usuario_maestro: user.username,
+          mensaje: "Configura los usuarios CEO y administrador para continuar"
+        });
+      }
+
+      const permisos = normalizarPermisosUsuario(user.permisos, user.rol);
+      const token = jwt.sign(
+        { id: user.id, username: user.username, rol: user.rol, permisos },
+        process.env.JWT_SECRET || "chipactli_jwt_secret",
+        { expiresIn: "12h" }
+      );
+
+      return res.json({
+        exito: true,
+        token,
+        debe_cambiar_password: !!user.debe_cambiar_password,
+        rol: user.rol,
+        nombre: user.nombre,
+        permisos
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudo iniciar sesion" });
+    }
   });
 
   app.post("/api/auth/configuracion-inicial", async (req, res) => {
@@ -186,30 +172,31 @@ export function registrarRutasAuth(app, bdAdmin) {
   });
 
   // Cambiar contraseña (requiere login)
-  app.post("/api/auth/cambiar-password", (req, res) => {
-    const { username, password_actual, password_nueva } = req.body;
-    bdAdmin.get(
-      "SELECT * FROM usuarios WHERE username = ?",
-      [username],
-      async (err, user) => {
-        if (err || !user) {
-          return res.status(401).json({ exito: false, mensaje: "Usuario no encontrado" });
-        }
-        const match = await bcrypt.compare(password_actual, user.password_hash);
-        if (!match) {
-          return res.status(401).json({ exito: false, mensaje: "Contraseña actual incorrecta" });
-        }
-        const hash = await bcrypt.hash(password_nueva, 10);
-        bdAdmin.run(
-          "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-          [hash, username],
-          (err2) => {
-            if (err2) return res.status(500).json({ exito: false, mensaje: "Error al actualizar contraseña" });
-            res.json({ exito: true });
-          }
-        );
+  app.post("/api/auth/cambiar-password", async (req, res) => {
+    const { username, password_actual, password_nueva } = req.body || {};
+
+    try {
+      const user = await dbGet(bdAdmin, "SELECT * FROM usuarios WHERE username = ?", [username]);
+      if (!user) {
+        return res.status(401).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
-    );
+
+      const match = await bcrypt.compare(String(password_actual || ""), String(user.password_hash || ""));
+      if (!match) {
+        return res.status(401).json({ exito: false, mensaje: "Contraseña actual incorrecta" });
+      }
+
+      const hash = await bcrypt.hash(String(password_nueva || ""), 10);
+      await dbRun(
+        bdAdmin,
+        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [hash, username]
+      );
+
+      return res.json({ exito: true });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "Error al actualizar contraseña" });
+    }
   });
 
   // Middleware para proteger rutas

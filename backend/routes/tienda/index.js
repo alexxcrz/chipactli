@@ -293,7 +293,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
               SELECT p2.precio_venta
               FROM produccion p2
               WHERE p2.nombre_receta = p.nombre_receta
-              ORDER BY datetime(COALESCE(p2.fecha_produccion, '1970-01-01T00:00:00Z')) DESC, p2.id DESC
+              ORDER BY COALESCE(p2.fecha_produccion, '1970-01-01T00:00:00Z') DESC, p2.id DESC
               LIMIT 1
             ), 0) AS precio_venta
      FROM produccion
@@ -612,7 +612,7 @@ async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventa
     `SELECT id, cantidad, fecha_produccion, costo_produccion, precio_venta
      FROM produccion
      WHERE nombre_receta = ? AND COALESCE(cantidad, 0) > 0
-     ORDER BY datetime(COALESCE(fecha_produccion, '1970-01-01T00:00:00Z')) ASC, id ASC`,
+     ORDER BY COALESCE(fecha_produccion, '1970-01-01T00:00:00Z') ASC, id ASC`,
     [nombreReceta]
   );
 

@@ -1,5 +1,20 @@
 import { transmitir } from "../../utils/index.js";
 
+function dbGet(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+}
+
+function dbRun(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+}
+
 export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
   app.post("/cortesia/:id", (req, res) => {
     const { nombre_receta, cantidad, numero_pedido, motivo, para_quien } = req.body;
@@ -26,34 +41,37 @@ export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
     );
   });
 
-  app.post("/cortesias/limpiar-pruebas", (req, res) => {
-    const hoy = new Date().toISOString().split("T")[0];
+  app.post("/cortesias/limpiar-pruebas", async (req, res) => {
+    const hoy = new Date();
+    hoy.setUTCHours(0, 0, 0, 0);
+    const manana = new Date(hoy);
+    manana.setUTCDate(manana.getUTCDate() + 1);
 
-    bdVentas.get(
-      "SELECT * FROM cortesias WHERE DATE(fecha_cortesia) = ? ORDER BY fecha_cortesia DESC LIMIT 1",
-      [hoy],
-      (err, cortesia) => {
-        if (err) return res.status(500).json({ error: "Error consultando cortesias" });
-        if (!cortesia) return res.status(404).json({ error: "No hay cortesia de hoy" });
+    try {
+      const cortesia = await dbGet(
+        bdVentas,
+        "SELECT * FROM cortesias WHERE fecha_cortesia >= ? AND fecha_cortesia < ? ORDER BY fecha_cortesia DESC LIMIT 1",
+        [hoy.toISOString(), manana.toISOString()]
+      );
 
-        bdVentas.serialize(() => {
-          bdVentas.run("BEGIN TRANSACTION");
-          bdVentas.run("DELETE FROM ventas");
-          bdVentas.run("DELETE FROM cortesias WHERE id <> ?", [cortesia.id]);
-          bdVentas.run("UPDATE cortesias SET id = 1 WHERE id = ?", [cortesia.id]);
-          bdVentas.run("DELETE FROM sqlite_sequence WHERE name IN ('ventas','cortesias')");
-          bdVentas.run("COMMIT", (errCommit) => {
-            if (errCommit) {
-              bdVentas.run("ROLLBACK");
-              return res.status(500).json({ error: "Error limpiando registros" });
-            }
-            transmitir({ tipo: "ventas_actualizado" });
-            transmitir({ tipo: "cortesias_actualizado" });
-            res.json({ ok: true, cortesia_id: 1 });
-          });
-        });
+      if (!cortesia) return res.status(404).json({ error: "No hay cortesia de hoy" });
+
+      await dbRun(bdVentas, "BEGIN");
+      await dbRun(bdVentas, "DELETE FROM ventas");
+      await dbRun(bdVentas, "DELETE FROM cortesias WHERE id <> ?", [cortesia.id]);
+      await dbRun(bdVentas, "COMMIT");
+
+      transmitir({ tipo: "ventas_actualizado" });
+      transmitir({ tipo: "cortesias_actualizado" });
+      return res.json({ ok: true, cortesia_id: Number(cortesia.id || 0) });
+    } catch {
+      try {
+        await dbRun(bdVentas, "ROLLBACK");
+      } catch {
+        // Ignorar rollback fallido.
       }
-    );
+      return res.status(500).json({ error: "Error limpiando registros" });
+    }
   });
 
   app.delete("/cortesias/:id", (req, res) => {

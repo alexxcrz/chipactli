@@ -1,20 +1,24 @@
 import bcrypt from "bcrypt";
 import { normalizarPermisosUsuario, serializarPermisos } from "../../utils/permisos/index.js";
+import { dbAll, dbGet, dbRun } from "../../utils/db-adapter/index.js";
 
 export function registrarRutasUsuarios(app, bdAdmin) {
   // Listar usuarios (solo admin/ceo)
-  app.get("/api/privado/usuarios", (req, res) => {
+  app.get("/api/privado/usuarios", async (req, res) => {
     if (!req.usuario) {
       return res.status(403).json({ exito: false, mensaje: "No autorizado" });
     }
-    bdAdmin.all("SELECT id, username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios", (err, rows) => {
-      if (err) return res.status(500).json({ exito: false, mensaje: "Error al listar usuarios" });
+
+    try {
+      const rows = await dbAll(bdAdmin, "SELECT id, username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios");
       const usuarios = (rows || []).map((u) => ({
         ...u,
         permisos: normalizarPermisosUsuario(u.permisos, u.rol)
       }));
-      res.json({ exito: true, usuarios });
-    });
+      return res.json({ exito: true, usuarios });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "Error al listar usuarios" });
+    }
   });
 
   // Crear usuario
@@ -26,18 +30,27 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     if (!username || !rol) return res.status(400).json({ exito: false, mensaje: "Faltan datos" });
     const passwordTemporal = Math.random().toString(36).slice(-8) + "!";
     const hash = await bcrypt.hash(passwordTemporal, 10);
-    bdAdmin.run(
-      "INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, 1)",
-      [username, hash, nombre || '', rol, serializarPermisos(permisos, rol)],
-      function(err) {
-        if (err) return res.status(400).json({ exito: false, mensaje: "Usuario ya existe" });
-        res.json({ exito: true, id: this.lastID, username, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
+    try {
+      const resultado = await dbRun(
+        bdAdmin,
+        "INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, 1)",
+        [username, hash, nombre || '', rol, serializarPermisos(permisos, rol)]
+      );
+
+      let idCreado = resultado?.lastID ?? null;
+      if (idCreado == null) {
+        const creado = await dbGet(bdAdmin, "SELECT id FROM usuarios WHERE username = ?", [username]);
+        idCreado = creado?.id ?? null;
       }
-    );
+
+      return res.json({ exito: true, id: idCreado, username, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
+    } catch {
+      return res.status(400).json({ exito: false, mensaje: "Usuario ya existe" });
+    }
   });
 
   // Editar datos generales de usuario
-  app.patch("/api/privado/usuarios/:username", (req, res) => {
+  app.patch("/api/privado/usuarios/:username", async (req, res) => {
     if (!req.usuario) {
       return res.status(403).json({ exito: false, mensaje: "No autorizado" });
     }
@@ -49,57 +62,57 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       return res.status(400).json({ exito: false, mensaje: "Username inválido" });
     }
 
-    bdAdmin.get(
-      "SELECT username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios WHERE username = ?",
-      [usernameActual],
-      (errGet, user) => {
-        if (errGet || !user) {
-          return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
-        }
+    try {
+      const user = await dbGet(
+        bdAdmin,
+        "SELECT username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios WHERE username = ?",
+        [usernameActual]
+      );
 
-        if (user.rol === 'ceo') {
-          return res.status(400).json({ exito: false, mensaje: "No se puede modificar el usuario CEO" });
-        }
-
-        const usernameFinal = (usernameNuevo || usernameActual || '').trim();
-        const nombreFinal = typeof nombre === 'string' ? nombre : (user.nombre || '');
-
-        if (!usernameFinal) {
-          return res.status(400).json({ exito: false, mensaje: "El username no puede estar vacío" });
-        }
-
-        bdAdmin.run(
-          "UPDATE usuarios SET username = ?, nombre = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-          [usernameFinal, nombreFinal, usernameActual],
-          function(errUpd) {
-            if (errUpd) {
-              if (String(errUpd.message || '').includes('UNIQUE')) {
-                return res.status(400).json({ exito: false, mensaje: "El username ya existe" });
-              }
-              return res.status(500).json({ exito: false, mensaje: "No se pudo actualizar usuario" });
-            }
-
-            if (this.changes === 0) {
-              return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
-            }
-
-            return res.json({
-              exito: true,
-              usuario: {
-                username: usernameFinal,
-                nombre: nombreFinal,
-                rol: user.rol,
-                permisos: normalizarPermisosUsuario(user.permisos, user.rol)
-              }
-            });
-          }
-        );
+      if (!user) {
+        return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
-    );
+
+      if (user.rol === 'ceo') {
+        return res.status(400).json({ exito: false, mensaje: "No se puede modificar el usuario CEO" });
+      }
+
+      const usernameFinal = (usernameNuevo || usernameActual || '').trim();
+      const nombreFinal = typeof nombre === 'string' ? nombre : (user.nombre || '');
+
+      if (!usernameFinal) {
+        return res.status(400).json({ exito: false, mensaje: "El username no puede estar vacío" });
+      }
+
+      const resultado = await dbRun(
+        bdAdmin,
+        "UPDATE usuarios SET username = ?, nombre = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [usernameFinal, nombreFinal, usernameActual]
+      );
+
+      if (!Number(resultado?.changes || 0)) {
+        return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
+      }
+
+      return res.json({
+        exito: true,
+        usuario: {
+          username: usernameFinal,
+          nombre: nombreFinal,
+          rol: user.rol,
+          permisos: normalizarPermisosUsuario(user.permisos, user.rol)
+        }
+      });
+    } catch (error) {
+      if (String(error?.message || '').toLowerCase().includes('unique')) {
+        return res.status(400).json({ exito: false, mensaje: "El username ya existe" });
+      }
+      return res.status(500).json({ exito: false, mensaje: "No se pudo actualizar usuario" });
+    }
   });
 
   // Actualizar permisos de usuario
-  app.patch("/api/privado/usuarios/:username/permisos", (req, res) => {
+  app.patch("/api/privado/usuarios/:username/permisos", async (req, res) => {
     if (!req.usuario) {
       return res.status(403).json({ exito: false, mensaje: "No autorizado" });
     }
@@ -110,8 +123,9 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       return res.status(400).json({ exito: false, mensaje: "Datos de permisos inválidos" });
     }
 
-    bdAdmin.get("SELECT username, rol FROM usuarios WHERE username = ?", [username], (errGet, user) => {
-      if (errGet || !user) {
+    try {
+      const user = await dbGet(bdAdmin, "SELECT username, rol FROM usuarios WHERE username = ?", [username]);
+      if (!user) {
         return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
 
@@ -120,21 +134,24 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       }
 
       const permisosSerializados = serializarPermisos(permisos, user.rol);
-      bdAdmin.run(
+      const resultado = await dbRun(
+        bdAdmin,
         "UPDATE usuarios SET permisos = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-        [permisosSerializados, username],
-        function(errUpd) {
-          if (errUpd || this.changes === 0) {
-            return res.status(500).json({ exito: false, mensaje: "No se pudieron actualizar permisos" });
-          }
-          return res.json({
-            exito: true,
-            username,
-            permisos: normalizarPermisosUsuario(permisosSerializados, user.rol)
-          });
-        }
+        [permisosSerializados, username]
       );
-    });
+
+      if (!Number(resultado?.changes || 0)) {
+        return res.status(500).json({ exito: false, mensaje: "No se pudieron actualizar permisos" });
+      }
+
+      return res.json({
+        exito: true,
+        username,
+        permisos: normalizarPermisosUsuario(permisosSerializados, user.rol)
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudieron actualizar permisos" });
+    }
   });
 
   // Resetear contraseña
@@ -153,31 +170,39 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     }
 
     const hash = await bcrypt.hash(passwordTemporal, 10);
-    bdAdmin.run(
-      "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-      [hash, username],
-      function(err) {
-        if (err || this.changes === 0) return res.status(400).json({ exito: false, mensaje: "Usuario no encontrado" });
-        res.json({ exito: true, username, passwordTemporal });
-      }
-    );
+    try {
+      const resultado = await dbRun(
+        bdAdmin,
+        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [hash, username]
+      );
+      if (!Number(resultado?.changes || 0)) return res.status(400).json({ exito: false, mensaje: "Usuario no encontrado" });
+      return res.json({ exito: true, username, passwordTemporal });
+    } catch {
+      return res.status(400).json({ exito: false, mensaje: "Usuario no encontrado" });
+    }
   });
 
   // Eliminar usuario
-  app.delete("/api/privado/usuarios/:username", (req, res) => {
+  app.delete("/api/privado/usuarios/:username", async (req, res) => {
     if (!req.usuario) {
       return res.status(403).json({ exito: false, mensaje: "No autorizado" });
     }
     const { username } = req.params;
     if (!username) return res.status(400).json({ exito: false, mensaje: "Falta username" });
-    bdAdmin.run(
-      "DELETE FROM usuarios WHERE username = ? AND rol != 'ceo'",
-      [username],
-      function(err) {
-        if (err) return res.status(500).json({ exito: false, mensaje: "Error al eliminar usuario" });
-        if (this.changes === 0) return res.status(400).json({ exito: false, mensaje: "No se puede eliminar CEO o usuario no encontrado" });
-        res.json({ exito: true, username });
+    try {
+      const resultado = await dbRun(
+        bdAdmin,
+        "DELETE FROM usuarios WHERE username = ? AND rol != 'ceo'",
+        [username]
+      );
+
+      if (!Number(resultado?.changes || 0)) {
+        return res.status(400).json({ exito: false, mensaje: "No se puede eliminar CEO o usuario no encontrado" });
       }
-    );
+      return res.json({ exito: true, username });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "Error al eliminar usuario" });
+    }
   });
 }

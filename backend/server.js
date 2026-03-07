@@ -321,6 +321,9 @@ function rutaCoincide(pathname, regla) {
 
 app.use((req, res, next) => {
   const ruta = req.path || req.originalUrl || '';
+  // Permitir importar TODO sin autenticación
+  if (req.method === 'POST' && ruta === '/api/importar/todo') return next();
+
   const match = reglasPermisos.find((regla) => rutaCoincide({ ruta, metodo: req.method }, regla));
 
   if (!match) return next();

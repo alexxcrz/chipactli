@@ -850,15 +850,6 @@ export default function App() {
   const PageComponent = pageComponents[page] || (() => null);
 
   if (!isAuthenticated) {
-    const ejecutarImportacionTodoDesdeMenu = async (datosImportar) => {
-      await fetchAPIJSON('/api/importar/todo', {
-        method: 'POST',
-        body: datosImportar
-      });
-      mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
-      window.location.reload();
-    };
-
     const onArchivoImportarTodoMenu = async (event) => {
       const input = event.target;
       const archivo = input?.files?.[0];
@@ -877,18 +868,12 @@ export default function App() {
 
         setMenuContextoTrastienda({ visible: false, x: 0, y: 0 });
 
-        const tokenActual = localStorage.getItem('token') || '';
-        if (!tokenActual) {
-          setImportacionTodoPendiente({
-            datos,
-            nombreArchivo: String(archivo?.name || '').trim()
-          });
-          setShowAccesoSistema(true);
-          mostrarNotificacion('Archivo listo. Inicia sesión para importar TODO.', 'advertencia');
-          return;
-        }
-
-        await ejecutarImportacionTodoDesdeMenu(datos);
+        await fetchAPIJSON('/api/importar/todo', {
+          method: 'POST',
+          body: datos
+        });
+        mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
+        window.location.reload();
       } catch (error) {
         mostrarNotificacion(`❌ Error al importar: ${error?.message || 'Error desconocido'}`, 'error');
       } finally {

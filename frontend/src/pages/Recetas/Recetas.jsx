@@ -289,7 +289,7 @@ export default function Recetas() {
             <textarea id="fichaTiendaModoUso" rows="4" placeholder="Modo de uso"></textarea>
             <textarea id="fichaTiendaCuidados" rows="4" placeholder="Cuidados del producto"></textarea>
             <div id="fichaTiendaIngredientesWrap" className="fichaSpan2 fichaIngredientesBloque">
-              <label htmlFor="fichaTiendaListaIngredientes">Ingredientes para tienda</label>
+              <div>Ingredientes para tienda</div>
               <div id="fichaTiendaListaIngredientes" className="fichaTiendaListaIngredientes"></div>
             </div>
             <button className="boton botonExito fichaSpan2" type="button" onClick={() => guardarFichaTiendaReceta()}>Guardar ficha tienda</button>

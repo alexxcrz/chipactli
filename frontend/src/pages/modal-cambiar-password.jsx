@@ -14,27 +14,27 @@ export function mostrarModalCambiarPassword(username) {
       </div>
       <form id="formCambiarPassword" class="cajaFormulario">
         <div class="grupoFormulario">
-          <label>Contraseña actual</label>
+          <label for="cambiarPasswordActual">Contraseña actual</label>
           <div class="passwordInputWrap">
-            <input class="passwordInputField" type="password" name="password_actual" placeholder="Contraseña actual" required>
+            <input id="cambiarPasswordActual" class="passwordInputField" type="password" name="password_actual" placeholder="Contraseña actual" required>
             <button type="button" class="passwordToggleBtn" data-password-toggle="password_actual" aria-label="Mostrar contraseña" title="Mostrar contraseña">
               &#128065;
             </button>
           </div>
         </div>
         <div class="grupoFormulario">
-          <label>Nueva contraseña</label>
+          <label for="cambiarPasswordNueva">Nueva contraseña</label>
           <div class="passwordInputWrap">
-            <input class="passwordInputField" type="password" name="password_nueva" placeholder="Nueva contraseña" required>
+            <input id="cambiarPasswordNueva" class="passwordInputField" type="password" name="password_nueva" placeholder="Nueva contraseña" required>
             <button type="button" class="passwordToggleBtn" data-password-toggle="password_nueva" aria-label="Mostrar contraseña" title="Mostrar contraseña">
               &#128065;
             </button>
           </div>
         </div>
         <div class="grupoFormulario">
-          <label>Repite nueva contraseña</label>
+          <label for="cambiarPasswordNueva2">Repite nueva contraseña</label>
           <div class="passwordInputWrap">
-            <input class="passwordInputField" type="password" name="password_nueva2" placeholder="Repite nueva contraseña" required>
+            <input id="cambiarPasswordNueva2" class="passwordInputField" type="password" name="password_nueva2" placeholder="Repite nueva contraseña" required>
             <button type="button" class="passwordToggleBtn" data-password-toggle="password_nueva2" aria-label="Mostrar contraseña" title="Mostrar contraseña">
               &#128065;
             </button>
@@ -84,7 +84,7 @@ export function mostrarModalCambiarPassword(username) {
       if (!data.exito) throw new Error(data.mensaje);
       mostrarNotificacion('Contraseña cambiada.', 'exito');
       document.getElementById('modalCambiarPassword').remove();
-      window.location.reload();
+      window.dispatchEvent(new CustomEvent('chipactli:password-actualizada', { detail: { username } }));
     } catch (err) {
       errorDiv.textContent = err.message;
       errorDiv.style.display = 'block';

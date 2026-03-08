@@ -23,6 +23,41 @@ import { mostrarModalCambiarPassword } from '../modal-cambiar-password.jsx';
 import { inicializarCierreModalConEsc } from '../../utils/modales.jsx';
 import { conectarWebSocket, cerrarWebSocket } from '../../utils/websocket.jsx';
 
+let secuenciaCampoAuto = 0;
+
+function asegurarAtributosFormulario(root = document) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  const campos = root.querySelectorAll('input, select, textarea');
+  campos.forEach((campo) => {
+    if (!campo) return;
+    if (!campo.id) {
+      secuenciaCampoAuto += 1;
+      campo.id = `chipactli-campo-${secuenciaCampoAuto}`;
+    }
+    if (!campo.getAttribute('name')) {
+      campo.setAttribute('name', campo.id);
+    }
+
+    const dentroDeLabel = Boolean(campo.closest('label'));
+    const labelAsociado = campo.id
+      ? document.querySelector(`label[for="${campo.id}"]`)
+      : null;
+    const tieneEtiquetaSemantica = dentroDeLabel || Boolean(labelAsociado);
+
+    if (!tieneEtiquetaSemantica && !campo.getAttribute('aria-label')) {
+      const sugerido = String(
+        campo.getAttribute('placeholder')
+        || campo.getAttribute('name')
+        || campo.id
+        || 'campo'
+      ).trim();
+      if (sugerido) {
+        campo.setAttribute('aria-label', sugerido);
+      }
+    }
+  });
+}
+
 const PERMISOS_POR_DEFECTO = {
   inventario: { ver: true, acciones: { ver: true } },
   recetas: { ver: false, acciones: { ver: false } },
@@ -105,6 +140,7 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showPendientes, setShowPendientes] = useState(false);
   const [showAlertas, setShowAlertas] = useState(false);
+  const [mostrarBotonInicio, setMostrarBotonInicio] = useState(false);
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [currentUser, setCurrentUser] = useState(obtenerUsuarioGuardado());
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
@@ -145,6 +181,25 @@ export default function App() {
 
   const isAuthenticated = Boolean(token && currentUser?.username);
 
+  const irAlInicio = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const refrescarDatosSinRecargar = useCallback(() => {
+    const tipos = [
+      'inventario_actualizado',
+      'recetas_actualizado',
+      'produccion_actualizado',
+      'ventas_actualizado',
+      'categorias_actualizado',
+      'tienda_catalogo_actualizado'
+    ];
+    tipos.forEach((tipo) => {
+      window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: { tipo } }));
+    });
+    window.dispatchEvent(new CustomEvent('chipactli:app-soft-refresh'));
+  }, []);
+
   // mapping between page keys and hash fragments
   const hashMap = {
     inventario: '#/inventario',
@@ -165,10 +220,45 @@ export default function App() {
 
   // synchronise page state with URL hash
   React.useEffect(() => {
+    const actualizarVisibilidadBotonInicio = () => {
+      const top = window.scrollY || window.pageYOffset || 0;
+      setMostrarBotonInicio(top > 260);
+    };
+
+    actualizarVisibilidadBotonInicio();
+    window.addEventListener('scroll', actualizarVisibilidadBotonInicio, { passive: true });
+    return () => window.removeEventListener('scroll', actualizarVisibilidadBotonInicio);
+  }, []);
+
+  React.useEffect(() => {
     const onHashChange = () => setPage(getPageFromHash());
     window.addEventListener('hashchange', onHashChange);
     setPage(getPageFromHash());
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  React.useEffect(() => {
+    asegurarAtributosFormulario(document);
+
+    const observer = new MutationObserver((mutaciones) => {
+      for (const mutacion of mutaciones) {
+        if (!mutacion?.addedNodes?.length) continue;
+        mutacion.addedNodes.forEach((nodo) => {
+          if (!(nodo instanceof Element)) return;
+          if (nodo.matches?.('input, select, textarea')) {
+            asegurarAtributosFormulario(nodo.parentElement || nodo);
+          } else {
+            asegurarAtributosFormulario(nodo);
+          }
+        });
+      }
+    });
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    return () => observer.disconnect();
   }, []);
 
   const changePage = (key) => {
@@ -484,7 +574,7 @@ export default function App() {
           });
           setImportacionTodoPendiente(null);
           mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
-          window.location.reload();
+          refrescarDatosSinRecargar();
           return;
         } catch (errorImportar) {
           setImportacionTodoPendiente(null);
@@ -582,11 +672,6 @@ export default function App() {
   };
 
   React.useEffect(() => {
-    if (!isAuthenticated) {
-      cerrarWebSocket();
-      return;
-    }
-
     const estadoLegible = (estadoRaw) => {
       const estado = String(estadoRaw || '').toLowerCase();
       if (estado === 'pendiente') return 'pendiente';
@@ -604,6 +689,12 @@ export default function App() {
     conectarWebSocket((evento) => {
       const tipo = String(evento?.tipo || '');
       if (!tipo) return;
+
+      window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: evento }));
+
+      // Keep realtime updates available for public views (e.g. tienda),
+      // but only show internal alert feed to authenticated users.
+      if (!isAuthenticated) return;
 
       if (tipo === 'tienda_orden_nueva') {
         const folio = String(evento?.folio || '').trim();
@@ -873,7 +964,7 @@ export default function App() {
           body: datos
         });
         mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
-        window.location.reload();
+        refrescarDatosSinRecargar();
       } catch (error) {
         mostrarNotificacion(`❌ Error al importar: ${error?.message || 'Error desconocido'}`, 'error');
       } finally {
@@ -917,6 +1008,7 @@ export default function App() {
     return (
       <div className="app" style={{ minHeight: '100vh', padding: '20px' }} onContextMenu={abrirMenuTrastienda}>
         <Tienda
+          key="tienda-publica"
           modo="tienda"
           mostrarLogoAccesoSistema
           onClickLogoAccesoSistema={registrarToqueLogo}
@@ -1114,6 +1206,18 @@ export default function App() {
               )}
             </div>
           </div>
+        )}
+
+        {mostrarBotonInicio && (
+          <button
+            type="button"
+            className="botonSubirInicio"
+            onClick={irAlInicio}
+            title="Volver al inicio"
+            aria-label="Volver al inicio"
+          >
+            ↑
+          </button>
         )}
         </div>
     );
@@ -1477,6 +1581,18 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {mostrarBotonInicio && (
+        <button
+          type="button"
+          className="botonSubirInicio"
+          onClick={irAlInicio}
+          title="Volver al inicio"
+          aria-label="Volver al inicio"
+        >
+          ↑
+        </button>
       )}
     </div>
   );

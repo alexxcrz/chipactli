@@ -5,8 +5,6 @@ import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modale
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
-const OC_SUGERIDOS_KEY = 'chipactli_oc_sugeridos';
-
 export default function Recetas() {
   useEffect(() => {
     window.recetas = {
@@ -48,15 +46,10 @@ export default function Recetas() {
       editarCategoriaDesdeMenu,
       eliminarCategoriaDesdeMenu
       ,cambiarSubpestanaRecetas
-      ,cargarOrdenesCompraRecetas
-      ,cargarInsumosOrdenCompraRecetas
-      ,seleccionarInsumoOrdenCompraRecetas
-      ,agregarItemOrdenCompraRecetas
-      ,eliminarItemOrdenCompraRecetas
-      ,crearOrdenCompraRecetas
-      ,aplicarSugerenciasAutomaticasOrdenCompraRecetas
       ,abrirFichaTiendaReceta
       ,guardarFichaTiendaReceta
+      ,agregarImagenesFichaTiendaDesdeInput
+      ,abrirSelectorImagenFichaTienda
       ,quitarImagenGaleriaTienda
       ,moverImagenGaleriaTienda
       ,iniciarArrastreImagenGaleria
@@ -64,20 +57,57 @@ export default function Recetas() {
       ,permitirDropImagenGaleria
       ,cambiarVisibleRecetaTienda
       ,toggleIngredienteTiendaVisible
+      ,cargarPaquetesRecetas
+      ,abrirModalNuevoPaquete
+      ,editarPaqueteReceta
+      ,eliminarPaqueteReceta
+      ,guardarPaqueteReceta
+      ,agregarItemPaqueteTemporal
+      ,quitarItemPaqueteTemporal
+      ,abrirDetallePaqueteReceta
+      ,abrirProduccionPaquete
+      ,producirDesdePaquete
+      ,renderResumenProduccionPaquete
+      ,cambiarVisiblePaqueteReceta
+      ,abrirAjustesProduccion
+      ,guardarAjustesProduccion
+      ,abrirFichaTiendaPaquete
     };
+
+    setTimeout(() => {
+      document.querySelectorAll('input, select, textarea').forEach((campo) => {
+        if (!campo) return;
+        if (!campo.getAttribute('name') && campo.id) {
+          campo.setAttribute('name', campo.id);
+        }
+      });
+    }, 0);
 
     window.agregarIngrediente = () => agregarIngrediente(false);
 
     cargarCategorias();
     cargarPestanasCategorias();
     cargarListadoRecetas();
+    cargarPaquetesRecetas();
+    cargarAjustesProduccion();
     cambiarSubpestanaRecetas('recetas');
 
-    const onSugeridosActualizados = () => {
-      if (subpestanaRecetasActiva !== 'ordenes-compra') return;
-      aplicarSugerenciasAutomaticasOrdenCompraRecetas();
+    let timerRefrescoTiempoReal = null;
+    const tiposRefrescar = new Set([
+      'tienda_catalogo_actualizado',
+      'recetas_actualizado',
+      'produccion_actualizado',
+      'inventario_actualizado'
+    ]);
+    const onRealtime = (event) => {
+      const tipo = String(event?.detail?.tipo || '').trim();
+      if (!tiposRefrescar.has(tipo)) return;
+      if (timerRefrescoTiempoReal) clearTimeout(timerRefrescoTiempoReal);
+      timerRefrescoTiempoReal = setTimeout(() => {
+        cargarListadoRecetas();
+      }, 120);
     };
-    window.addEventListener('chipactli:ordenes-compra-sugeridos-actualizados', onSugeridosActualizados);
+    window.addEventListener('chipactli:realtime', onRealtime);
 
     const onDocClick = (event) => {
       const menu = document.getElementById('menuCategoriaRecetas');
@@ -97,7 +127,8 @@ export default function Recetas() {
     return () => {
       document.removeEventListener('click', onDocClick);
       document.removeEventListener('keydown', onEsc);
-      window.removeEventListener('chipactli:ordenes-compra-sugeridos-actualizados', onSugeridosActualizados);
+      window.removeEventListener('chipactli:realtime', onRealtime);
+      if (timerRefrescoTiempoReal) clearTimeout(timerRefrescoTiempoReal);
     };
   }, []);
 
@@ -106,6 +137,8 @@ export default function Recetas() {
       <div className="encabezadoTarjeta">
         <h2>Gestión de Recetas</h2>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="boton" onClick={() => abrirAjustesProduccion()}>% Producción</button>
+          <button className="boton" onClick={() => abrirModalNuevoPaquete()}>📦 Nuevo Paquete</button>
           <button className="boton" onClick={() => abrirModalEscaladoCategoria()}>📋 Escalar por categoría</button>
           <button className="boton" onClick={() => abrirModalArchivadoRecetas()}>🗂️ Archivar recetas</button>
           <button className="boton" onClick={() => abrirModal('modalCategoria')}>➕ Nueva Categoría</button>
@@ -117,53 +150,18 @@ export default function Recetas() {
         <input type="text" className="cajaBusqueda" id="busquedaRecetas" placeholder="🔍 Buscar receta..." onChange={e => filtrarRecetas(e.target.value)} style={{ width: '220px' }} />
       </div>
 
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+        <button id="btnSubTabRecetas" className="boton activo" onClick={() => cambiarSubpestanaRecetas('recetas')}>Recetas</button>
+        <button id="btnSubTabPaquetes" className="boton" onClick={() => cambiarSubpestanaRecetas('paquetes')}>Paquetes</button>
+      </div>
+
       <div id="panelSubpestanaRecetas">
         <div id="pestanasCategoriasRecetas" style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '15px', position: 'relative', overflow: 'visible' }}></div>
         <div id="cuerpoRecetas" className="gridRecetas"></div>
       </div>
 
-      <div id="panelSubpestanaOrdenesCompra" style={{ display: 'none' }}>
-        <div className="bloqueOrdenCompraRecetas">
-          <h3>Crear orden de compra</h3>
-          <div id="sugerenciasAutoOrdenCompraRecetas" className="listaOrdenesCompraRecetas" style={{ marginBottom: '10px' }}></div>
-          <div className="filaOrdenCompraRecetas">
-            <input id="busquedaOrdenesCompraRecetas" type="text" placeholder="Buscar por proveedor o insumo..." onChange={() => {
-              renderListaPreciosOrdenCompraRecetas();
-              cargarOrdenesCompraRecetas();
-            }} />
-          </div>
-          <div className="filaOrdenCompraRecetas">
-            <input id="proveedorOrdenCompraRecetas" type="text" placeholder="Proveedor" />
-            <select id="insumoOrdenCompraRecetas" onChange={() => seleccionarInsumoOrdenCompraRecetas()}>
-              <option value="">Selecciona un insumo</option>
-            </select>
-            <input id="cantidadOrdenCompraRecetas" type="number" step="0.01" min="0.01" placeholder="Cantidad" />
-            <input id="unidadOrdenCompraRecetas" type="text" placeholder="Unidad" readOnly />
-            <input id="precioOrdenCompraRecetas" type="number" step="0.01" min="0" placeholder="Precio unitario (opcional)" />
-            <button className="boton" type="button" onClick={() => agregarItemOrdenCompraRecetas()}>+ Agregar</button>
-          </div>
-
-          <table>
-            <thead>
-              <tr><th>Insumo</th><th>Proveedor</th><th>Cantidad</th><th>Precio unitario</th><th></th></tr>
-            </thead>
-            <tbody id="tablaItemsOrdenCompraRecetas"></tbody>
-          </table>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-            <button className="boton botonExito" type="button" onClick={() => crearOrdenCompraRecetas()}>Guardar orden de compra</button>
-          </div>
-        </div>
-
-        <div className="bloqueOrdenCompraRecetas" style={{ marginTop: '12px' }}>
-          <h3>Órdenes registradas</h3>
-          <div id="listaOrdenesCompraRecetas" className="listaOrdenesCompraRecetas"></div>
-        </div>
-
-        <div className="bloqueOrdenCompraRecetas" style={{ marginTop: '12px' }}>
-          <h3>Lista de insumos y precios</h3>
-          <div id="listaPreciosOrdenCompraRecetas" className="listaOrdenesCompraRecetas"></div>
-        </div>
+      <div id="panelSubpestanaPaquetes" style={{ display: 'none' }}>
+        <div id="cuerpoPaquetesRecetas" className="gridRecetas"></div>
       </div>
 
       <div id="modalCategoria" className="modal" onClick={() => cerrarModal('modalCategoria')}>
@@ -268,21 +266,31 @@ export default function Recetas() {
 
       <div id="modalFichaTiendaReceta" className="modal" onClick={() => cerrarModal('modalFichaTiendaReceta')}>
         <div className="contenidoModal modalFichaTiendaCompacta" onClick={e => e.stopPropagation()}>
-          <div className="encabezadoModal"><h3>Ficha para tienda</h3><button className="cerrarModal" onClick={() => cerrarModal('modalFichaTiendaReceta')}>&times;</button></div>
+          <div className="encabezadoModal"><h3 id="tituloModalFichaTienda">Ficha para tienda</h3><button className="cerrarModal" onClick={() => cerrarModal('modalFichaTiendaReceta')}>&times;</button></div>
           <div className="cajaFormulario fichaTiendaFormularioCompacta">
             <input id="fichaTiendaNombreReceta" type="text" readOnly />
-            <div>
+            <div id="fichaTiendaPrecioWrap">
               <label htmlFor="fichaTiendaPrecioPublico">Precio público (opcional)</label>
               <input id="fichaTiendaPrecioPublico" type="number" min="0" step="0.01" placeholder="Ej. 120" />
             </div>
-            <label className="fichaSpan2">Imágenes del producto (la primera será la principal)</label>
-            <input id="fichaTiendaImagenes" className="fichaSpan2" type="file" accept="image/*" multiple />
+            <label className="fichaSpan2" htmlFor="fichaTiendaImagenes">Imágenes del producto (la primera será la principal)</label>
+            <input
+              id="fichaTiendaImagenes"
+              className="fichaSpan2"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={() => agregarImagenesFichaTiendaDesdeInput()}
+            />
+            <button className="boton fichaSpan2" type="button" onClick={() => abrirSelectorImagenFichaTienda()}>
+              + Agregar otra imagen
+            </button>
             <div id="fichaTiendaGaleria" className="fichaTiendaGaleria fichaSpan2"></div>
             <textarea id="fichaTiendaDescripcion" className="fichaSpan2" rows="2" placeholder="Descripción (se comparte entre variantes)"></textarea>
             <textarea id="fichaTiendaModoUso" rows="4" placeholder="Modo de uso"></textarea>
             <textarea id="fichaTiendaCuidados" rows="4" placeholder="Cuidados del producto"></textarea>
-            <div className="fichaSpan2 fichaIngredientesBloque">
-              <label>Ingredientes para tienda</label>
+            <div id="fichaTiendaIngredientesWrap" className="fichaSpan2 fichaIngredientesBloque">
+              <label htmlFor="fichaTiendaListaIngredientes">Ingredientes para tienda</label>
               <div id="fichaTiendaListaIngredientes" className="fichaTiendaListaIngredientes"></div>
             </div>
             <button className="boton botonExito fichaSpan2" type="button" onClick={() => guardarFichaTiendaReceta()}>Guardar ficha tienda</button>
@@ -297,29 +305,44 @@ export default function Recetas() {
             <input id="idRecetaProducir" type="hidden" />
             <div className="filaProduccionRapida filaProduccionRapidaTop">
               <div>
-                <label>Receta</label>
+                <label htmlFor="nombreRecetaProducir">Receta</label>
                 <input id="nombreRecetaProducir" type="text" readOnly />
               </div>
               <div>
-                <label>Cantidad</label>
+                <label htmlFor="cantidadProducir">Cantidad</label>
                 <input id="cantidadProducir" type="number" min="1" defaultValue="1" onChange={actualizarCostoProduccion} />
               </div>
               <div>
-                <label>Costo por pieza</label>
+                <label htmlFor="costoPorPiezaProducir">Costo por pieza</label>
                 <input id="costoPorPiezaProducir" type="number" step="0.01" onChange={actualizarCostoProduccion} onBlur={normalizarCostoPorPieza} />
               </div>
             </div>
             <div className="filaProduccionRapida filaProduccionRapidaBottom">
               <div>
-                <label>Costo producción</label>
+                <label htmlFor="costoProducir">Costo producción</label>
                 <input id="costoProducir" type="number" step="0.01" readOnly />
               </div>
               <div>
-                <label>Precio venta</label>
+                <label htmlFor="precioVentaProducir">Precio venta</label>
                 <input id="precioVentaProducir" type="number" step="0.01" />
               </div>
               <button className="boton botonExito" onClick={() => producirDesdeReceta()}>Registrar producción</button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalProduccionPaquete" className="modal" onClick={() => cerrarModal('modalProduccionPaquete')}>
+        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
+          <div className="encabezadoModal"><h3>Producción de paquete</h3><button className="cerrarModal" onClick={() => cerrarModal('modalProduccionPaquete')}>&times;</button></div>
+          <div className="cajaFormulario">
+            <input id="idPaqueteProducir" type="hidden" />
+            <label htmlFor="nombrePaqueteProducir">Paquete</label>
+            <input id="nombrePaqueteProducir" type="text" readOnly />
+            <label htmlFor="cantidadPaqueteProducir">Cantidad de paquetes</label>
+            <input id="cantidadPaqueteProducir" type="number" min="1" step="1" defaultValue="1" onChange={() => renderResumenProduccionPaquete()} />
+            <div id="resumenProduccionPaquete" className="fichaIngredientesBloque" style={{ marginTop: '8px' }}></div>
+            <button className="boton botonExito" type="button" onClick={() => producirDesdePaquete()}>Registrar producción del paquete</button>
           </div>
         </div>
       </div>
@@ -329,9 +352,9 @@ export default function Recetas() {
           <div className="encabezadoModal"><h3>Copiar receta escalada</h3><button className="cerrarModal" onClick={() => cerrarModal('modalEscalarReceta')}>&times;</button></div>
           <div className="cajaFormulario">
             <input id="idRecetaEscalar" type="hidden" />
-            <label>Receta base</label>
+            <label htmlFor="gramajeOriginal">Receta base</label>
             <input id="gramajeOriginal" type="text" readOnly />
-            <label>Nuevo gramaje</label>
+            <label htmlFor="nuevoGramaje">Nuevo gramaje</label>
             <input id="nuevoGramaje" type="number" step="0.01" min="0.01" placeholder="Ej. 250" />
             <button className="boton botonExito" onClick={() => copiarRecetaEscalada()}>Crear copia</button>
           </div>
@@ -406,6 +429,57 @@ export default function Recetas() {
         </div>
       </div>
 
+      <div id="modalPaqueteReceta" className="modal" onClick={() => cerrarModal('modalPaqueteReceta')}>
+        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
+          <div className="encabezadoModal"><h3 id="tituloModalPaqueteReceta">Nuevo paquete</h3><button className="cerrarModal" onClick={() => cerrarModal('modalPaqueteReceta')}>&times;</button></div>
+          <div className="cajaFormulario">
+            <input id="idPaqueteReceta" type="hidden" />
+            <input id="nombrePaqueteReceta" type="text" placeholder="Nombre del paquete" />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '8px', marginBottom: '10px' }}>
+              <select id="filtroCategoriaRecetaPaquete" onChange={() => filtrarRecetasPaquete()}>
+                <option value="">Todas las categorías</option>
+              </select>
+              <input id="busquedaRecetaPaquete" type="text" placeholder="Buscar receta..." onChange={() => filtrarRecetasPaquete()} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px auto', gap: '8px', marginBottom: '10px' }}>
+              <select id="selectRecetaPaquete"></select>
+              <input id="cantidadRecetaPaquete" type="number" min="1" step="1" defaultValue="1" />
+              <button className="boton" type="button" onClick={() => agregarItemPaqueteTemporal()}>+ Agregar</button>
+            </div>
+            <table>
+              <thead><tr><th>Receta</th><th>Piezas</th><th></th></tr></thead>
+              <tbody id="tablaItemsPaqueteReceta"></tbody>
+            </table>
+            <button className="boton botonExito" type="button" onClick={() => guardarPaqueteReceta()}>Guardar paquete</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalDetallePaqueteReceta" className="modal" onClick={() => cerrarModal('modalDetallePaqueteReceta')}>
+        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
+          <div className="encabezadoModal"><h3 id="tituloDetallePaqueteReceta">Detalle del paquete</h3><button className="cerrarModal" onClick={() => cerrarModal('modalDetallePaqueteReceta')}>&times;</button></div>
+          <div className="cajaFormulario">
+            <div id="tabsDetallePaqueteReceta" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}></div>
+            <div id="contenidoDetallePaqueteReceta"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalAjustesProduccion" className="modal" onClick={() => cerrarModal('modalAjustesProduccion')}>
+        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
+          <div className="encabezadoModal"><h3>Porcentajes de producción</h3><button className="cerrarModal" onClick={() => cerrarModal('modalAjustesProduccion')}>&times;</button></div>
+          <div className="cajaFormulario">
+            <label htmlFor="ajusteFactorCostoProduccion">Factor costo producción</label>
+            <input id="ajusteFactorCostoProduccion" type="number" min="0.01" step="0.01" />
+            <label htmlFor="ajusteFactorPrecioVenta">Factor precio venta</label>
+            <input id="ajusteFactorPrecioVenta" type="number" min="0.01" step="0.01" />
+            <label htmlFor="ajusteRedondeoPrecio">Redondeo de precio</label>
+            <input id="ajusteRedondeoPrecio" type="number" min="0.01" step="0.01" />
+            <button className="boton botonExito" type="button" onClick={() => guardarAjustesProduccion()}>Guardar ajustes</button>
+          </div>
+        </div>
+      </div>
+
       <div id="menuCategoriaRecetas" className="menuCategoriaRecetas" onClick={e => e.stopPropagation()}>
         <button type="button" className="menuCategoriaBtn" onClick={() => editarCategoriaDesdeMenu()}>✏️ Editar categoría</button>
         <button type="button" className="menuCategoriaBtn menuCategoriaBtnDanger" onClick={() => eliminarCategoriaDesdeMenu()}>🗑️ Eliminar categoría</button>
@@ -427,13 +501,29 @@ let recetasArchivadoActual = [];
 let recetasArchivadasActual = [];
 let tabArchivadoActiva = 'archivar';
 let subpestanaRecetasActiva = 'recetas';
-let insumosOrdenCompraRecetas = [];
-let itemsOrdenCompraRecetasTemporales = [];
-let sugerenciasAutoOrdenCompraRecetas = [];
 let recetaTiendaEditando = null;
 let fichaTiendaGaleriaActual = [];
 let fichaTiendaIngredientesActual = [];
 let indiceDragGaleriaTienda = -1;
+let paquetesRecetasActual = [];
+let productosTiendaAdminCache = [];
+let itemsPaqueteTemporales = [];
+let detallePaqueteActual = null;
+let filtroCategoriaPaqueteActual = '';
+let busquedaRecetaPaqueteActual = '';
+let paqueteProduccionActual = null;
+let ajustesProduccionActual = {
+  factor_costo_produccion: 1.15,
+  factor_precio_venta: 2.5,
+  redondeo_precio: 5
+};
+
+function claveNombreReceta(valor) {
+  return String(valor || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
 
 function getAbrev(unidad) {
   if (!unidad) return '';
@@ -479,351 +569,20 @@ function agruparInsumosPorProveedor(insumos = []) {
 }
 
 function cambiarSubpestanaRecetas(tab) {
-  subpestanaRecetasActiva = tab === 'ordenes-compra' ? 'ordenes-compra' : 'recetas';
+  if (tab === 'paquetes') subpestanaRecetasActiva = 'paquetes';
+  else subpestanaRecetasActiva = 'recetas';
   const panelRecetas = document.getElementById('panelSubpestanaRecetas');
-  const panelOrdenes = document.getElementById('panelSubpestanaOrdenesCompra');
+  const panelPaquetes = document.getElementById('panelSubpestanaPaquetes');
   const btnRecetas = document.getElementById('btnSubTabRecetas');
-  const btnOrdenes = document.getElementById('btnSubTabOrdenesCompra');
+  const btnPaquetes = document.getElementById('btnSubTabPaquetes');
 
   if (panelRecetas) panelRecetas.style.display = subpestanaRecetasActiva === 'recetas' ? '' : 'none';
-  if (panelOrdenes) panelOrdenes.style.display = subpestanaRecetasActiva === 'ordenes-compra' ? '' : 'none';
+  if (panelPaquetes) panelPaquetes.style.display = subpestanaRecetasActiva === 'paquetes' ? '' : 'none';
   if (btnRecetas) btnRecetas.classList.toggle('activo', subpestanaRecetasActiva === 'recetas');
-  if (btnOrdenes) btnOrdenes.classList.toggle('activo', subpestanaRecetasActiva === 'ordenes-compra');
-
-  if (subpestanaRecetasActiva === 'ordenes-compra') {
-    cargarInsumosOrdenCompraRecetas();
-    aplicarSugerenciasAutomaticasOrdenCompraRecetas();
-    renderItemsOrdenCompraRecetasTemporales();
-    cargarOrdenesCompraRecetas();
-    renderListaPreciosOrdenCompraRecetas();
+  if (btnPaquetes) btnPaquetes.classList.toggle('activo', subpestanaRecetasActiva === 'paquetes');
+  if (subpestanaRecetasActiva === 'paquetes') {
+    cargarPaquetesRecetas();
   }
-}
-
-function cargarSugerenciasAutomaticasOrdenCompraRecetas() {
-  try {
-    const raw = localStorage.getItem(OC_SUGERIDOS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    sugerenciasAutoOrdenCompraRecetas = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    sugerenciasAutoOrdenCompraRecetas = [];
-  }
-}
-
-function aplicarSugerenciasAutomaticasOrdenCompraRecetas() {
-  cargarSugerenciasAutomaticasOrdenCompraRecetas();
-  if (!Array.isArray(sugerenciasAutoOrdenCompraRecetas)) return;
-
-  const idsSugeridos = new Set(sugerenciasAutoOrdenCompraRecetas.map((item) => Number(item.id_inventario)).filter((id) => Number.isFinite(id)));
-  itemsOrdenCompraRecetasTemporales = itemsOrdenCompraRecetasTemporales.filter((item) => {
-    if (!item?.automatico) return true;
-    return idsSugeridos.has(Number(item.id_inventario));
-  });
-
-  sugerenciasAutoOrdenCompraRecetas.forEach((sugerido) => {
-    const id = Number(sugerido.id_inventario);
-    if (!Number.isFinite(id)) return;
-    const existente = itemsOrdenCompraRecetasTemporales.find((item) => Number(item.id_inventario) === id);
-    if (existente) {
-      existente.automatico = true;
-      existente.cantidad_requerida = Math.max(Number(existente.cantidad_requerida) || 0, Number(sugerido.cantidad_requerida) || 0);
-      if (!existente.proveedor) existente.proveedor = sugerido.proveedor || '';
-      if (!Number(existente.precio_unitario)) existente.precio_unitario = Number(sugerido.precio_unitario) || 0;
-      return;
-    }
-    itemsOrdenCompraRecetasTemporales.push({
-      id_inventario: id,
-      codigo: sugerido.codigo || '',
-      nombre: sugerido.nombre || '',
-      unidad: sugerido.unidad || '',
-      proveedor: sugerido.proveedor || '',
-      cantidad_requerida: Number(sugerido.cantidad_requerida) || 0,
-      precio_unitario: Number(sugerido.precio_unitario) || 0,
-      automatico: true
-    });
-  });
-
-  renderSugerenciasAutomaticasOrdenCompraRecetas();
-  renderItemsOrdenCompraRecetasTemporales();
-}
-
-async function cargarInsumosOrdenCompraRecetas() {
-  try {
-    const respuesta = await fetch(`${API}/inventario`);
-    if (!respuesta.ok) return;
-    const insumos = await respuesta.json();
-    insumosOrdenCompraRecetas = Array.isArray(insumos) ? insumos : [];
-
-    const select = document.getElementById('insumoOrdenCompraRecetas');
-    if (!select) return;
-
-    const valorActual = select.value;
-    select.innerHTML = '<option value="">Selecciona un insumo</option>';
-    const grupos = agruparInsumosPorProveedor(insumosOrdenCompraRecetas);
-    grupos.forEach((grupo) => {
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = grupo.proveedor;
-      grupo.items.forEach((insumo) => {
-        const option = document.createElement('option');
-        option.value = String(insumo.id);
-        option.textContent = `${insumo.nombre} (${insumo.codigo || 'SIN-COD'}${insumo.unidad ? ` • ${getAbrev(insumo.unidad)}` : ''})`;
-        optgroup.appendChild(option);
-      });
-      select.appendChild(optgroup);
-    });
-    if (valorActual) select.value = valorActual;
-    renderListaPreciosOrdenCompraRecetas();
-  } catch (error) {
-    console.error('Error cargando insumos para orden de compra:', error);
-  }
-}
-
-function seleccionarInsumoOrdenCompraRecetas() {
-  const id = Number(document.getElementById('insumoOrdenCompraRecetas')?.value || 0);
-  const insumo = insumosOrdenCompraRecetas.find((item) => Number(item.id) === id);
-  const inputUnidad = document.getElementById('unidadOrdenCompraRecetas');
-  const inputProveedor = document.getElementById('proveedorOrdenCompraRecetas');
-
-  if (inputUnidad) inputUnidad.value = insumo?.unidad ? getAbrev(insumo.unidad) : '';
-  if (inputProveedor && !inputProveedor.value.trim() && insumo?.proveedor) {
-    inputProveedor.value = insumo.proveedor;
-  }
-}
-
-function agregarItemOrdenCompraRecetas() {
-  const id = Number(document.getElementById('insumoOrdenCompraRecetas')?.value || 0);
-  const cantidad = Number(document.getElementById('cantidadOrdenCompraRecetas')?.value || 0);
-  const precioUnitario = Number(document.getElementById('precioOrdenCompraRecetas')?.value || 0);
-  const proveedor = String(document.getElementById('proveedorOrdenCompraRecetas')?.value || '').trim();
-  const insumo = insumosOrdenCompraRecetas.find((item) => Number(item.id) === id);
-
-  if (!insumo || !Number.isFinite(cantidad) || cantidad <= 0) {
-    mostrarNotificacion('Selecciona un insumo y una cantidad válida', 'error');
-    return;
-  }
-
-  const existente = itemsOrdenCompraRecetasTemporales.find((item) => Number(item.id_inventario) === Number(insumo.id));
-  if (existente) {
-    existente.cantidad_requerida = Number(existente.cantidad_requerida) + Number(cantidad);
-    existente.proveedor = proveedor || existente.proveedor || '';
-    if (Number.isFinite(precioUnitario) && precioUnitario > 0) existente.precio_unitario = precioUnitario;
-  } else {
-    itemsOrdenCompraRecetasTemporales.push({
-      id_inventario: insumo.id,
-      codigo: insumo.codigo || '',
-      nombre: insumo.nombre || '',
-      unidad: normalizarUnidadReceta(insumo.unidad || ''),
-      proveedor: proveedor || (insumo.proveedor || ''),
-      cantidad_requerida: Number(cantidad),
-      precio_unitario: Number.isFinite(precioUnitario) ? precioUnitario : 0
-    });
-  }
-
-  document.getElementById('cantidadOrdenCompraRecetas').value = '';
-  document.getElementById('precioOrdenCompraRecetas').value = '';
-  document.getElementById('insumoOrdenCompraRecetas').value = '';
-  document.getElementById('unidadOrdenCompraRecetas').value = '';
-  renderItemsOrdenCompraRecetasTemporales();
-}
-
-function eliminarItemOrdenCompraRecetas(index) {
-  itemsOrdenCompraRecetasTemporales.splice(index, 1);
-  renderItemsOrdenCompraRecetasTemporales();
-}
-
-function renderItemsOrdenCompraRecetasTemporales() {
-  const tbody = document.getElementById('tablaItemsOrdenCompraRecetas');
-  if (!tbody) return;
-
-  tbody.innerHTML = '';
-  if (!itemsOrdenCompraRecetasTemporales.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#777">Agrega insumos para crear la orden</td></tr>';
-    return;
-  }
-
-  const ordenados = [...itemsOrdenCompraRecetasTemporales]
-    .sort((a, b) => {
-      const cmpProv = ordenarTexto(a.proveedor || 'Sin proveedor', b.proveedor || 'Sin proveedor');
-      if (cmpProv !== 0) return cmpProv;
-      return ordenarTexto(a.nombre || '', b.nombre || '');
-    });
-
-  ordenados.forEach((item) => {
-    const index = itemsOrdenCompraRecetasTemporales.indexOf(item);
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${item.nombre} <small style="color:#666">(${item.codigo || 'SIN-COD'}${item.unidad ? ` • ${getAbrev(item.unidad)}` : ''})</small></td>
-      <td>${item.proveedor || '<span style="color:#999">Sin proveedor</span>'}</td>
-      <td>${Number(item.cantidad_requerida).toFixed(2)}${item.automatico ? ' <small style="color:#607d8b">(auto ≤20%)</small>' : ''}</td>
-      <td>${Number(item.precio_unitario || 0) > 0 ? `$${Number(item.precio_unitario).toFixed(2)}` : '-'}</td>
-      <td><button class="botonPequeno botonDanger" onclick="window.recetas.eliminarItemOrdenCompraRecetas(${index})">×</button></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function renderSugerenciasAutomaticasOrdenCompraRecetas() {
-  const contenedor = document.getElementById('sugerenciasAutoOrdenCompraRecetas');
-  if (!contenedor) return;
-
-  if (!sugerenciasAutoOrdenCompraRecetas.length) {
-    contenedor.innerHTML = '<div class="mensajeSinRecetasEscalado">Sin sugerencias automáticas por stock ≤20%</div>';
-    return;
-  }
-
-  const grupos = agruparInsumosPorProveedor(sugerenciasAutoOrdenCompraRecetas);
-  contenedor.innerHTML = grupos.map((grupo) => {
-    const items = (grupo.items || []).map((item) => (
-      `<li>${item.nombre} • ${Number(item.cantidad_requerida || 0).toFixed(2)} ${getAbrev(item.unidad || '') || ''}</li>`
-    )).join('');
-
-    return `
-      <div class="itemOrdenCompraRecetas">
-        <div class="itemOrdenCompraRecetasHeader">
-          <strong>${grupo.proveedor}</strong>
-          <span>${(grupo.items || []).length} sugerido(s)</span>
-          <span>Auto ≤20%</span>
-        </div>
-        <ul>${items}</ul>
-      </div>
-    `;
-  }).join('');
-}
-
-async function crearOrdenCompraRecetas() {
-  if (!itemsOrdenCompraRecetasTemporales.length) {
-    mostrarNotificacion('Agrega al menos un insumo a la orden de compra', 'error');
-    return;
-  }
-
-  const proveedor = String(document.getElementById('proveedorOrdenCompraRecetas')?.value || '').trim();
-
-  try {
-    const respuesta = await fetch(`${API}/recetas/ordenes-compra`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proveedor,
-        items: itemsOrdenCompraRecetasTemporales
-      })
-    });
-
-    if (!respuesta.ok) {
-      const err = await respuesta.json().catch(() => ({}));
-      mostrarNotificacion(err.error || 'No se pudo guardar la orden de compra', 'error');
-      return;
-    }
-
-    const resultado = await respuesta.json();
-    itemsOrdenCompraRecetasTemporales = [];
-    renderItemsOrdenCompraRecetasTemporales();
-    document.getElementById('proveedorOrdenCompraRecetas').value = '';
-    mostrarNotificacion(`Orden creada (${resultado.numero_orden || 'sin folio'})`, 'exito');
-    await cargarOrdenesCompraRecetas();
-  } catch (error) {
-    console.error('Error creando orden de compra:', error);
-    mostrarNotificacion('Error al crear la orden de compra', 'error');
-  }
-}
-
-async function cargarOrdenesCompraRecetas() {
-  const contenedor = document.getElementById('listaOrdenesCompraRecetas');
-  if (!contenedor) return;
-  renderSugerenciasAutomaticasOrdenCompraRecetas();
-  renderListaPreciosOrdenCompraRecetas();
-
-  try {
-    const respuesta = await fetch(`${API}/recetas/ordenes-compra`);
-    if (!respuesta.ok) {
-      contenedor.innerHTML = '<div class="mensajeSinRecetasEscalado">No se pudo cargar el historial de órdenes</div>';
-      return;
-    }
-
-    const ordenesCrudas = await respuesta.json();
-    const busqueda = normalizarTextoBusqueda(document.getElementById('busquedaOrdenesCompraRecetas')?.value || '');
-    const ordenes = (Array.isArray(ordenesCrudas) ? ordenesCrudas : []).map((orden) => ({
-      ...orden,
-      proveedor: String(orden?.proveedor || 'Sin proveedor').trim() || 'Sin proveedor',
-      items: (Array.isArray(orden?.items) ? orden.items : []).sort((a, b) => ordenarTexto(a?.nombre, b?.nombre))
-    })).sort((a, b) => ordenarTexto(a.proveedor, b.proveedor));
-
-    const ordenesFiltradas = !busqueda
-      ? ordenes
-      : ordenes.filter((orden) => {
-        const proveedor = normalizarTextoBusqueda(orden.proveedor);
-        if (proveedor.includes(busqueda)) return true;
-        return (orden.items || []).some((item) => normalizarTextoBusqueda(item?.nombre).includes(busqueda));
-      });
-
-    if (!ordenesFiltradas.length) {
-      contenedor.innerHTML = '<div class="mensajeSinRecetasEscalado">Aún no hay órdenes de compra registradas</div>';
-      return;
-    }
-
-    contenedor.innerHTML = ordenesFiltradas.map((orden) => {
-      const itemsHtml = (orden.items || []).map((item) => (
-        `<li>${item.nombre} • ${Number(item.cantidad_requerida || 0).toFixed(2)} ${getAbrev(item.unidad || '') || ''}</li>`
-      )).join('');
-
-      return `
-        <div class="itemOrdenCompraRecetas">
-          <div class="itemOrdenCompraRecetasHeader">
-            <strong>${orden.numero_orden || 'Sin folio'}</strong>
-            <span>${orden.proveedor || 'Sin proveedor'}</span>
-            <span>${orden.fecha_creacion ? new Date(orden.fecha_creacion).toLocaleString() : ''}</span>
-          </div>
-          <ul>${itemsHtml || '<li>Sin insumos</li>'}</ul>
-        </div>
-      `;
-    }).join('');
-  } catch (error) {
-    console.error('Error cargando órdenes de compra:', error);
-    contenedor.innerHTML = '<div class="mensajeSinRecetasEscalado">Error al cargar órdenes de compra</div>';
-  }
-}
-
-function renderListaPreciosOrdenCompraRecetas() {
-  const contenedor = document.getElementById('listaPreciosOrdenCompraRecetas');
-  if (!contenedor) return;
-
-  const busqueda = normalizarTextoBusqueda(document.getElementById('busquedaOrdenesCompraRecetas')?.value || '');
-  const grupos = agruparInsumosPorProveedor(insumosOrdenCompraRecetas);
-
-  const gruposFiltrados = grupos
-    .map((grupo) => ({
-      ...grupo,
-      items: grupo.items.filter((item) => {
-        if (!busqueda) return true;
-        const nombre = normalizarTextoBusqueda(item?.nombre);
-        const proveedor = normalizarTextoBusqueda(grupo.proveedor);
-        return nombre.includes(busqueda) || proveedor.includes(busqueda);
-      })
-    }))
-    .filter((grupo) => grupo.items.length > 0);
-
-  if (!gruposFiltrados.length) {
-    contenedor.innerHTML = '<div class="mensajeSinRecetasEscalado">No hay insumos para mostrar</div>';
-    return;
-  }
-
-  contenedor.innerHTML = gruposFiltrados.map((grupo) => {
-    const itemsHtml = grupo.items.map((item) => `
-      <li>
-        <span>${item.nombre} ${item.unidad ? `(${getAbrev(item.unidad)})` : ''}</span>
-        <strong>$${Number(item.costo_por_unidad || 0).toFixed(2)}</strong>
-      </li>
-    `).join('');
-
-    return `
-      <div class="itemOrdenCompraRecetas">
-        <div class="itemOrdenCompraRecetasHeader">
-          <strong>${grupo.proveedor}</strong>
-          <span>${grupo.items.length} insumo(s)</span>
-          <span></span>
-        </div>
-        <ul class="listaPreciosProveedor">${itemsHtml}</ul>
-      </div>
-    `;
-  }).join('');
 }
 
 async function cargarCategorias() {
@@ -1503,9 +1262,11 @@ async function archivarReceta(id, nombreReceta) {
   }
 }
 
-async function cargarListadoRecetas() {
+async function cargarListadoRecetas(opciones = {}) {
+  const preservarScroll = opciones?.preservarScroll !== false;
   if (cargandoRecetas) return;
   cargandoRecetas = true;
+  const scrollYAntes = preservarScroll ? (window.scrollY || window.pageYOffset || 0) : 0;
   try {
     let url = `${API}/recetas`;
     if (categoriaRecetaActual !== null) url += `?categoria=${categoriaRecetaActual}`;
@@ -1523,6 +1284,33 @@ async function cargarListadoRecetas() {
       return;
     }
 
+    const token = localStorage.getItem('token') || '';
+    const visibilidadTienda = new Map();
+    try {
+      const respProductosAdmin = await fetch(`${API}/tienda/admin/productos`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      });
+      if (respProductosAdmin.ok) {
+        const productosAdmin = await respProductosAdmin.json();
+        if (Array.isArray(productosAdmin)) {
+          productosAdmin.forEach((producto) => {
+            const variantes = Array.isArray(producto?.variantes) ? producto.variantes : [];
+            variantes.forEach((variante) => {
+              const clave = claveNombreReceta(variante?.receta_nombre || variante?.nombre || '');
+              if (clave) visibilidadTienda.set(clave, Boolean(variante?.visible_publico));
+            });
+
+            const claveProducto = claveNombreReceta(producto?.nombre_receta || '');
+            if (claveProducto && !visibilidadTienda.has(claveProducto)) {
+              visibilidadTienda.set(claveProducto, Boolean(producto?.visible_publico));
+            }
+          });
+        }
+      }
+    } catch (errorVisibilidad) {
+      console.warn('No se pudo cargar visibilidad de tienda para recetas:', errorVisibilidad);
+    }
+
     const cuerpo = document.getElementById('cuerpoRecetas');
     if (!cuerpo) return;
     cuerpo.innerHTML = '';
@@ -1533,6 +1321,7 @@ async function cargarListadoRecetas() {
     }
 
     for (const receta of recetas) {
+      const visibleRecetaTienda = Boolean(visibilidadTienda.get(claveNombreReceta(receta?.nombre)));
       const respDetalle = await fetch(`${API}/recetas/${receta.id}`);
       const detalle = await respDetalle.json();
       const respCapacidad = await fetch(`${API}/recetas/calcular`, {
@@ -1585,7 +1374,7 @@ async function cargarListadoRecetas() {
               <label class="switchMini" title="Mostrar en tienda">
                 <input
                   type="checkbox"
-                  ${Boolean(receta.visible_publico) ? 'checked' : ''}
+                  ${visibleRecetaTienda ? 'checked' : ''}
                   onchange="window.recetas.cambiarVisibleRecetaTienda(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}', this.checked, this)"
                 />
                 <span class="switchMiniSlider"></span>
@@ -1612,6 +1401,14 @@ async function cargarListadoRecetas() {
         </div>
       `;
       cuerpo.appendChild(tarjeta);
+    }
+
+    if (preservarScroll) {
+      window.requestAnimationFrame(() => {
+        const topMax = Math.max(0, (document.documentElement?.scrollHeight || 0) - (window.innerHeight || 0));
+        const topObjetivo = Math.min(scrollYAntes, topMax);
+        window.scrollTo({ top: topObjetivo, behavior: 'auto' });
+      });
     }
   } catch (error) {
     console.error('Error cargando recetas:', error);
@@ -1645,6 +1442,468 @@ async function cambiarVisibleRecetaTienda(idReceta, nombreReceta, visible, input
     console.error('Error actualizando visibilidad de receta en tienda:', error);
     if (inputEl) inputEl.checked = !Boolean(visible);
     mostrarNotificacion(error?.message || 'Error al actualizar visibilidad', 'error');
+  }
+}
+
+function headersConToken(extra = {}) {
+  const token = localStorage.getItem('token') || '';
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra
+  };
+}
+
+async function cargarAjustesProduccion() {
+  try {
+    const respuesta = await fetch(`${API}/api/recetas/ajustes-produccion`, { headers: headersConToken() });
+    if (!respuesta.ok) return;
+    const data = await respuesta.json();
+    ajustesProduccionActual = {
+      factor_costo_produccion: Number(data?.factor_costo_produccion) || 1.15,
+      factor_precio_venta: Number(data?.factor_precio_venta) || 2.5,
+      redondeo_precio: Number(data?.redondeo_precio) || 5
+    };
+  } catch {
+    ajustesProduccionActual = { factor_costo_produccion: 1.15, factor_precio_venta: 2.5, redondeo_precio: 5 };
+  }
+}
+
+function abrirAjustesProduccion() {
+  const f1 = document.getElementById('ajusteFactorCostoProduccion');
+  const f2 = document.getElementById('ajusteFactorPrecioVenta');
+  const f3 = document.getElementById('ajusteRedondeoPrecio');
+  if (f1) f1.value = Number(ajustesProduccionActual.factor_costo_produccion || 1.15).toFixed(2);
+  if (f2) f2.value = Number(ajustesProduccionActual.factor_precio_venta || 2.5).toFixed(2);
+  if (f3) f3.value = Number(ajustesProduccionActual.redondeo_precio || 5).toFixed(2);
+  abrirModal('modalAjustesProduccion');
+}
+
+async function guardarAjustesProduccion() {
+  const factorCosto = Number(document.getElementById('ajusteFactorCostoProduccion')?.value);
+  const factorVenta = Number(document.getElementById('ajusteFactorPrecioVenta')?.value);
+  const redondeo = Number(document.getElementById('ajusteRedondeoPrecio')?.value);
+  if (!Number.isFinite(factorCosto) || factorCosto <= 0 || !Number.isFinite(factorVenta) || factorVenta <= 0 || !Number.isFinite(redondeo) || redondeo <= 0) {
+    mostrarNotificacion('Completa valores válidos para porcentajes de producción', 'error');
+    return;
+  }
+
+  try {
+    const respuesta = await fetch(`${API}/api/recetas/ajustes-produccion`, {
+      method: 'PUT',
+      headers: headersConToken({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ factor_costo_produccion: factorCosto, factor_precio_venta: factorVenta, redondeo_precio: redondeo })
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(data?.error || 'No se pudieron guardar ajustes');
+    ajustesProduccionActual = {
+      factor_costo_produccion: factorCosto,
+      factor_precio_venta: factorVenta,
+      redondeo_precio: redondeo
+    };
+    actualizarCostoProduccion();
+    cerrarModal('modalAjustesProduccion');
+    mostrarNotificacion('Ajustes de producción guardados', 'exito');
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'Error guardando ajustes', 'error');
+  }
+}
+
+async function cargarProductosTiendaAdminCache() {
+  try {
+    const respuesta = await fetch(`${API}/tienda/admin/productos`, { headers: headersConToken() });
+    if (!respuesta.ok) return;
+    const data = await respuesta.json();
+    productosTiendaAdminCache = Array.isArray(data) ? data : [];
+  } catch {
+    productosTiendaAdminCache = [];
+  }
+}
+
+function renderSelectRecetasPaquete() {
+  renderFiltrosRecetasPaquete();
+  const sel = document.getElementById('selectRecetaPaquete');
+  if (!sel) return;
+  const actual = String(sel.value || '').trim();
+  sel.innerHTML = '<option value="">Selecciona receta</option>';
+
+  const categoriaFiltro = String(filtroCategoriaPaqueteActual || '').trim().toLowerCase();
+  const busquedaFiltro = normalizarTextoBusqueda(busquedaRecetaPaqueteActual || '');
+
+  const opciones = (productosTiendaAdminCache || [])
+    .filter((p) => String(p?.tipo_producto || '').trim().toLowerCase() !== 'paquete')
+    .filter((p) => {
+      const categoria = String(p?.categoria_nombre || '').trim().toLowerCase();
+      if (categoriaFiltro && categoria !== categoriaFiltro) return false;
+
+      if (!busquedaFiltro) return true;
+      const nombre = normalizarTextoBusqueda(p?.nombre_receta || '');
+      const categoriaNorm = normalizarTextoBusqueda(p?.categoria_nombre || '');
+      return nombre.includes(busquedaFiltro) || categoriaNorm.includes(busquedaFiltro);
+    })
+    .sort((a, b) => ordenarTexto(a?.nombre_receta, b?.nombre_receta));
+
+  opciones.forEach((p) => {
+    const opt = document.createElement('option');
+    opt.value = String(p?.nombre_receta || '').trim();
+    opt.textContent = `${p?.nombre_receta || 'Sin nombre'}${p?.categoria_nombre ? ` (${p.categoria_nombre})` : ''}`;
+    sel.appendChild(opt);
+  });
+
+  if (actual && opciones.some((p) => String(p?.nombre_receta || '').trim() === actual)) {
+    sel.value = actual;
+  }
+}
+
+function renderFiltrosRecetasPaquete() {
+  const selCategoria = document.getElementById('filtroCategoriaRecetaPaquete');
+  if (!selCategoria) return;
+  const actual = String(selCategoria.value || '').trim().toLowerCase();
+
+  const categorias = Array.from(new Set(
+    (productosTiendaAdminCache || [])
+      .filter((p) => String(p?.tipo_producto || '').trim().toLowerCase() !== 'paquete')
+      .map((p) => String(p?.categoria_nombre || '').trim())
+      .filter(Boolean)
+  )).sort((a, b) => ordenarTexto(a, b));
+
+  selCategoria.innerHTML = '<option value="">Todas las categorías</option>';
+  categorias.forEach((nombre) => {
+    const opt = document.createElement('option');
+    opt.value = String(nombre || '').trim().toLowerCase();
+    opt.textContent = nombre;
+    selCategoria.appendChild(opt);
+  });
+
+  if (actual && categorias.some((c) => c.toLowerCase() === actual)) {
+    selCategoria.value = actual;
+  } else {
+    selCategoria.value = filtroCategoriaPaqueteActual || '';
+  }
+}
+
+function filtrarRecetasPaquete() {
+  filtroCategoriaPaqueteActual = String(document.getElementById('filtroCategoriaRecetaPaquete')?.value || '').trim().toLowerCase();
+  busquedaRecetaPaqueteActual = String(document.getElementById('busquedaRecetaPaquete')?.value || '').trim();
+  renderSelectRecetasPaquete();
+}
+
+function renderItemsPaqueteTemporal() {
+  const tbody = document.getElementById('tablaItemsPaqueteReceta');
+  if (!tbody) return;
+  if (!itemsPaqueteTemporales.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#777">Sin recetas agregadas</td></tr>';
+    return;
+  }
+  tbody.innerHTML = itemsPaqueteTemporales.map((item, idx) => `
+    <tr>
+      <td>${item.receta_nombre}</td>
+      <td>${Number(item.cantidad) || 1}</td>
+      <td><button type="button" class="botonPequeno botonDanger" onclick="window.recetas.quitarItemPaqueteTemporal(${idx})">×</button></td>
+    </tr>
+  `).join('');
+}
+
+function agregarItemPaqueteTemporal() {
+  const recetaNombre = String(document.getElementById('selectRecetaPaquete')?.value || '').trim();
+  const cantidad = Math.max(1, Number(document.getElementById('cantidadRecetaPaquete')?.value) || 1);
+  if (!recetaNombre) {
+    mostrarNotificacion('Selecciona una receta para agregar al paquete', 'error');
+    return;
+  }
+  const existe = itemsPaqueteTemporales.find((it) => String(it.receta_nombre || '').trim() === recetaNombre);
+  if (existe) existe.cantidad = Math.max(1, Number(existe.cantidad || 1) + cantidad);
+  else itemsPaqueteTemporales.push({ receta_nombre: recetaNombre, cantidad });
+  renderItemsPaqueteTemporal();
+}
+
+function quitarItemPaqueteTemporal(index) {
+  const idx = Number(index);
+  if (!Number.isFinite(idx) || idx < 0 || idx >= itemsPaqueteTemporales.length) return;
+  itemsPaqueteTemporales.splice(idx, 1);
+  renderItemsPaqueteTemporal();
+}
+
+function abrirModalNuevoPaquete() {
+  document.getElementById('idPaqueteReceta').value = '';
+  document.getElementById('nombrePaqueteReceta').value = '';
+  const inputBuscar = document.getElementById('busquedaRecetaPaquete');
+  if (inputBuscar) inputBuscar.value = '';
+  const inputCategoria = document.getElementById('filtroCategoriaRecetaPaquete');
+  if (inputCategoria) inputCategoria.value = '';
+  filtroCategoriaPaqueteActual = '';
+  busquedaRecetaPaqueteActual = '';
+  const titulo = document.getElementById('tituloModalPaqueteReceta');
+  if (titulo) titulo.textContent = 'Nuevo paquete';
+  itemsPaqueteTemporales = [];
+  renderItemsPaqueteTemporal();
+  renderSelectRecetasPaquete();
+  abrirModal('modalPaqueteReceta');
+}
+
+async function editarPaqueteReceta(idPaquete) {
+  const id = Number(idPaquete);
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
+  if (!paquete) return;
+  document.getElementById('idPaqueteReceta').value = String(paquete.id || '');
+  document.getElementById('nombrePaqueteReceta').value = String(paquete.nombre || '');
+  const inputBuscar = document.getElementById('busquedaRecetaPaquete');
+  if (inputBuscar) inputBuscar.value = '';
+  const inputCategoria = document.getElementById('filtroCategoriaRecetaPaquete');
+  if (inputCategoria) inputCategoria.value = '';
+  filtroCategoriaPaqueteActual = '';
+  busquedaRecetaPaqueteActual = '';
+  const titulo = document.getElementById('tituloModalPaqueteReceta');
+  if (titulo) titulo.textContent = 'Editar paquete';
+  itemsPaqueteTemporales = Array.isArray(paquete?.items)
+    ? paquete.items.map((it) => ({ receta_nombre: String(it?.receta_nombre || '').trim(), cantidad: Math.max(1, Number(it?.cantidad) || 1) }))
+    : [];
+  renderItemsPaqueteTemporal();
+  renderSelectRecetasPaquete();
+  abrirModal('modalPaqueteReceta');
+}
+
+async function guardarPaqueteReceta() {
+  const id = Number(document.getElementById('idPaqueteReceta')?.value || 0);
+  const nombre = String(document.getElementById('nombrePaqueteReceta')?.value || '').trim();
+  const paqueteExistente = Number.isFinite(id) && id > 0
+    ? paquetesRecetasActual.find((p) => Number(p?.id) === id)
+    : null;
+  if (!nombre) {
+    mostrarNotificacion('El nombre del paquete es obligatorio', 'error');
+    return;
+  }
+  if (!itemsPaqueteTemporales.length) {
+    mostrarNotificacion('Agrega al menos una receta al paquete', 'error');
+    return;
+  }
+
+  const payload = {
+    nombre,
+    descripcion: String(paqueteExistente?.descripcion || '').trim(),
+    image_url: String(paqueteExistente?.image_url || '').trim(),
+    activo: paqueteExistente ? Number(paqueteExistente?.activo) === 1 : true,
+    items: itemsPaqueteTemporales.map((it) => ({ receta_nombre: String(it.receta_nombre || '').trim(), cantidad: Math.max(1, Number(it.cantidad) || 1) }))
+  };
+
+  try {
+    const ruta = Number.isFinite(id) && id > 0 ? `${API}/tienda/admin/paquetes/${id}` : `${API}/tienda/admin/paquetes`;
+    const metodo = Number.isFinite(id) && id > 0 ? 'PATCH' : 'POST';
+    const respuesta = await fetch(ruta, {
+      method: metodo,
+      headers: headersConToken({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload)
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(data?.error || 'No se pudo guardar el paquete');
+
+    cerrarModal('modalPaqueteReceta');
+    mostrarNotificacion('Paquete guardado correctamente', 'exito');
+    await cargarPaquetesRecetas();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'Error guardando paquete', 'error');
+  }
+}
+
+async function eliminarPaqueteReceta(idPaquete) {
+  const id = Number(idPaquete);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const ok = await mostrarConfirmacion('¿Eliminar este paquete?', 'Esta acción no se puede deshacer.');
+  if (!ok) return;
+  try {
+    const respuesta = await fetch(`${API}/tienda/admin/paquetes/${id}`, {
+      method: 'DELETE',
+      headers: headersConToken()
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(data?.error || 'No se pudo eliminar paquete');
+    mostrarNotificacion('Paquete eliminado', 'exito');
+    await cargarPaquetesRecetas();
+  } catch (error) {
+    mostrarNotificacion(error?.message || 'Error eliminando paquete', 'error');
+  }
+}
+
+async function cambiarVisiblePaqueteReceta(idPaquete, visible, inputEl = null) {
+  const id = Number(idPaquete);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
+  if (!paquete) return;
+  try {
+    const respuesta = await fetch(`${API}/tienda/admin/paquetes/${id}`, {
+      method: 'PATCH',
+      headers: headersConToken({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ activo: Boolean(visible), nombre: paquete.nombre, descripcion: paquete.descripcion || '', image_url: paquete.image_url || '', items: paquete.items || [] })
+    });
+    const data = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(data?.error || 'No se pudo actualizar visibilidad');
+    mostrarNotificacion(`Paquete ${visible ? 'visible' : 'oculto'} en tienda`, 'exito');
+    await cargarPaquetesRecetas();
+  } catch (error) {
+    if (inputEl) inputEl.checked = !Boolean(visible);
+    mostrarNotificacion(error?.message || 'Error al actualizar visibilidad', 'error');
+  }
+}
+
+function renderDetallePaqueteContenido(paquete, indexActivo = 0) {
+  const tabs = document.getElementById('tabsDetallePaqueteReceta');
+  const cont = document.getElementById('contenidoDetallePaqueteReceta');
+  if (!tabs || !cont) return;
+  const detalles = Array.isArray(paquete?.detalle_producto) ? paquete.detalle_producto : [];
+  if (!detalles.length) {
+    tabs.innerHTML = '';
+    cont.innerHTML = '<div style="color:#777">Sin detalle disponible para este paquete.</div>';
+    return;
+  }
+
+  const idx = Math.max(0, Math.min(Number(indexActivo) || 0, detalles.length - 1));
+  const actual = detalles[idx] || {};
+
+  tabs.innerHTML = detalles.map((item, i) => (
+    `<button class="boton ${i === idx ? 'activo' : ''}" onclick="window.recetas.abrirDetallePaqueteReceta(${Number(paquete?.id)}, ${i})">${String(item?.receta_nombre || 'Receta')} x${Number(item?.cantidad) || 1}</button>`
+  )).join('');
+
+  const ingredientes = Array.isArray(actual?.ingredientes) ? actual.ingredientes.map((x) => String(x || '').trim()).filter(Boolean) : [];
+  cont.innerHTML = `
+    <div style="display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:start;">
+      <div>${actual?.image_url ? `<img src="${actual.image_url}" alt="${String(actual?.receta_nombre || '')}" style="width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid #ddd;" />` : '<div style="width:120px;height:120px;border-radius:12px;background:#f1f1f1;display:flex;align-items:center;justify-content:center;color:#777;">Sin imagen</div>'}</div>
+      <div>
+        <h4 style="margin:0 0 6px 0;">${String(actual?.receta_nombre || '')}</h4>
+        <div style="font-size:12px;color:#555;margin-bottom:6px;">Piezas en paquete: ${Number(actual?.cantidad) || 1}</div>
+        <div style="font-size:12px;color:#555;margin-bottom:6px;">Precio unitario: $${(Number(actual?.precio_unitario) || 0).toFixed(2)}</div>
+        <div style="font-size:12px;color:#555;margin-bottom:10px;">Subtotal: $${(Number(actual?.subtotal) || 0).toFixed(2)}</div>
+        <p style="margin:0 0 8px 0;">${String(actual?.descripcion || '').trim() || 'Sin descripción'}</p>
+        <div style="font-size:12px;color:#333;"><strong>Ingredientes:</strong> ${ingredientes.join(', ') || 'N/D'}</div>
+      </div>
+    </div>
+  `;
+}
+
+function abrirDetallePaqueteReceta(idPaquete, tabIndex = 0) {
+  const id = Number(idPaquete);
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
+  if (!paquete) return;
+  detallePaqueteActual = paquete;
+  const titulo = document.getElementById('tituloDetallePaqueteReceta');
+  if (titulo) titulo.textContent = `Detalle: ${paquete.nombre || 'Paquete'}`;
+  renderDetallePaqueteContenido(paquete, tabIndex);
+  abrirModal('modalDetallePaqueteReceta');
+}
+
+function renderPaquetesRecetas() {
+  const cont = document.getElementById('cuerpoPaquetesRecetas');
+  if (!cont) return;
+  if (!paquetesRecetasActual.length) {
+    cont.innerHTML = '<div style="text-align:center;padding:30px;color:#999">No hay paquetes registrados</div>';
+    return;
+  }
+
+  cont.innerHTML = paquetesRecetasActual.map((p) => `
+    <div class="tarjetaReceta">
+      <div style="padding:18px">
+        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px">
+          <div style="flex:1">
+            <h3 style="margin:0 0 5px 0;color:#1a1a1a;font-size:16px">📦 ${String(p?.nombre || 'Paquete')}</h3>
+            <p style="margin:0;color:#666;font-size:11px">${(Array.isArray(p?.items) ? p.items.length : 0)} receta(s) • Total: $${(Number(p?.precio_total) || 0).toFixed(2)}</p>
+          </div>
+          <div style="font-size:11px;color:${Number(p?.activo) === 1 ? '#2e7d32' : '#6b7280'};font-weight:600">${Number(p?.activo) === 1 ? 'Visible en tienda' : 'Archivado en tienda'}</div>
+        </div>
+        <p style="margin:0 0 10px 0;color:#444;font-size:12px">${String(p?.descripcion || '').trim() || 'Sin descripción'}</p>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          <button onclick="window.recetas.abrirProduccionPaquete(${Number(p?.id)})" class="botonPequeno" style="background:#ff9800" title="Producción">🎰</button>
+          <button onclick="window.recetas.abrirDetallePaqueteReceta(${Number(p?.id)}, 0)" class="botonPequeno" style="background:#3b82f6" title="Detalle del paquete">👁️</button>
+          <button onclick="window.recetas.editarPaqueteReceta(${Number(p?.id)})" class="botonPequeno" title="Editar paquete">✏️</button>
+          <button onclick="window.recetas.abrirFichaTiendaPaquete(${Number(p?.id)})" class="botonPequeno" style="background:#4a7c59" title="Editar ficha de tienda">🛍️</button>
+          <label class="switchMini" title="Visible en tienda" style="align-self:center;">
+            <input
+              type="checkbox"
+              ${Number(p?.activo) === 1 ? 'checked' : ''}
+              onchange="window.recetas.cambiarVisiblePaqueteReceta(${Number(p?.id)}, this.checked, this)"
+            />
+            <span class="switchMiniSlider"></span>
+          </label>
+          <button onclick="window.recetas.eliminarPaqueteReceta(${Number(p?.id)})" class="botonPequeno botonDanger" title="Eliminar paquete">🗑️</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function abrirFichaTiendaPaquete(idPaquete) {
+  const id = Number(idPaquete);
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
+  if (!paquete) return;
+
+  recetaTiendaEditando = {
+    id: id,
+    nombre: String(paquete?.nombre || ''),
+    __tipo: 'paquete',
+    activo: Number(paquete?.activo) === 1,
+    descripcion: String(paquete?.descripcion || ''),
+    image_url: String(paquete?.image_url || ''),
+    items: Array.isArray(paquete?.items) ? paquete.items : []
+  };
+  fichaTiendaGaleriaActual = String(paquete?.image_url || '').trim() ? [String(paquete.image_url).trim()] : [];
+  fichaTiendaIngredientesActual = [];
+
+  const titulo = document.getElementById('tituloModalFichaTienda');
+  if (titulo) titulo.textContent = 'Ficha para tienda (Paquete)';
+  const precioWrap = document.getElementById('fichaTiendaPrecioWrap');
+  if (precioWrap) precioWrap.style.display = 'none';
+  const modoUso = document.getElementById('fichaTiendaModoUso');
+  if (modoUso) modoUso.style.display = 'none';
+  const cuidados = document.getElementById('fichaTiendaCuidados');
+  if (cuidados) cuidados.style.display = 'none';
+  const ingredientesWrap = document.getElementById('fichaTiendaIngredientesWrap');
+  if (ingredientesWrap) ingredientesWrap.style.display = 'none';
+
+  const campoNombre = document.getElementById('fichaTiendaNombreReceta');
+  const campoImagenes = document.getElementById('fichaTiendaImagenes');
+  const campoDescripcion = document.getElementById('fichaTiendaDescripcion');
+  const campoPrecioPublico = document.getElementById('fichaTiendaPrecioPublico');
+  if (campoNombre) campoNombre.value = String(paquete?.nombre || '');
+  if (campoImagenes) campoImagenes.value = '';
+  if (campoDescripcion) campoDescripcion.value = String(paquete?.descripcion || '');
+  if (campoPrecioPublico) campoPrecioPublico.value = '';
+
+  renderFichaTiendaPreviews();
+  renderFichaTiendaIngredientes();
+  abrirModal('modalFichaTiendaReceta');
+}
+
+async function cargarPaquetesRecetas() {
+  try {
+    await cargarProductosTiendaAdminCache();
+
+    const respuesta = await fetch(`${API}/tienda/admin/paquetes`, { headers: headersConToken() });
+    const paquetes = await respuesta.json().catch(() => []);
+    if (!respuesta.ok) throw new Error('No se pudieron cargar paquetes');
+
+    const mapaProducto = new Map((productosTiendaAdminCache || []).map((p) => [String(p?.nombre_receta || '').trim(), p]));
+    paquetesRecetasActual = (Array.isArray(paquetes) ? paquetes : []).map((paquete) => {
+      const items = Array.isArray(paquete?.items) ? paquete.items : [];
+      const detalle = items.map((it) => {
+        const nombre = String(it?.receta_nombre || '').trim();
+        const producto = mapaProducto.get(nombre) || {};
+        const cantidad = Math.max(1, Number(it?.cantidad) || 1);
+        const precioUnit = Number(producto?.precio_original ?? producto?.precio_venta) || 0;
+        return {
+          receta_nombre: nombre,
+          cantidad,
+          image_url: String(producto?.image_url || ''),
+          descripcion: String(producto?.descripcion || ''),
+          ingredientes: Array.isArray(producto?.ingredientes) ? producto.ingredientes : [],
+          precio_unitario: precioUnit,
+          subtotal: precioUnit * cantidad
+        };
+      });
+      const precioTotal = detalle.reduce((sum, d) => sum + (Number(d?.subtotal) || 0), 0);
+      return { ...paquete, items, detalle_producto: detalle, precio_total: precioTotal };
+    });
+
+    renderPaquetesRecetas();
+    renderSelectRecetasPaquete();
+  } catch (error) {
+    console.error('Error cargando paquetes:', error);
   }
 }
 
@@ -1982,7 +2241,17 @@ async function abrirFichaTiendaReceta(idReceta) {
     }
 
     const receta = await respuesta.json();
-    recetaTiendaEditando = receta;
+    recetaTiendaEditando = { ...receta, __tipo: 'receta' };
+    const titulo = document.getElementById('tituloModalFichaTienda');
+    if (titulo) titulo.textContent = 'Ficha para tienda (Receta)';
+    const precioWrap = document.getElementById('fichaTiendaPrecioWrap');
+    if (precioWrap) precioWrap.style.display = '';
+    const modoUso = document.getElementById('fichaTiendaModoUso');
+    if (modoUso) modoUso.style.display = '';
+    const cuidados = document.getElementById('fichaTiendaCuidados');
+    if (cuidados) cuidados.style.display = '';
+    const ingredientesWrap = document.getElementById('fichaTiendaIngredientesWrap');
+    if (ingredientesWrap) ingredientesWrap.style.display = '';
     const ingredientesOrdenados = (Array.isArray(receta.ingredientes) ? receta.ingredientes : [])
       .map((ing) => ({
         nombre: String(ing?.nombre || '').trim(),
@@ -2088,6 +2357,31 @@ async function guardarFichaTiendaReceta() {
     const imagenPrincipal = galeriaOrdenada[0] || '';
     const galeriaSecundaria = galeriaOrdenada.slice(1);
 
+    if (recetaTiendaEditando.__tipo === 'paquete') {
+      const payloadPaquete = {
+        nombre: String(recetaTiendaEditando?.nombre || '').trim(),
+        descripcion: String(document.getElementById('fichaTiendaDescripcion')?.value || '').trim(),
+        image_url: imagenPrincipal,
+        activo: Boolean(recetaTiendaEditando?.activo),
+        items: Array.isArray(recetaTiendaEditando?.items) ? recetaTiendaEditando.items : []
+      };
+
+      const respPaquete = await fetch(`${API}/tienda/admin/paquetes/${recetaTiendaEditando.id}`, {
+        method: 'PATCH',
+        headers: headersConToken({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payloadPaquete)
+      });
+      if (!respPaquete.ok) {
+        const errPaquete = await respPaquete.json().catch(() => ({}));
+        throw new Error(errPaquete?.error || 'No se pudo guardar ficha de paquete');
+      }
+
+      cerrarModal('modalFichaTiendaReceta');
+      mostrarNotificacion('Ficha de tienda guardada en el paquete', 'exito');
+      await cargarPaquetesRecetas();
+      return;
+    }
+
     const ingredientesVisibles = fichaTiendaIngredientesActual
       .filter((item) => Boolean(item?.visible))
       .map((item) => String(item?.nombre || '').trim())
@@ -2130,6 +2424,101 @@ async function guardarFichaTiendaReceta() {
   } catch (error) {
     console.error('Error guardando ficha tienda:', error);
     mostrarNotificacion(error?.message || 'Error al guardar ficha de tienda', 'error');
+  }
+}
+
+function abrirSelectorImagenFichaTienda() {
+  const inputImagenes = document.getElementById('fichaTiendaImagenes');
+  if (!inputImagenes) return;
+  inputImagenes.click();
+}
+
+async function persistirFichaTiendaImagenesActual() {
+  if (!recetaTiendaEditando?.id) return;
+
+  const galeriaOrdenada = fichaTiendaGaleriaActual
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const imagenPrincipal = galeriaOrdenada[0] || '';
+  const galeriaSecundaria = galeriaOrdenada.slice(1);
+
+  if (recetaTiendaEditando.__tipo === 'paquete') {
+    const payloadPaquete = {
+      nombre: String(recetaTiendaEditando?.nombre || '').trim(),
+      descripcion: String(document.getElementById('fichaTiendaDescripcion')?.value || '').trim(),
+      image_url: imagenPrincipal,
+      activo: Boolean(recetaTiendaEditando?.activo),
+      items: Array.isArray(recetaTiendaEditando?.items) ? recetaTiendaEditando.items : []
+    };
+
+    const respPaquete = await fetch(`${API}/tienda/admin/paquetes/${recetaTiendaEditando.id}`, {
+      method: 'PATCH',
+      headers: headersConToken({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payloadPaquete)
+    });
+    if (!respPaquete.ok) {
+      const errPaquete = await respPaquete.json().catch(() => ({}));
+      throw new Error(errPaquete?.error || 'No se pudo guardar imágenes del paquete');
+    }
+    return;
+  }
+
+  const ingredientesVisibles = fichaTiendaIngredientesActual
+    .filter((item) => Boolean(item?.visible))
+    .map((item) => String(item?.nombre || '').trim())
+    .filter(Boolean);
+
+  const payload = {
+    nombre: recetaTiendaEditando.nombre,
+    id_categoria: recetaTiendaEditando.id_categoria,
+    gramaje: recetaTiendaEditando.gramaje,
+    ingredientes: (recetaTiendaEditando.ingredientes || []).map((ing) => ({
+      id_insumo: ing.id_insumo,
+      nombre: ing.nombre,
+      proveedor: ing.proveedor || '',
+      cantidad: ing.cantidad,
+      unidad: ing.unidad
+    })),
+    tienda_image_url: imagenPrincipal,
+    tienda_galeria: galeriaSecundaria,
+    tienda_descripcion: document.getElementById('fichaTiendaDescripcion')?.value || '',
+    tienda_precio_publico: Number(document.getElementById('fichaTiendaPrecioPublico')?.value) || 0,
+    tienda_modo_uso: document.getElementById('fichaTiendaModoUso')?.value || '',
+    tienda_cuidados: document.getElementById('fichaTiendaCuidados')?.value || '',
+    tienda_ingredientes: ingredientesVisibles.join('\n')
+  };
+
+  const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!respuesta.ok) {
+    const err = await respuesta.json().catch(() => ({}));
+    throw new Error(err?.error || 'No se pudo guardar imágenes de la ficha');
+  }
+}
+
+async function agregarImagenesFichaTiendaDesdeInput() {
+  const inputImagenes = document.getElementById('fichaTiendaImagenes');
+  const archivosNuevos = Array.from(inputImagenes?.files || []);
+  if (!archivosNuevos.length) return;
+
+  try {
+    for (const archivo of archivosNuevos) {
+      const url = await subirImagenTienda(archivo);
+      if (url) fichaTiendaGaleriaActual.push(url);
+    }
+    fichaTiendaGaleriaActual = Array.from(new Set(fichaTiendaGaleriaActual));
+    renderFichaTiendaPreviews();
+    await persistirFichaTiendaImagenesActual();
+    mostrarNotificacion('Imagen agregada y guardada automáticamente', 'exito');
+  } catch (error) {
+    console.error('Error subiendo imagen de ficha:', error);
+    mostrarNotificacion(error?.message || 'No se pudo subir la imagen', 'error');
+  } finally {
+    if (inputImagenes) inputImagenes.value = '';
   }
 }
 
@@ -2334,14 +2723,17 @@ function normalizarCostoPorPieza() {
 
 function actualizarCostoProduccion() {
   const costoPorPieza = parseFloat(document.getElementById('costoPorPiezaProducir')?.value) || 0;
-  const costoProduccionCalculado = costoPorPieza * 1.15;
+  const factorCosto = Number(ajustesProduccionActual?.factor_costo_produccion) || 1.15;
+  const factorVenta = Number(ajustesProduccionActual?.factor_precio_venta) || 2.5;
+  const redondeo = Number(ajustesProduccionActual?.redondeo_precio) || 5;
+  const costoProduccionCalculado = costoPorPieza * factorCosto;
   const out = document.getElementById('costoProducir');
   if (out) out.value = costoProduccionCalculado.toFixed(2);
 
   const precioVenta = document.getElementById('precioVentaProducir');
   if (precioVenta) {
-    const ventaCalculada = costoProduccionCalculado * 2.5;
-    const ventaRedondeada = Math.ceil(ventaCalculada / 5) * 5;
+    const ventaCalculada = costoProduccionCalculado * factorVenta;
+    const ventaRedondeada = redondeo > 0 ? (Math.ceil(ventaCalculada / redondeo) * redondeo) : ventaCalculada;
     precioVenta.value = ventaRedondeada.toFixed(2);
   }
 }
@@ -2379,6 +2771,70 @@ async function producirDesdeReceta() {
   } catch (error) {
     console.error('Error registrando producción:', error);
     mostrarNotificacion('Error al registrar la producción', 'error');
+  }
+}
+
+function renderResumenProduccionPaquete() {
+  const cont = document.getElementById('resumenProduccionPaquete');
+  if (!cont) return;
+  const cantidadPaquetes = Math.max(1, Number(document.getElementById('cantidadPaqueteProducir')?.value) || 1);
+  const items = Array.isArray(paqueteProduccionActual?.items) ? paqueteProduccionActual.items : [];
+  if (!items.length) {
+    cont.innerHTML = '<div style="color:#777">Este paquete no tiene recetas configuradas.</div>';
+    return;
+  }
+  const filas = items.map((it) => {
+    const piezas = Math.max(1, Number(it?.cantidad) || 1) * cantidadPaquetes;
+    return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;"><span>${String(it?.receta_nombre || 'Receta')}</span><strong>${piezas} pza(s)</strong></div>`;
+  }).join('');
+  cont.innerHTML = `<label>Resumen por receta</label><div style="display:grid;gap:6px">${filas}</div>`;
+}
+
+function abrirProduccionPaquete(idPaquete) {
+  const id = Number(idPaquete);
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
+  if (!paquete) return;
+  paqueteProduccionActual = paquete;
+  document.getElementById('idPaqueteProducir').value = String(id);
+  document.getElementById('nombrePaqueteProducir').value = String(paquete?.nombre || '');
+  document.getElementById('cantidadPaqueteProducir').value = '1';
+  renderResumenProduccionPaquete();
+  abrirModal('modalProduccionPaquete');
+}
+
+async function producirDesdePaquete() {
+  const idPaquete = Number(document.getElementById('idPaqueteProducir')?.value || 0);
+  const cantidadPaquetes = Math.max(1, Number(document.getElementById('cantidadPaqueteProducir')?.value) || 1);
+  const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === idPaquete) || paqueteProduccionActual;
+  const items = Array.isArray(paquete?.items) ? paquete.items : [];
+  if (!idPaquete || !items.length) {
+    mostrarNotificacion('El paquete no tiene recetas configuradas', 'error');
+    return;
+  }
+
+  try {
+    const resp = await fetch(`${API}/produccion/paquete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id_paquete: idPaquete,
+        nombre_paquete: String(paquete?.nombre || ''),
+        cantidad_paquetes: cantidadPaquetes,
+        items
+      })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data?.error || 'No se pudo registrar producción del paquete');
+
+    cerrarModal('modalProduccionPaquete');
+    mostrarNotificacion(
+      `Producción registrada: ${Number(data?.total_producciones) || 0} receta(s), ${Number(data?.total_piezas) || 0} pieza(s)`,
+      'exito'
+    );
+    window.dispatchEvent(new CustomEvent('produccionActualizada'));
+  } catch (error) {
+    console.error('Error produciendo paquete:', error);
+    mostrarNotificacion(error?.message || 'Error al producir paquete', 'error');
   }
 }
 

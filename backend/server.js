@@ -112,6 +112,7 @@ const dbDir = process.env.DB_DIR
   ? path.resolve(process.env.DB_DIR)
   : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : __dirname);
 const uploadsDir = path.join(dbDir, 'uploads');
+const uploadsTiendaDir = path.join(uploadsDir, 'tienda');
 const backupDir = path.join(dbDir, 'backups');
 const DB_FILES = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
 
@@ -193,7 +194,7 @@ configurarBackup({
 
 // Endurecer almacenamiento y recuperar DBs faltantes desde backups locales.
 await reforzarPersistenciaDb();
-await fs.mkdir(path.join(uploadsDir, 'tienda'), { recursive: true });
+await fs.mkdir(uploadsTiendaDir, { recursive: true });
 
 app.use('/uploads', express.static(uploadsDir));
 
@@ -555,8 +556,7 @@ app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res)
 
     await fs.writeFile(destino, req.file.buffer);
 
-    const base = `${req.protocol}://${req.get('host')}`;
-    return res.json({ ok: true, url: `${base}/uploads/tienda/${nombre}` });
+    return res.json({ ok: true, url: `/uploads/tienda/${nombre}` });
   } catch {
     return res.status(500).json({ exito: false, mensaje: 'No se pudo subir la imagen' });
   }
@@ -636,10 +636,9 @@ app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (
 
     const textoExtraido = await extraerTextoArchivoListaPrecios(req.file);
 
-    const base = `${req.protocol}://${req.get('host')}`;
     return res.json({
       ok: true,
-      url: `${base}/uploads/tienda/${nombre}`,
+      url: `/uploads/tienda/${nombre}`,
       nombre_original: String(req.file.originalname || nombre),
       tipo: mime,
       texto_extraido: textoExtraido
@@ -672,7 +671,7 @@ registrarRutasInventario(app, bdInventarioRutas, bdRecetasRutas);
 registrarRutasUtensilios(app, bdInventarioRutas);
 registrarRutasCategorias(app, bdRecetasRutas);
 registrarRutasRecetas(app, bdRecetasRutas, bdInventarioRutas);
-registrarRutasProduccion(app, bdProduccionRutas, bdRecetasRutas, bdInventarioRutas);
+registrarRutasProduccion(app, bdProduccionRutas, bdRecetasRutas, bdInventarioRutas, bdVentasRutas);
 registrarRutasCortesias(app, bdVentasRutas, bdProduccionRutas);
 registrarRutasVentas(app, bdVentasRutas, bdProduccionRutas, bdInventarioRutas, bdRecetasRutas);
 registrarRutasTienda(app, bdProduccionRutas, bdRecetasRutas, bdVentasRutas, bdInventarioRutas);
@@ -863,6 +862,97 @@ function toArrayMaybe(valor) {
   return Array.isArray(valor) ? valor : [];
 }
 
+function normalizarUrlMediaPersistida(valor) {
+  const txt = String(valor || '').trim();
+  if (!txt) return '';
+  if (txt.startsWith('/uploads/')) return txt;
+  if (txt.startsWith('uploads/')) return `/${txt}`;
+
+  try {
+    const parsed = new URL(txt);
+    const pathName = String(parsed.pathname || '').trim();
+    if (pathName.startsWith('/uploads/')) return pathName;
+    if (pathName.startsWith('uploads/')) return `/${pathName}`;
+  } catch {
+    // No-op: dejar el valor original si no es URL válida.
+  }
+
+  return txt;
+}
+
+function normalizarCamposMediaEnFila(tabla, row = {}) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+  const salida = { ...row };
+  const t = String(tabla || '').trim().toLowerCase();
+
+  const columnasUrlDirecta = new Set(['image_url', 'tienda_image_url']);
+  for (const col of Object.keys(salida)) {
+    if (!columnasUrlDirecta.has(String(col || '').trim().toLowerCase())) continue;
+    salida[col] = normalizarUrlMediaPersistida(salida[col]);
+  }
+
+  if (t === 'recetas') {
+    const rawGaleria = String(salida.tienda_galeria || '').trim();
+    if (rawGaleria) {
+      try {
+        const parsed = JSON.parse(rawGaleria);
+        if (Array.isArray(parsed)) {
+          salida.tienda_galeria = JSON.stringify(parsed.map((item) => normalizarUrlMediaPersistida(item)).filter(Boolean));
+        }
+      } catch {
+        // Ignorar si no es JSON válido.
+      }
+    }
+  }
+
+  return salida;
+}
+
+async function exportarUploadsTienda() {
+  try {
+    await fs.mkdir(uploadsTiendaDir, { recursive: true });
+    const nombres = await fs.readdir(uploadsTiendaDir);
+    const archivos = [];
+    for (const nombre of (nombres || [])) {
+      const limpio = String(nombre || '').trim();
+      if (!limpio) continue;
+      const ruta = path.join(uploadsTiendaDir, limpio);
+      const stat = await fs.stat(ruta).catch(() => null);
+      if (!stat || !stat.isFile()) continue;
+      const contenido = await fs.readFile(ruta);
+      archivos.push({
+        nombre: limpio,
+        size: Number(stat.size) || 0,
+        mtime: stat.mtime ? new Date(stat.mtime).toISOString() : null,
+        base64: contenido.toString('base64')
+      });
+    }
+    return archivos;
+  } catch {
+    return [];
+  }
+}
+
+async function importarUploadsTienda(archivos = []) {
+  const lista = Array.isArray(archivos) ? archivos : [];
+  if (!lista.length) return 0;
+  await fs.mkdir(uploadsTiendaDir, { recursive: true });
+
+  let restaurados = 0;
+  for (const item of lista) {
+    const nombre = String(item?.nombre || '').trim();
+    const base64 = String(item?.base64 || '').trim();
+    if (!nombre || !base64) continue;
+    if (nombre.includes('/') || nombre.includes('\\')) continue;
+
+    const destino = path.join(uploadsTiendaDir, nombre);
+    const buffer = Buffer.from(base64, 'base64');
+    await fs.writeFile(destino, buffer);
+    restaurados += 1;
+  }
+  return restaurados;
+}
+
 function normalizarEntradaImportacionTodo(payload) {
   const base = payload?.dbs || payload?.datos?.dbs || payload?.datos || payload;
   if (!base || typeof base !== 'object' || Array.isArray(base)) return null;
@@ -893,6 +983,58 @@ function normalizarEntradaImportacionTodo(payload) {
         })).filter((row) => row.clave);
       }
     }
+  }
+
+  const leerLista = (...candidatos) => candidatos
+    .map((valor) => toArrayMaybe(valor))
+    .find((arr) => Array.isArray(arr) && arr.length) || [];
+
+  // Compatibilidad: importar backups antiguos o personalizados que traen bloques
+  // de tienda fuera de dbs.ventas.tablas.
+  if (!Array.isArray(tablasVentas.tienda_descuentos) || !tablasVentas.tienda_descuentos.length) {
+    const descuentos = leerLista(
+      payload?.tienda_descuentos,
+      payload?.descuentos_tienda,
+      payload?.descuentos,
+      payload?.datos?.tienda_descuentos,
+      payload?.datos?.descuentos_tienda,
+      payload?.datos?.descuentos
+    );
+    if (descuentos.length) tablasVentas.tienda_descuentos = descuentos;
+  }
+
+  if (!Array.isArray(tablasVentas.tienda_paquetes) || !tablasVentas.tienda_paquetes.length) {
+    const paquetes = leerLista(
+      payload?.tienda_paquetes,
+      payload?.paquetes_tienda,
+      payload?.paquetes,
+      payload?.datos?.tienda_paquetes,
+      payload?.datos?.paquetes_tienda,
+      payload?.datos?.paquetes
+    );
+    if (paquetes.length) tablasVentas.tienda_paquetes = paquetes;
+  }
+
+  if (!Array.isArray(tablasVentas.tienda_paquetes_items) || !tablasVentas.tienda_paquetes_items.length) {
+    const paquetesItems = leerLista(
+      payload?.tienda_paquetes_items,
+      payload?.paquetes_items_tienda,
+      payload?.paquetes_items,
+      payload?.datos?.tienda_paquetes_items,
+      payload?.datos?.paquetes_items_tienda,
+      payload?.datos?.paquetes_items
+    );
+    if (paquetesItems.length) tablasVentas.tienda_paquetes_items = paquetesItems;
+  }
+
+  if (!Array.isArray(tablasVentas.tienda_catalogo) || !tablasVentas.tienda_catalogo.length) {
+    const catalogo = leerLista(
+      payload?.tienda_catalogo,
+      payload?.catalogo_tienda,
+      payload?.datos?.tienda_catalogo,
+      payload?.datos?.catalogo_tienda
+    );
+    if (catalogo.length) tablasVentas.tienda_catalogo = catalogo;
   }
 
   normalizado.ventas = {
@@ -956,12 +1098,23 @@ app.get('/api/exportar/todo', async (req, res) => {
     }
 
     const trastiendaConfig = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_config);
+    const tiendaDescuentos = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_descuentos);
+    const tiendaPaquetes = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_paquetes);
+    const tiendaPaquetesItems = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_paquetes_items);
+    const tiendaCatalogo = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_catalogo);
+    const archivosUploadsTienda = await exportarUploadsTienda();
 
     res.json({
       ...salida,
       total,
       trastienda_config: trastiendaConfig,
-      incluye_trastienda_config: true
+      incluye_trastienda_config: true,
+      tienda_descuentos: tiendaDescuentos,
+      tienda_paquetes: tiendaPaquetes,
+      tienda_paquetes_items: tiendaPaquetesItems,
+      tienda_catalogo: tiendaCatalogo,
+      archivos_uploads_tienda: archivosUploadsTienda,
+      incluye_uploads_tienda: true
     });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: 'Error al exportar TODO', detalle: error.message });
@@ -978,6 +1131,7 @@ app.post('/api/importar/todo', async (req, res) => {
   }
 
   const resultado = {};
+  const archivosUploadsEntrada = toArrayMaybe(payload?.archivos_uploads_tienda);
 
   try {
     for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
@@ -1005,8 +1159,9 @@ app.post('/api/importar/todo', async (req, res) => {
           await dbRunAsync(db, `DELETE FROM ${escaparIdentificadorSql(tabla)}`);
 
           let importados = 0;
-          for (const row of rows) {
-            if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+          for (const rowRaw of rows) {
+            if (!rowRaw || typeof rowRaw !== 'object' || Array.isArray(rowRaw)) continue;
+            const row = normalizarCamposMediaEnFila(tabla, rowRaw);
 
             const columnasRow = Object.keys(row).filter((c) => setColumnas.has(c));
             if (!columnasRow.length) continue;
@@ -1035,7 +1190,8 @@ app.post('/api/importar/todo', async (req, res) => {
       }
     }
 
-    res.json({ exito: true, mensaje: 'Respaldo total importado', importados: resultado });
+    const archivosRestaurados = await importarUploadsTienda(archivosUploadsEntrada);
+    res.json({ exito: true, mensaje: 'Respaldo total importado', importados: resultado, archivos_uploads_tienda_restaurados: archivosRestaurados });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: 'Error al importar TODO: ' + error.message });
   }

@@ -240,6 +240,46 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       unidad TEXT
     )`);
 
+    bdRecetas.run(`CREATE TABLE IF NOT EXISTS receta_paquetes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT UNIQUE,
+      activo_tienda INTEGER DEFAULT 0,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdRecetas.run(`CREATE TABLE IF NOT EXISTS receta_paquetes_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_paquete INTEGER,
+      id_receta INTEGER,
+      receta_nombre TEXT,
+      cantidad_piezas INTEGER DEFAULT 1,
+      orden INTEGER DEFAULT 0,
+      FOREIGN KEY(id_paquete) REFERENCES receta_paquetes(id)
+    )`);
+
+    bdRecetas.run(`CREATE TABLE IF NOT EXISTS recetas_ajustes (
+      clave TEXT PRIMARY KEY,
+      valor REAL,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdRecetas.run(
+      `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+       VALUES ('factor_costo_produccion', 1.15, CURRENT_TIMESTAMP)
+       ON CONFLICT(clave) DO NOTHING`
+    );
+    bdRecetas.run(
+      `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+       VALUES ('factor_precio_venta', 2.5, CURRENT_TIMESTAMP)
+       ON CONFLICT(clave) DO NOTHING`
+    );
+    bdRecetas.run(
+      `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+       VALUES ('redondeo_precio', 5, CURRENT_TIMESTAMP)
+       ON CONFLICT(clave) DO NOTHING`
+    );
+
     bdRecetas.all("PRAGMA table_info(recetas)", (err, columnas) => {
       if (!err && columnas && !columnas.some(col => col.name === "gramaje")) {
         bdRecetas.run("ALTER TABLE recetas ADD COLUMN gramaje REAL DEFAULT 0");
@@ -341,6 +381,35 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       es_accesorio INTEGER DEFAULT 0,
       activo INTEGER DEFAULT 1,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_descuentos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope TEXT,
+      clave TEXT,
+      activo INTEGER DEFAULT 0,
+      porcentaje REAL DEFAULT 0,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(scope, clave)
+    )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_paquetes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT UNIQUE,
+      slug TEXT UNIQUE,
+      descripcion TEXT,
+      image_url TEXT,
+      activo INTEGER DEFAULT 0,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_paquetes_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_paquete INTEGER,
+      receta_nombre TEXT,
+      cantidad INTEGER DEFAULT 1,
+      orden INTEGER DEFAULT 0,
+      FOREIGN KEY(id_paquete) REFERENCES tienda_paquetes(id)
     )`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_clientes (

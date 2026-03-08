@@ -51,6 +51,30 @@ function parseJSON(value, fallback) {
   }
 }
 
+function normalizarMediaUrl(valor) {
+  const txt = String(valor || '').trim();
+  if (!txt) return '';
+  if (txt.startsWith('/uploads/')) return txt;
+  if (txt.startsWith('uploads/')) return `/${txt}`;
+
+  try {
+    const parsed = new URL(txt);
+    const pathName = String(parsed.pathname || '').trim();
+    if (pathName.startsWith('/uploads/')) return pathName;
+    if (pathName.startsWith('uploads/')) return `/${pathName}`;
+  } catch {
+    // Conservar el valor original cuando no sea URL válida.
+  }
+
+  return txt;
+}
+
+function normalizarMediaLista(lista = []) {
+  return Array.from(new Set((Array.isArray(lista) ? lista : [])
+    .map((item) => normalizarMediaUrl(item))
+    .filter(Boolean)));
+}
+
 function tieneClave(obj, clave) {
   return Object.prototype.hasOwnProperty.call(obj || {}, clave);
 }
@@ -103,6 +127,13 @@ function nombreBaseProducto(nombreReceta = "", gramaje = 0) {
     return String(finalParentesis[1] || "").trim() || texto;
   }
   return texto;
+}
+
+function claveRecetaNombre(valor = "") {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function crearTokenCliente(cliente) {
@@ -201,10 +232,218 @@ async function obtenerConfigTienda(bdVentas) {
   return out;
 }
 
+async function obtenerAjustesProduccion(bdRecetas) {
+  const rows = await dbAll(
+    bdRecetas,
+    "SELECT clave, valor FROM recetas_ajustes WHERE clave IN ('factor_costo_produccion','factor_precio_venta','redondeo_precio')"
+  );
+  const mapa = new Map((rows || []).map((r) => [String(r?.clave || '').trim(), Number(r?.valor)]));
+  return {
+    factorCostoProduccion: Number(mapa.get('factor_costo_produccion')) || 1.15,
+    factorPrecioVenta: Number(mapa.get('factor_precio_venta')) || 2.5,
+    redondeoPrecio: Number(mapa.get('redondeo_precio')) || 5
+  };
+}
+
+function calcularPrecioSugerido(costoBase, ajustes) {
+  const costo = Number(costoBase) || 0;
+  if (costo <= 0) return 0;
+  const costoProduccion = costo * (Number(ajustes?.factorCostoProduccion) || 1.15);
+  const precioBruto = costoProduccion * (Number(ajustes?.factorPrecioVenta) || 2.5);
+  const redondeo = Number(ajustes?.redondeoPrecio) || 5;
+  if (redondeo <= 0) return precioBruto;
+  return Math.ceil(precioBruto / redondeo) * redondeo;
+}
+
+function aplicarDescuentoRedondeado(precio, porcentaje) {
+  const base = Number(precio) || 0;
+  const pct = Math.max(0, Number(porcentaje) || 0);
+  if (base <= 0 || pct <= 0) return base;
+  return Math.max(0, Math.floor(base * (1 - (pct / 100))));
+}
+
+async function aplicarDescuentosProductos(productos = [], bdVentas) {
+  const rows = await dbAll(
+    bdVentas,
+    `SELECT scope, clave, activo, porcentaje
+     FROM tienda_descuentos`
+  );
+
+  const porCategoria = new Map();
+  const porProducto = new Map();
+  const excluidosGlobal = new Set();
+  let descuentoGlobal = 0;
+  for (const row of (rows || [])) {
+    const scope = String(row?.scope || '').trim().toLowerCase();
+    const clave = String(row?.clave || '').trim().toLowerCase();
+    const activo = Number(row?.activo) === 1;
+    const porcentaje = Math.max(0, Number(row?.porcentaje) || 0);
+    if (!clave) continue;
+
+    if (scope === 'global_exclusion') {
+      if (activo) excluidosGlobal.add(clave);
+      else excluidosGlobal.delete(clave);
+      continue;
+    }
+
+    if (!activo || porcentaje <= 0) continue;
+    if (scope === 'global') descuentoGlobal = porcentaje;
+    if (scope === 'categoria') porCategoria.set(clave, porcentaje);
+    if (scope === 'producto') porProducto.set(clave, porcentaje);
+  }
+
+  return (Array.isArray(productos) ? productos : []).map((item) => {
+    const nombre = String(item?.nombre_receta || '').trim().toLowerCase();
+    const categoria = String(item?.categoria_nombre || '').trim().toLowerCase();
+    let pct = 0;
+    if (porProducto.has(nombre)) pct = Number(porProducto.get(nombre) || 0);
+    else if (porCategoria.has(categoria)) pct = Number(porCategoria.get(categoria) || 0);
+    else if (descuentoGlobal > 0 && !excluidosGlobal.has(nombre)) pct = Number(descuentoGlobal || 0);
+
+    const precioOriginal = Number(item?.precio_venta) || 0;
+    const precioConDescuento = aplicarDescuentoRedondeado(precioOriginal, pct);
+
+    const variantes = Array.isArray(item?.variantes)
+      ? item.variantes.map((v) => {
+        const pvOriginal = Number(v?.precio_venta) || 0;
+        return {
+          ...v,
+          precio_original: pvOriginal,
+          precio_venta: pct > 0 ? aplicarDescuentoRedondeado(pvOriginal, pct) : pvOriginal,
+          descuento_porcentaje: pct,
+          descuento_activo: pct > 0
+        };
+      })
+      : item?.variantes;
+
+    return {
+      ...item,
+      variantes,
+      precio_original: precioOriginal,
+      precio_venta: pct > 0 ? precioConDescuento : precioOriginal,
+      descuento_porcentaje: pct,
+      descuento_activo: pct > 0
+    };
+  });
+}
+
+async function construirPaquetesProductos({ bdVentas, mapaProductosPorNombre, incluirOcultos, agruparVariantes }) {
+  const paquetes = await dbAll(
+    bdVentas,
+    `SELECT id, nombre, slug, descripcion, image_url, activo
+     FROM tienda_paquetes
+     ORDER BY nombre ASC`
+  );
+  if (!paquetes.length) return [];
+
+  const items = await dbAll(
+    bdVentas,
+    `SELECT id_paquete, receta_nombre, cantidad, orden
+     FROM tienda_paquetes_items
+     ORDER BY id_paquete ASC, orden ASC, id ASC`
+  );
+
+  const itemsPorPaquete = new Map();
+  for (const item of (items || [])) {
+    const id = Number(item?.id_paquete);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (!itemsPorPaquete.has(id)) itemsPorPaquete.set(id, []);
+    itemsPorPaquete.get(id).push(item);
+  }
+
+  const salida = [];
+  for (const paquete of paquetes) {
+    const activo = Number(paquete?.activo) === 1;
+    if (!activo && !incluirOcultos) continue;
+
+    const lista = itemsPorPaquete.get(Number(paquete?.id)) || [];
+    if (!lista.length) continue;
+
+    let precioRealTotal = 0;
+    let costoTotal = 0;
+    const detalles = [];
+    const ingredientes = [];
+    const galeria = [];
+
+    for (const item of lista) {
+      const recetaNombre = String(item?.receta_nombre || '').trim();
+      if (!recetaNombre) continue;
+      const cantidad = Math.max(1, Number(item?.cantidad) || 1);
+      const prod = mapaProductosPorNombre.get(recetaNombre) || null;
+      if (!prod) continue;
+
+      const precioUnit = Number(prod?.precio_venta) || 0;
+      const costoUnit = Number(prod?.costo_estimado) || 0;
+      precioRealTotal += (precioUnit * cantidad);
+      costoTotal += (costoUnit * cantidad);
+
+      if (prod?.image_url) galeria.push(normalizarMediaUrl(prod.image_url));
+      (Array.isArray(prod?.ingredientes) ? prod.ingredientes : []).forEach((ing) => ingredientes.push(String(ing || '').trim()));
+
+      detalles.push({
+        receta_nombre: recetaNombre,
+        cantidad,
+        image_url: normalizarMediaUrl(prod?.image_url),
+        descripcion: String(prod?.descripcion || ''),
+        modo_uso: String(prod?.modo_uso || ''),
+        cuidados: String(prod?.cuidados || ''),
+        ingredientes: Array.isArray(prod?.ingredientes) ? prod.ingredientes : [],
+        precio_unitario: precioUnit,
+        costo_unitario: costoUnit,
+        subtotal: precioUnit * cantidad
+      });
+    }
+
+    const nombre = String(paquete?.nombre || '').trim();
+    if (!nombre) continue;
+    const descripcion = String(paquete?.descripcion || '').trim() || `Paquete con ${detalles.length} producto(s)`;
+    const imageUrl = normalizarMediaUrl(paquete?.image_url || galeria[0] || '');
+
+    const productoPaquete = {
+      paquete_id: Number(paquete?.id),
+      tipo_producto: 'paquete',
+      categoria_nombre: 'Paquetes',
+      nombre_receta: nombre,
+      nombre_base: nombre,
+      slug: String(paquete?.slug || slugify(nombre)),
+      visible_publico: activo,
+      stock: 0,
+      disponible: false,
+      activo: false,
+      precio_venta: precioRealTotal,
+      precio_real_total: precioRealTotal,
+      costo_estimado: costoTotal,
+      gramaje: 0,
+      descripcion,
+      modo_uso: '',
+      cuidados: '',
+      image_url: imageUrl,
+      galeria: normalizarMediaLista(galeria),
+      ingredientes: Array.from(new Set(ingredientes.filter(Boolean))),
+      paquete_detalle: detalles,
+      variantes: agruparVariantes
+        ? [{ nombre: 'Paquete', receta_nombre: nombre, gramaje: 0, precio_venta: precioRealTotal, stock: 0, disponible: false, visible_publico: activo }]
+        : [],
+      es_lanzamiento: false,
+      es_favorito: false,
+      es_oferta: false,
+      es_accesorio: false,
+      resenas_total: 0,
+      resenas_promedio: 0,
+      ultima_produccion: null
+    };
+
+    salida.push(productoPaquete);
+  }
+
+  return salida;
+}
+
 async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, opciones = {}) {
   const incluirOcultos = Boolean(opciones?.incluirOcultos);
   const agruparVariantes = opciones?.agruparVariantes !== false;
   const bdInventario = opciones?.bdInventario || null;
+  const ajustesProduccion = await obtenerAjustesProduccion(bdRecetas);
   const recetas = await dbAll(
     bdRecetas,
      `SELECT r.id, r.nombre, r.gramaje, r.id_categoria,
@@ -327,13 +566,22 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
   const catalogoRows = await dbAll(
     bdVentas,
     `SELECT receta_nombre, slug, descripcion, image_url, ingredientes, variantes, activo,
+            actualizado_en,
             es_lanzamiento, es_favorito, es_oferta, es_accesorio
      FROM tienda_catalogo`
   );
 
-  const mapaCatalogo = new Map(
-    (catalogoRows || []).map((row) => [String(row?.receta_nombre || '').trim(), row])
-  );
+  const mapaCatalogo = new Map();
+  for (const row of (catalogoRows || [])) {
+    const clave = claveRecetaNombre(row?.receta_nombre);
+    if (!clave) continue;
+    const previo = mapaCatalogo.get(clave);
+    const fechaActual = String(row?.actualizado_en || '');
+    const fechaPrevia = String(previo?.actualizado_en || '');
+    if (!previo || fechaActual >= fechaPrevia) {
+      mapaCatalogo.set(clave, row);
+    }
+  }
 
   const mapaResenas = await obtenerResumenResenas(bdVentas);
 
@@ -344,8 +592,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
 
     const prod = mapaProduccion.get(nombreReceta) || null;
     const prodBase = mapaProduccionBase.get(nombreBaseProducto(nombreReceta, receta?.gramaje)) || null;
-    const catalogo = mapaCatalogo.get(nombreReceta) || null;
-    const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : true;
+    const catalogo = mapaCatalogo.get(claveRecetaNombre(nombreReceta)) || null;
+    // By default, a recipe variant is hidden until explicitly enabled in tienda_catalogo.
+    const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : false;
     if (!visibleCatalogo && !incluirOcultos) continue;
 
     const stock = Number(prod?.stock) || 0;
@@ -368,8 +617,8 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     );
     const ingredientesTienda = ordenarIngredientesPorCantidad(lineasTexto(receta?.tienda_ingredientes), mapaCantidadIngredientes);
     const galeriaTienda = parseJSON(receta?.tienda_galeria, []);
-    const galeria = Array.isArray(galeriaTienda) ? galeriaTienda.map((item) => String(item || '').trim()).filter(Boolean) : [];
-    const imagenPrincipal = String(receta?.tienda_image_url || catalogo?.image_url || galeria[0] || "");
+    const galeria = normalizarMediaLista(Array.isArray(galeriaTienda) ? galeriaTienda : []);
+    const imagenPrincipal = normalizarMediaUrl(receta?.tienda_image_url || catalogo?.image_url || galeria[0] || "");
 
     salidaFlat.push({
       receta_id: receta?.id || null,
@@ -382,10 +631,11 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       stock,
       disponible: stock > 0,
       activo: stock > 0,
+      costo_estimado: Number(mapaPrecioSugeridoReceta.get(Number(receta?.id)) || 0),
       precio_venta: (
         Number(prod?.precio_venta)
         || Number(prodBase?.precio_venta)
-        || Number(Math.ceil(((Number(mapaPrecioSugeridoReceta.get(Number(receta?.id)) || 0) * 1.15 * 2.5) / 5)) * 5)
+        || Number(calcularPrecioSugerido(Number(mapaPrecioSugeridoReceta.get(Number(receta?.id)) || 0), ajustesProduccion))
         || Number(receta?.tienda_precio_publico)
         || 0
       ),
@@ -394,7 +644,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       modo_uso: String(receta?.tienda_modo_uso || ""),
       cuidados: String(receta?.tienda_cuidados || ""),
       image_url: imagenPrincipal,
-      galeria,
+      galeria: normalizarMediaLista(galeria),
       ingredientes: ingredientesTienda.length
         ? ingredientesTienda
         : ordenarIngredientesPorCantidad(parseJSON(catalogo?.ingredientes, ingredientesAuto), mapaCantidadIngredientes),
@@ -410,7 +660,17 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
   }
 
   if (!agruparVariantes) {
-    return salidaFlat;
+    const mapaProductosPorNombreFlat = new Map(
+      salidaFlat.map((p) => [String(p?.nombre_receta || '').trim(), p])
+    );
+    const paquetesFlat = await construirPaquetesProductos({
+      bdVentas,
+      mapaProductosPorNombre: mapaProductosPorNombreFlat,
+      incluirOcultos,
+      agruparVariantes: false
+    });
+    const todoFlat = [...salidaFlat, ...paquetesFlat];
+    return aplicarDescuentosProductos(todoFlat, bdVentas);
   }
 
   const grupos = new Map();
@@ -419,14 +679,14 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     if (!base) continue;
 
     if (!grupos.has(base)) {
-      const catalogoBase = mapaCatalogo.get(base) || null;
+      const catalogoBase = mapaCatalogo.get(claveRecetaNombre(base)) || null;
       grupos.set(base, {
         receta_id: item.receta_id,
         categoria_id: item.categoria_id,
         categoria_nombre: item.categoria_nombre,
         nombre_receta: base,
         slug: String(catalogoBase?.slug || slugify(base)),
-        visible_publico: catalogoBase ? Number(catalogoBase.activo) !== 0 : true,
+        visible_publico: catalogoBase ? Number(catalogoBase.activo) !== 0 : false,
         stock: 0,
         disponible: false,
         activo: false,
@@ -490,13 +750,29 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       stock,
       disponible: stock > 0,
       activo: stock > 0,
+      costo_estimado: (grupo.variantes || []).reduce((sum, v) => {
+        const nombreVar = String(v?.receta_nombre || '').trim();
+        const detalle = salidaFlat.find((it) => String(it?.nombre_receta || '').trim() === nombreVar);
+        return sum + (Number(detalle?.costo_estimado) || 0);
+      }, 0),
       precio_venta: Number(varianteActiva?.precio_venta) || 0,
       gramaje: Number(varianteActiva?.gramaje) || 0,
       visible_publico: incluirOcultos ? Boolean(grupo.visible_publico) : (variantes.length > 0)
     };
   });
 
-  return incluirOcultos ? salida : salida.filter((item) => item.visible_publico);
+  const baseSalida = incluirOcultos ? salida : salida.filter((item) => item.visible_publico);
+  const mapaProductosPorNombre = new Map(
+    salidaFlat.map((p) => [String(p?.nombre_receta || '').trim(), p])
+  );
+  const paquetes = await construirPaquetesProductos({
+    bdVentas,
+    mapaProductosPorNombre,
+    incluirOcultos,
+    agruparVariantes: true
+  });
+  const todo = [...baseSalida, ...paquetes];
+  return aplicarDescuentosProductos(todo, bdVentas);
 }
 
 async function crearPreferenciaMercadoPago({ orden, items }) {
@@ -842,6 +1118,184 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
+  app.get('/tienda/admin/descuentos', authInterno, async (req, res) => {
+    try {
+      const rows = await dbAll(
+        bdVentas,
+        `SELECT id, scope, clave, activo, porcentaje, actualizado_en
+         FROM tienda_descuentos
+         ORDER BY scope ASC, clave ASC`
+      );
+      res.json(rows || []);
+    } catch {
+      res.status(500).json({ error: 'No se pudieron cargar descuentos' });
+    }
+  });
+
+  app.post('/tienda/admin/descuentos/upsert', authInterno, async (req, res) => {
+    try {
+      const scope = String(req.body?.scope || '').trim().toLowerCase();
+      const clave = String(req.body?.clave || '').trim();
+      const activo = boolToInt(req.body?.activo);
+      const porcentaje = Math.max(0, Number(req.body?.porcentaje) || 0);
+      const claveNormalizada = scope === 'global' ? '__all__' : clave;
+
+      if (!['global', 'global_exclusion', 'categoria', 'producto'].includes(scope)) {
+        return res.status(400).json({ error: 'scope inválido (global|global_exclusion|categoria|producto)' });
+      }
+      if (scope !== 'global' && !claveNormalizada) {
+        return res.status(400).json({ error: 'clave obligatoria' });
+      }
+
+      const porcentajeFinal = scope === 'global_exclusion' ? 0 : porcentaje;
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_descuentos (scope, clave, activo, porcentaje, actualizado_en)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(scope, clave) DO UPDATE SET
+           activo = excluded.activo,
+           porcentaje = excluded.porcentaje,
+           actualizado_en = CURRENT_TIMESTAMP`,
+        [scope, claveNormalizada, activo, porcentajeFinal]
+      );
+
+      transmitir({ tipo: 'tienda_descuentos_actualizados', scope, clave: claveNormalizada, activo: Number(activo) === 1, porcentaje: porcentajeFinal });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo guardar descuento' });
+    }
+  });
+
+  app.get('/tienda/admin/paquetes', authInterno, async (req, res) => {
+    try {
+      const paquetes = await dbAll(
+        bdVentas,
+        `SELECT id, nombre, slug, descripcion, image_url, activo, actualizado_en
+         FROM tienda_paquetes
+         ORDER BY nombre ASC`
+      );
+      const items = await dbAll(
+        bdVentas,
+        `SELECT id_paquete, receta_nombre, cantidad, orden
+         FROM tienda_paquetes_items
+         ORDER BY id_paquete ASC, orden ASC, id ASC`
+      );
+
+      const porPaquete = new Map();
+      (items || []).forEach((item) => {
+        const id = Number(item?.id_paquete);
+        if (!porPaquete.has(id)) porPaquete.set(id, []);
+        porPaquete.get(id).push({
+          receta_nombre: String(item?.receta_nombre || '').trim(),
+          cantidad: Math.max(1, Number(item?.cantidad) || 1)
+        });
+      });
+
+      res.json((paquetes || []).map((p) => ({ ...p, image_url: normalizarMediaUrl(p?.image_url), items: porPaquete.get(Number(p?.id)) || [] })));
+    } catch {
+      res.status(500).json({ error: 'No se pudieron cargar paquetes' });
+    }
+  });
+
+  app.post('/tienda/admin/paquetes', authInterno, async (req, res) => {
+    try {
+      const nombre = String(req.body?.nombre || '').trim();
+      const descripcion = String(req.body?.descripcion || '').trim();
+      const imageUrl = normalizarMediaUrl(req.body?.image_url);
+      const activo = boolToInt(req.body?.activo);
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+      if (!nombre) return res.status(400).json({ error: 'Nombre de paquete obligatorio' });
+      if (!items.length) return res.status(400).json({ error: 'Agrega al menos una receta al paquete' });
+
+      const slug = slugify(nombre);
+      const creado = await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_paquetes (nombre, slug, descripcion, image_url, activo, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [nombre, slug, descripcion, imageUrl, activo]
+      );
+
+      const idPaquete = Number(creado?.lastID) || 0;
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i] || {};
+        const recetaNombre = String(item?.receta_nombre || '').trim();
+        const cantidad = Math.max(1, Number(item?.cantidad) || 1);
+        if (!recetaNombre) continue;
+        await dbRun(
+          bdVentas,
+          `INSERT INTO tienda_paquetes_items (id_paquete, receta_nombre, cantidad, orden)
+           VALUES (?, ?, ?, ?)`,
+          [idPaquete, recetaNombre, cantidad, i]
+        );
+      }
+
+      transmitir({ tipo: 'tienda_catalogo_actualizado', receta_nombre: nombre, activo: Number(activo) === 1 });
+      res.json({ ok: true, id: idPaquete });
+    } catch {
+      res.status(500).json({ error: 'No se pudo crear el paquete' });
+    }
+  });
+
+  app.patch('/tienda/admin/paquetes/:id', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Paquete inválido' });
+
+      const previo = await dbGet(bdVentas, 'SELECT id, nombre FROM tienda_paquetes WHERE id = ?', [id]);
+      if (!previo) return res.status(404).json({ error: 'Paquete no encontrado' });
+
+      const nombre = String(req.body?.nombre || previo.nombre || '').trim();
+      const descripcion = String(req.body?.descripcion || '').trim();
+      const imageUrl = normalizarMediaUrl(req.body?.image_url);
+      const activo = boolToInt(req.body?.activo);
+      const items = Array.isArray(req.body?.items) ? req.body.items : null;
+
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_paquetes
+         SET nombre = ?, slug = ?, descripcion = ?, image_url = ?, activo = ?, actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [nombre, slugify(nombre), descripcion, imageUrl, activo, id]
+      );
+
+      if (items) {
+        await dbRun(bdVentas, 'DELETE FROM tienda_paquetes_items WHERE id_paquete = ?', [id]);
+        for (let i = 0; i < items.length; i += 1) {
+          const item = items[i] || {};
+          const recetaNombre = String(item?.receta_nombre || '').trim();
+          const cantidad = Math.max(1, Number(item?.cantidad) || 1);
+          if (!recetaNombre) continue;
+          await dbRun(
+            bdVentas,
+            `INSERT INTO tienda_paquetes_items (id_paquete, receta_nombre, cantidad, orden)
+             VALUES (?, ?, ?, ?)`,
+            [id, recetaNombre, cantidad, i]
+          );
+        }
+      }
+
+      transmitir({ tipo: 'tienda_catalogo_actualizado', receta_nombre: nombre, activo: Number(activo) === 1 });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo actualizar el paquete' });
+    }
+  });
+
+  app.delete('/tienda/admin/paquetes/:id', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Paquete inválido' });
+      await dbRun(bdVentas, 'DELETE FROM tienda_paquetes_items WHERE id_paquete = ?', [id]);
+      await dbRun(bdVentas, 'DELETE FROM tienda_paquetes WHERE id = ?', [id]);
+      transmitir({ tipo: 'tienda_catalogo_actualizado' });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo eliminar el paquete' });
+    }
+  });
+
   app.post("/tienda/auth/register", async (req, res) => {
     try {
       const nombre = String(req.body?.nombre || "").trim();
@@ -1079,6 +1533,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       res.json(
         rows.map((row) => ({
           ...row,
+          image_url: normalizarMediaUrl(row?.image_url),
           ingredientes: parseJSON(row.ingredientes, []),
           variantes: parseJSON(row.variantes, []),
           es_lanzamiento: Number(row?.es_lanzamiento) === 1,
@@ -1099,11 +1554,15 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
       const previo = await dbGet(
         bdVentas,
-        `SELECT slug, descripcion, image_url, ingredientes, variantes,
+        `SELECT receta_nombre, slug, descripcion, image_url, ingredientes, variantes,
                 es_lanzamiento, es_favorito, es_oferta, es_accesorio, activo
-         FROM tienda_catalogo WHERE receta_nombre = ? LIMIT 1`,
+         FROM tienda_catalogo
+         WHERE LOWER(TRIM(receta_nombre)) = LOWER(TRIM(?))
+         LIMIT 1`,
         [recetaNombre]
       );
+
+      const recetaNombreGuardar = String(previo?.receta_nombre || recetaNombre).trim();
 
       const body = req.body && typeof req.body === 'object' ? req.body : {};
       const slug = tieneClave(body, 'slug')
@@ -1113,8 +1572,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         ? String(body.descripcion || '').trim()
         : String(previo?.descripcion || '').trim();
       const imageUrl = tieneClave(body, 'image_url')
-        ? String(body.image_url || '').trim()
-        : String(previo?.image_url || '').trim();
+        ? normalizarMediaUrl(body.image_url)
+        : normalizarMediaUrl(previo?.image_url);
       const ingredientes = JSON.stringify(
         tieneClave(body, 'ingredientes')
           ? (Array.isArray(body.ingredientes) ? body.ingredientes : [])
@@ -1129,7 +1588,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const esFavorito = tieneClave(body, 'es_favorito') ? boolToInt(body.es_favorito) : boolToInt(previo?.es_favorito);
       const esOferta = tieneClave(body, 'es_oferta') ? boolToInt(body.es_oferta) : boolToInt(previo?.es_oferta);
       const esAccesorio = tieneClave(body, 'es_accesorio') ? boolToInt(body.es_accesorio) : boolToInt(previo?.es_accesorio);
-      const activo = tieneClave(body, 'activo') ? (body.activo === false ? 0 : 1) : (Number(previo?.activo) === 0 ? 0 : 1);
+      const activo = tieneClave(body, 'activo') ? (body.activo === false ? 0 : 1) : (previo ? (Number(previo?.activo) === 0 ? 0 : 1) : 0);
 
       await dbRun(
         bdVentas,
@@ -1147,10 +1606,16 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
            es_accesorio = excluded.es_accesorio,
            activo = excluded.activo,
            actualizado_en = CURRENT_TIMESTAMP`,
-        [recetaNombre, slug, descripcion, imageUrl, ingredientes, variantes, esLanzamiento, esFavorito, esOferta, esAccesorio, activo]
+        [recetaNombreGuardar, slug, descripcion, imageUrl, ingredientes, variantes, esLanzamiento, esFavorito, esOferta, esAccesorio, activo]
       );
 
-      res.json({ ok: true, slug });
+      transmitir({
+        tipo: 'tienda_catalogo_actualizado',
+        receta_nombre: recetaNombreGuardar,
+        activo: Number(activo) === 1
+      });
+
+      res.json({ ok: true, slug, receta_nombre: recetaNombreGuardar });
     } catch {
       res.status(500).json({ error: "No se pudo guardar el catálogo" });
     }

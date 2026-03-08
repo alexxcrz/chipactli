@@ -189,80 +189,8 @@
   flex-wrap: wrap;
 }
 
-.bloqueOrdenCompraRecetas {
-  border: 2px solid #d4ccc0;
-  border-radius: 14px;
-  padding: 12px;
-  background: #fff;
-}
-
-.bloqueOrdenCompraRecetas h3 {
-  margin: 0 0 10px 0;
-  color: #4a7c59;
-}
-
-.filaOrdenCompraRecetas {
-  display: grid;
-  grid-template-columns: 1.2fr 1.3fr .8fr .7fr 1fr auto;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.listaOrdenesCompraRecetas {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.itemOrdenCompraRecetas {
-  border: 1px solid #e5ded3;
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: #fff;
-}
-
-.itemOrdenCompraRecetasHeader {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 8px;
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-
-.itemOrdenCompraRecetas ul {
-  margin: 0;
-  padding-left: 16px;
-  color: #444;
-  font-size: 12px;
-}
-
-.listaPreciosProveedor {
-  list-style: none;
-  padding-left: 0 !important;
-}
-
-.listaPreciosProveedor li {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 0;
-  border-bottom: 1px solid #eee;
-}
-
-.listaPreciosProveedor li:last-child {
-  border-bottom: none;
-}
-
 @media (max-width: 760px) {
   .filtrosArchivadoRecetas {
-    grid-template-columns: 1fr;
-  }
-
-  .filaOrdenCompraRecetas {
-    grid-template-columns: 1fr;
-  }
-
-  .itemOrdenCompraRecetasHeader {
     grid-template-columns: 1fr;
   }
 }

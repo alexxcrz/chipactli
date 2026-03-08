@@ -113,9 +113,12 @@ function normalizarVariantes(variantes) {
         extra: Number(item?.extra) || 0,
         receta_nombre: String(item?.receta_nombre || '').trim(),
         precio_venta: Number(item?.precio_venta) || 0,
+        precio_original: Number(item?.precio_original) || Number(item?.precio_venta) || 0,
         stock: Number(item?.stock) || 0,
         disponible: Boolean(item?.disponible) || (Number(item?.stock) || 0) > 0,
-        gramaje: Number(item?.gramaje) || 0
+        gramaje: Number(item?.gramaje) || 0,
+        descuento_porcentaje: Number(item?.descuento_porcentaje) || 0,
+        descuento_activo: Boolean(item?.descuento_activo)
       };
     })
     .filter((item) => item.nombre);
@@ -254,6 +257,14 @@ export default function Tienda({
   const [filtroCategoriaClasificacion, setFiltroCategoriaClasificacion] = useState('todas');
   const [configAdminTab, setConfigAdminTab] = useState('general');
   const [infoLinkAdminTab, setInfoLinkAdminTab] = useState(2);
+  const [mostrarBotonArribaTienda, setMostrarBotonArribaTienda] = useState(false);
+  const [descuentosAdmin, setDescuentosAdmin] = useState([]);
+  const [guardandoDescuentoClave, setGuardandoDescuentoClave] = useState('');
+  const [descuentoTabInterna, setDescuentoTabInterna] = useState('general');
+  const [descuentoCategoriaActiva, setDescuentoCategoriaActiva] = useState('');
+  const [filtroDescuentoProducto, setFiltroDescuentoProducto] = useState('');
+  const [filtroExclusionGlobal, setFiltroExclusionGlobal] = useState('');
+  const [descuentoDrafts, setDescuentoDrafts] = useState({});
   const [resenasDetalle, setResenasDetalle] = useState([]);
   const [cargandoResenas, setCargandoResenas] = useState(false);
   const [enviandoResena, setEnviandoResena] = useState(false);
@@ -262,6 +273,7 @@ export default function Tienda({
   const [whatsForm, setWhatsForm] = useState({ nombre: '', mensaje: '' });
   const [editorProducto, setEditorProducto] = useState(null);
   const bloqueoAperturaCarritoRef = useRef(0);
+  const contenedorScrollRef = useRef(null);
   const detalleTouchStartRef = useRef({ x: 0, y: 0 });
   const detalleTouchTrackingRef = useRef(false);
 
@@ -521,6 +533,63 @@ export default function Tienda({
     filtroCategoriaClasificacion
   ]);
 
+  const productosDescuento = useMemo(() => {
+    return (productos || [])
+      .filter((producto) => String(producto?.tipo_producto || '').trim().toLowerCase() !== 'paquete')
+      .sort((a, b) => {
+        const categoriaA = String(a?.categoria_nombre || '').trim();
+        const categoriaB = String(b?.categoria_nombre || '').trim();
+        const cmpCategoria = categoriaA.localeCompare(categoriaB, 'es', { sensitivity: 'base' });
+        if (cmpCategoria !== 0) return cmpCategoria;
+        return String(a?.nombre_receta || '').localeCompare(String(b?.nombre_receta || ''), 'es', { sensitivity: 'base' });
+      });
+  }, [productos]);
+
+  const categoriasDescuento = useMemo(() => {
+    const setCategorias = new Set();
+    for (const item of productosDescuento) {
+      const categoria = String(item?.categoria_nombre || '').trim();
+      if (categoria) setCategorias.add(categoria);
+    }
+    return Array.from(setCategorias).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }, [productosDescuento]);
+
+  const productosCategoriaDescuento = useMemo(() => {
+    const categoriaNorm = String(descuentoCategoriaActiva || '').trim().toLowerCase();
+    const termino = String(filtroDescuentoProducto || '').trim().toLowerCase();
+    return productosDescuento.filter((producto) => {
+      const categoria = String(producto?.categoria_nombre || '').trim().toLowerCase();
+      if (categoriaNorm && categoria !== categoriaNorm) return false;
+      if (!termino) return true;
+      const nombre = String(producto?.nombre_receta || '').toLowerCase();
+      return nombre.includes(termino);
+    });
+  }, [productosDescuento, descuentoCategoriaActiva, filtroDescuentoProducto]);
+
+  const productosExclusionGlobal = useMemo(() => {
+    const termino = String(filtroExclusionGlobal || '').trim().toLowerCase();
+    return productosDescuento.filter((producto) => {
+      if (!termino) return true;
+      const nombre = String(producto?.nombre_receta || '').toLowerCase();
+      const categoria = String(producto?.categoria_nombre || '').toLowerCase();
+      return nombre.includes(termino) || categoria.includes(termino);
+    });
+  }, [productosDescuento, filtroExclusionGlobal]);
+
+  useEffect(() => {
+    if (!categoriasDescuento.length) {
+      setDescuentoCategoriaActiva('');
+      return;
+    }
+    const existe = categoriasDescuento.some((categoria) => String(categoria).toLowerCase() === String(descuentoCategoriaActiva || '').toLowerCase());
+    if (!existe) setDescuentoCategoriaActiva(String(categoriasDescuento[0] || '').toLowerCase());
+  }, [categoriasDescuento, descuentoCategoriaActiva]);
+
+  useEffect(() => {
+    setDescuentoDrafts({});
+  }, [descuentosAdmin]);
+
+
   const ordenesAdminFiltradas = useMemo(() => {
     const termino = String(busquedaAdmin || '').trim().toLowerCase();
     return adminOrdenes.filter((orden) => {
@@ -596,8 +665,10 @@ export default function Tienda({
     setPasoCheckout((prev) => Math.max(1, prev - 1));
   }
 
-  async function cargarProductos() {
-    setCargando(true);
+  async function cargarProductos(opciones = {}) {
+    const silencioso = Boolean(opciones?.silencioso);
+
+    if (!silencioso) setCargando(true);
     try {
       const data = tokenInterno
         ? await fetchAdmin('/tienda/admin/productos')
@@ -614,7 +685,7 @@ export default function Tienda({
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo cargar la tienda', 'error');
     } finally {
-      setCargando(false);
+      if (!silencioso) setCargando(false);
     }
   }
 
@@ -697,6 +768,130 @@ export default function Tienda({
     cargarAdminClientes();
     cargarAdminOrdenes();
     cargarConfigTiendaAdmin();
+    cargarDescuentosAdmin();
+  }, [tokenInterno]);
+
+  useEffect(() => {
+    const contenedor = contenedorScrollRef.current;
+    if (!contenedor) return undefined;
+
+    const onScroll = () => {
+      const top = Number(contenedor.scrollTop) || 0;
+      setMostrarBotonArribaTienda(top > 220);
+    };
+
+    onScroll();
+    contenedor.addEventListener('scroll', onScroll, { passive: true });
+    return () => contenedor.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const contenedor = contenedorScrollRef.current;
+    if (!contenedor) return undefined;
+
+    const tieneScrollPropio = (objetivo) => {
+      let nodo = objetivo instanceof Element ? objetivo : null;
+      while (nodo && nodo !== contenedor) {
+        const estilo = window.getComputedStyle(nodo);
+        const overflowY = String(estilo?.overflowY || '').toLowerCase();
+        const desplazable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+          && nodo.scrollHeight > nodo.clientHeight;
+        if (desplazable) return true;
+        nodo = nodo.parentElement;
+      }
+      return false;
+    };
+
+    const onWheel = (event) => {
+      const deltaY = Number(event?.deltaY) || 0;
+      if (!deltaY) return;
+      if (tieneScrollPropio(event.target)) return;
+
+      const maxScroll = Math.max(0, contenedor.scrollHeight - contenedor.clientHeight);
+      if (maxScroll <= 0) return;
+
+      const siguiente = Math.min(maxScroll, Math.max(0, contenedor.scrollTop + deltaY));
+      if (siguiente === contenedor.scrollTop) return;
+
+      contenedor.scrollTop = siguiente;
+      event.preventDefault();
+    };
+
+    contenedor.addEventListener('wheel', onWheel, { passive: false });
+    return () => contenedor.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useEffect(() => {
+    const contenedor = contenedorScrollRef.current;
+    if (!contenedor) return undefined;
+
+    const ajustarAlto = () => {
+      const top = Number(contenedor.getBoundingClientRect()?.top) || 0;
+      const viewport = window.innerHeight || document.documentElement?.clientHeight || 0;
+      const alto = Math.max(320, viewport - Math.max(0, top));
+      contenedor.style.height = `${alto}px`;
+      contenedor.style.maxHeight = `${alto}px`;
+    };
+
+    ajustarAlto();
+    window.addEventListener('resize', ajustarAlto);
+    window.addEventListener('orientationchange', ajustarAlto);
+    return () => {
+      window.removeEventListener('resize', ajustarAlto);
+      window.removeEventListener('orientationchange', ajustarAlto);
+    };
+  }, []);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    let timerRefresco = null;
+    const onRealtime = (event) => {
+      const tipo = String(event?.detail?.tipo || '').trim();
+      if (!tipo) return;
+
+      const requiereRefrescoProductos = (
+        tipo === 'tienda_catalogo_actualizado'
+        || tipo === 'tienda_descuentos_actualizados'
+        || tipo === 'recetas_actualizado'
+        || tipo === 'produccion_actualizado'
+        || tipo === 'inventario_actualizado'
+        || tipo === 'ventas_actualizado'
+      );
+
+      if (requiereRefrescoProductos) {
+        if (timerRefresco) clearTimeout(timerRefresco);
+        timerRefresco = setTimeout(() => {
+          cargarProductos({ silencioso: true });
+        }, 100);
+      }
+
+      if (tokenInterno && (tipo === 'tienda_orden_nueva' || tipo === 'tienda_orden_actualizada')) {
+        cargarAdminOrdenes();
+      }
+      if (tokenInterno && tipo === 'tienda_descuentos_actualizados') {
+        cargarDescuentosAdmin();
+      }
+    };
+
+    window.addEventListener('chipactli:realtime', onRealtime);
+    return () => {
+      window.removeEventListener('chipactli:realtime', onRealtime);
+      if (timerRefresco) clearTimeout(timerRefresco);
+    };
   }, [tokenInterno]);
 
   async function cargarConfigTienda() {
@@ -741,6 +936,80 @@ export default function Tienda({
       mostrarNotificacion('Configuración de tienda guardada', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar configuración', 'error');
+    }
+  }
+
+  async function cargarDescuentosAdmin() {
+    if (!tokenInterno) return;
+    try {
+      const data = await fetchAdmin('/tienda/admin/descuentos');
+      setDescuentosAdmin(Array.isArray(data) ? data : []);
+    } catch {
+      setDescuentosAdmin([]);
+    }
+  }
+
+  function obtenerDescuento(scope, clave) {
+    const s = String(scope || '').trim().toLowerCase();
+    const c = String(clave || '').trim().toLowerCase();
+    return descuentosAdmin.find((d) => String(d?.scope || '').trim().toLowerCase() === s && String(d?.clave || '').trim().toLowerCase() === c) || null;
+  }
+
+  function claveDraftDescuento(scope, clave) {
+    return `${String(scope || '').trim().toLowerCase()}:${String(clave || '').trim().toLowerCase()}`;
+  }
+
+  function obtenerControlDescuento(scope, clave) {
+    const key = claveDraftDescuento(scope, clave);
+    const draft = descuentoDrafts[key];
+    if (draft) {
+      return {
+        activo: Boolean(draft.activo),
+        porcentaje: Number(draft.porcentaje) || 0
+      };
+    }
+
+    const existente = obtenerDescuento(scope, clave);
+    return {
+      activo: Number(existente?.activo) === 1,
+      porcentaje: Number(existente?.porcentaje) || 0
+    };
+  }
+
+  function actualizarControlDescuento(scope, clave, cambios = {}) {
+    const key = claveDraftDescuento(scope, clave);
+    const actual = obtenerControlDescuento(scope, clave);
+    const siguiente = {
+      activo: typeof cambios.activo === 'boolean' ? cambios.activo : actual.activo,
+      porcentaje: typeof cambios.porcentaje === 'number' ? cambios.porcentaje : actual.porcentaje
+    };
+    setDescuentoDrafts((prev) => ({ ...prev, [key]: siguiente }));
+  }
+
+  function cambiarDescuentoTab(valor) {
+    setDescuentoTabInterna(valor);
+  }
+
+  function cambiarDescuentoCategoria(valor) {
+    setDescuentoCategoriaActiva(String(valor || '').trim().toLowerCase());
+  }
+
+  async function guardarDescuento(scope, clave, activo, porcentaje) {
+    const key = claveDraftDescuento(scope, scope === 'global' ? '__all__' : clave);
+    setGuardandoDescuentoClave(key);
+    try {
+      await fetchAdmin('/tienda/admin/descuentos/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, clave, activo, porcentaje })
+      });
+      await cargarDescuentosAdmin();
+      await cargarProductos({ silencioso: true });
+      mostrarNotificacion('Descuento guardado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo guardar descuento', 'error');
+    } finally {
+      setGuardandoDescuentoClave('');
     }
   }
 
@@ -1093,19 +1362,33 @@ export default function Tienda({
   function abrirDetalle(producto) {
     const variantes = normalizarVariantes(producto?.variantes);
     const primeraDisponible = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
-    const galeria = Array.isArray(producto?.galeria) ? producto.galeria.map((item) => String(item || '').trim()).filter(Boolean) : [];
-    const imagenActiva = String(producto?.image_url || galeria[0] || '').trim();
+    const detallePaquete = Array.isArray(producto?.paquete_detalle) ? producto.paquete_detalle : [];
+    const imagenPaquete = String(producto?.image_url || '').trim();
+    const galeriaBase = Array.isArray(producto?.galeria)
+      ? producto.galeria.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const galeriaDetalles = detallePaquete
+      .map((item) => String(item?.image_url || '').trim())
+      .filter(Boolean);
+    const galeria = Array.from(new Set([imagenPaquete, ...galeriaBase, ...galeriaDetalles].filter(Boolean)));
+    const imagenActiva = String(imagenPaquete || galeria[0] || '').trim();
     setSeleccionado({
       ...producto,
       variantes,
       variante_activa: primeraDisponible?.nombre || '',
+      detalle_paquete_activo: 0,
       galeria,
       imagen_activa: imagenActiva
     });
     setResenaNueva({ calificacion: 5, comentario: '' });
     cargarResenasProducto(producto?.nombre_receta);
     setVistaActiva('detalle');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const contenedor = contenedorScrollRef.current;
+    if (contenedor && typeof contenedor.scrollTo === 'function') {
+      contenedor.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }
 
   function seleccionarVarianteDetalle(nombreVariante) {
@@ -1113,6 +1396,26 @@ export default function Tienda({
       if (!prev) return prev;
       return { ...prev, variante_activa: nombreVariante };
     });
+  }
+
+  function seleccionarDetallePaquete(index) {
+    const idx = Number(index) || 0;
+    setSeleccionado((prev) => {
+      if (!prev) return prev;
+      const detalles = Array.isArray(prev?.paquete_detalle) ? prev.paquete_detalle : [];
+      if (!detalles.length) return prev;
+      const idxSeguro = Math.max(0, Math.min(idx, detalles.length - 1));
+      return {
+        ...prev,
+        detalle_paquete_activo: idxSeguro
+      };
+    });
+
+    const detalle = (Array.isArray(seleccionado?.paquete_detalle) ? seleccionado.paquete_detalle : [])[idx];
+    const nombreRecetaDetalle = String(detalle?.receta_nombre || '').trim();
+    if (nombreRecetaDetalle) {
+      cargarResenasProducto(nombreRecetaDetalle);
+    }
   }
 
   function seleccionarImagenDetalle(url) {
@@ -1358,7 +1661,7 @@ export default function Tienda({
   const whatsMensajeInvalido = whatsMensajeTrimLen < 6 || whatsMensajeTrimLen > 420;
 
   return (
-    <div>
+    <div ref={contenedorScrollRef} className="tiendaRootScroll" tabIndex={0}>
       {!esVistaTrastienda && (
       <div className="tiendaPromoBar">
         {configTienda.promo_texto}
@@ -1475,6 +1778,11 @@ export default function Tienda({
               const varianteActiva = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
               const disponible = varianteActiva ? Boolean(varianteActiva?.disponible) : ((Number(producto?.stock) || 0) > 0);
               const precioActual = varianteActiva ? precioVariante(producto, varianteActiva) : (Number(producto?.precio_venta) || 0);
+              const precioOriginal = varianteActiva
+                ? (Number(varianteActiva?.precio_original) || Number(varianteActiva?.precio_venta) || 0)
+                : (Number(producto?.precio_original) || Number(producto?.precio_venta) || 0);
+              const descuentoPct = Number(producto?.descuento_porcentaje) || 0;
+              const tieneDescuento = Boolean(producto?.descuento_activo) && descuentoPct > 0 && precioOriginal > precioActual;
               const categoriaProducto = String(producto?.categoria_nombre || '').trim() || 'Sin categoría';
               const totalResenas = Number(producto?.resenas_total) || 0;
               const promedioResenas = Number(producto?.resenas_promedio) || 0;
@@ -1513,7 +1821,19 @@ export default function Tienda({
                     <p className="tiendaDescripcion">{producto.descripcion}</p>
                   )}
                   <div className="tiendaMeta">
-                    <span>{precioActual > 0 ? precio(precioActual) : 'Próximamente'}</span>
+                    <span>
+                      {tieneDescuento && (
+                        <span style={{ fontSize: '11px', color: '#777', textDecoration: 'line-through', marginRight: '6px' }}>
+                          {precio(precioOriginal)}
+                        </span>
+                      )}
+                      {precioActual > 0 ? precio(precioActual) : 'Próximamente'}
+                      {tieneDescuento && (
+                        <span style={{ marginLeft: '6px', fontSize: '10px', color: '#4a7c59', fontWeight: 700 }}>
+                          -{descuentoPct.toFixed(0)}%
+                        </span>
+                      )}
+                    </span>
                     <span>
                       {tokenInterno
                         ? (disponible ? `Stock: ${producto.stock}` : 'Sin stock')
@@ -1701,6 +2021,7 @@ export default function Tienda({
               <button type="button" className={adminVista === 'clientes' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('clientes')}>Clientes</button>
               <button type="button" className={adminVista === 'puntos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('puntos')}>Puntos de entrega</button>
               <button type="button" className={adminVista === 'catalogo' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('catalogo')}>Catálogo</button>
+              <button type="button" className={adminVista === 'descuentos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('descuentos')}>Descuentos</button>
               <button type="button" className={adminVista === 'config' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('config')}>Configuración</button>
             </div>
 
@@ -1814,24 +2135,27 @@ export default function Tienda({
                     <strong>Horarios de atención</strong>
                     <div className="tiendaAdminHorariosGrid">
                       <div className="tiendaAdminHorarioCard">
-                        <label>Lunes a viernes</label>
+                        <label htmlFor="cfgHorarioLunesViernes">Lunes a viernes</label>
                         <input
+                          id="cfgHorarioLunesViernes"
                           placeholder="Ej. 09:00 a 18:00"
                           value={configTiendaAdmin.atencion_horario_lunes_viernes || ''}
                           onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, atencion_horario_lunes_viernes: e.target.value }))}
                         />
                       </div>
                       <div className="tiendaAdminHorarioCard">
-                        <label>Sábado</label>
+                        <label htmlFor="cfgHorarioSabado">Sábado</label>
                         <input
+                          id="cfgHorarioSabado"
                           placeholder="Ej. 09:00 a 14:00"
                           value={configTiendaAdmin.atencion_horario_sabado || ''}
                           onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, atencion_horario_sabado: e.target.value }))}
                         />
                       </div>
                       <div className="tiendaAdminHorarioCard">
-                        <label>Domingo</label>
+                        <label htmlFor="cfgHorarioDomingo">Domingo</label>
                         <input
+                          id="cfgHorarioDomingo"
                           placeholder="Ej. Cerrado o 10:00 a 13:00"
                           value={configTiendaAdmin.atencion_horario_domingo || ''}
                           onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, atencion_horario_domingo: e.target.value }))}
@@ -2061,6 +2385,221 @@ export default function Tienda({
             </div>
             )}
 
+            {adminVista === 'descuentos' && (
+            <div className="tiendaAdminForm">
+              <strong>Descuentos</strong>
+              <div className="tiendaVacio" style={{ marginBottom: '8px' }}>
+                Descuento redondeado hacia abajo al peso entero.
+              </div>
+
+              <div className="tiendaAdminTabs tiendaAdminTabsConfigInternas" style={{ marginBottom: '10px' }}>
+                <button type="button" className={descuentoTabInterna === 'general' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => cambiarDescuentoTab('general')}>General</button>
+                <button type="button" className={descuentoTabInterna === 'categorias' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => cambiarDescuentoTab('categorias')}>Por categoría</button>
+              </div>
+
+              {descuentoTabInterna === 'general' && (() => {
+                const controlGlobal = obtenerControlDescuento('global', '__all__');
+                const keyGlobal = claveDraftDescuento('global', '__all__');
+                return (
+                  <div className="tiendaDescuentoPanel">
+                    <div className="tiendaDescuentoRow tiendaDescuentoRowGlobal">
+                      <strong>Descuento general para todos los productos</strong>
+                      <label className="tiendaSwitchCard tiendaSwitchToggle tiendaSwitchSoloIcono" title="Activar descuento general">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(controlGlobal.activo)}
+                          onChange={(e) => actualizarControlDescuento('global', '__all__', { activo: e.target.checked })}
+                        />
+                        <span className="tiendaSwitchSlider" />
+                      </label>
+                      <input
+                        className="tiendaDescuentoInput"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="95"
+                        step="0.1"
+                        value={Number(controlGlobal.porcentaje || 0) > 0 ? String(Number(controlGlobal.porcentaje || 0)) : ''}
+                        disabled={!controlGlobal.activo}
+                        onChange={(e) => {
+                          const valor = Math.max(0, Math.min(95, Number(e.target.value) || 0));
+                          actualizarControlDescuento('global', '__all__', { porcentaje: valor });
+                        }}
+                      />
+                      <button
+                        className="botonPequeno"
+                        type="button"
+                        disabled={guardandoDescuentoClave === keyGlobal}
+                        onClick={() => guardarDescuento('global', '__all__', controlGlobal.activo, controlGlobal.porcentaje)}
+                      >
+                        {guardandoDescuentoClave === keyGlobal ? 'Guardando...' : 'Guardar'}
+                      </button>
+                    </div>
+
+                    <details className="tiendaDescuentoExclusionMenu">
+                      <summary>Excluir recetas del descuento general</summary>
+                      <div className="tiendaDescuentoExclusionBody">
+                        <input
+                          type="text"
+                          placeholder="Buscar receta para excluir..."
+                          value={filtroExclusionGlobal}
+                          onChange={(e) => setFiltroExclusionGlobal(e.target.value)}
+                        />
+                        <div className="tiendaDescuentoExclusionLista">
+                          {productosExclusionGlobal.map((producto) => {
+                            const nombre = String(producto?.nombre_receta || '').trim();
+                            const categoria = String(producto?.categoria_nombre || '').trim() || 'Sin categoría';
+                            const controlExclusion = obtenerControlDescuento('global_exclusion', nombre);
+                            const keyExclusion = claveDraftDescuento('global_exclusion', nombre);
+                            return (
+                              <div key={`desc-exclusion-${nombre}`} className="tiendaDescuentoExclusionItem">
+                                <div>
+                                  <strong>{nombre}</strong>
+                                  <span>{categoria}</span>
+                                </div>
+                                <label className="tiendaSwitchCard tiendaSwitchToggle tiendaSwitchSoloIcono" title={`Excluir ${nombre}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(controlExclusion.activo)}
+                                    disabled={guardandoDescuentoClave === keyExclusion}
+                                    onChange={(e) => {
+                                      const checked = e.target.checked;
+                                      actualizarControlDescuento('global_exclusion', nombre, { activo: checked, porcentaje: 0 });
+                                      guardarDescuento('global_exclusion', nombre, checked, 0);
+                                    }}
+                                  />
+                                  <span className="tiendaSwitchSlider" />
+                                </label>
+                              </div>
+                            );
+                          })}
+                          {!productosExclusionGlobal.length && <div className="tiendaVacio">No hay recetas para ese filtro.</div>}
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                );
+              })()}
+
+              {descuentoTabInterna === 'categorias' && (
+                <div className="tiendaDescuentoPanel">
+                  <div className="tiendaAdminTabs tiendaAdminTabsConfigInternas tiendaDescuentoCategoriasTabs">
+                    {categoriasDescuento.map((categoria) => {
+                      const categoriaValue = String(categoria || '').toLowerCase();
+                      return (
+                        <button
+                          key={`tab-desc-categoria-${categoria}`}
+                          type="button"
+                          className={descuentoCategoriaActiva === categoriaValue ? 'tiendaTab activa' : 'tiendaTab'}
+                          onClick={() => cambiarDescuentoCategoria(categoriaValue)}
+                        >
+                          {categoria}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {!!categoriasDescuento.length && (() => {
+                    const categoriaSeleccionada = categoriasDescuento.find((categoria) => String(categoria || '').toLowerCase() === String(descuentoCategoriaActiva || '').toLowerCase()) || categoriasDescuento[0];
+                    const controlCategoria = obtenerControlDescuento('categoria', categoriaSeleccionada);
+                    const keyCategoria = claveDraftDescuento('categoria', categoriaSeleccionada);
+
+                    return (
+                      <>
+                        <div className="tiendaDescuentoRow tiendaDescuentoRowCategoria">
+                          <strong>{categoriaSeleccionada}</strong>
+                          <label className="tiendaSwitchCard tiendaSwitchToggle tiendaSwitchSoloIcono" title={`Activar descuento en ${categoriaSeleccionada}`}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(controlCategoria.activo)}
+                              onChange={(e) => actualizarControlDescuento('categoria', categoriaSeleccionada, { activo: e.target.checked })}
+                            />
+                            <span className="tiendaSwitchSlider" />
+                          </label>
+                          <input
+                            className="tiendaDescuentoInput"
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            max="95"
+                            step="0.1"
+                            value={Number(controlCategoria.porcentaje || 0) > 0 ? String(Number(controlCategoria.porcentaje || 0)) : ''}
+                            disabled={!controlCategoria.activo}
+                            onChange={(e) => {
+                              const valor = Math.max(0, Math.min(95, Number(e.target.value) || 0));
+                              actualizarControlDescuento('categoria', categoriaSeleccionada, { porcentaje: valor });
+                            }}
+                          />
+                          <button
+                            className="botonPequeno"
+                            type="button"
+                            disabled={guardandoDescuentoClave === keyCategoria}
+                            onClick={() => guardarDescuento('categoria', categoriaSeleccionada, controlCategoria.activo, controlCategoria.porcentaje)}
+                          >
+                            {guardandoDescuentoClave === keyCategoria ? 'Guardando...' : 'Guardar'}
+                          </button>
+                        </div>
+
+                        <div className="tiendaDescuentoFiltroProductos">
+                          <input
+                            type="text"
+                            placeholder="Buscar producto en esta categoría..."
+                            value={filtroDescuentoProducto}
+                            onChange={(e) => setFiltroDescuentoProducto(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="tiendaDescuentoListaProductos">
+                          {productosCategoriaDescuento.map((producto) => {
+                            const nombre = String(producto?.nombre_receta || '').trim();
+                            const controlProducto = obtenerControlDescuento('producto', nombre);
+                            const keyProducto = claveDraftDescuento('producto', nombre);
+                            return (
+                              <div key={`desc-prod-${nombre}`} className="tiendaDescuentoRow tiendaDescuentoRowProducto">
+                                <span className="tiendaDescuentoProductoNombre">{nombre}</span>
+                                <label className="tiendaSwitchCard tiendaSwitchToggle tiendaSwitchSoloIcono" title={`Activar descuento para ${nombre}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(controlProducto.activo)}
+                                    onChange={(e) => actualizarControlDescuento('producto', nombre, { activo: e.target.checked })}
+                                  />
+                                  <span className="tiendaSwitchSlider" />
+                                </label>
+                                <input
+                                  className="tiendaDescuentoInput"
+                                  type="number"
+                                  inputMode="decimal"
+                                  min="0"
+                                  max="95"
+                                  step="0.1"
+                                  value={Number(controlProducto.porcentaje || 0) > 0 ? String(Number(controlProducto.porcentaje || 0)) : ''}
+                                  disabled={!controlProducto.activo}
+                                  onChange={(e) => {
+                                    const valor = Math.max(0, Math.min(95, Number(e.target.value) || 0));
+                                    actualizarControlDescuento('producto', nombre, { porcentaje: valor });
+                                  }}
+                                />
+                                <button
+                                  className="botonPequeno"
+                                  type="button"
+                                  disabled={guardandoDescuentoClave === keyProducto}
+                                  onClick={() => guardarDescuento('producto', nombre, controlProducto.activo, controlProducto.porcentaje)}
+                                >
+                                  {guardandoDescuentoClave === keyProducto ? 'Guardando...' : 'Guardar'}
+                                </button>
+                              </div>
+                            );
+                          })}
+                          {!productosCategoriaDescuento.length && <div className="tiendaVacio">No hay productos para ese filtro en esta categoría.</div>}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+            )}
+
             {adminVista === 'clientes' && (
               <div className="tiendaAdminForm">
                 <strong>Clientes registrados</strong>
@@ -2163,6 +2702,29 @@ export default function Tienda({
               || variantes.find((v) => Boolean(v?.disponible))
               || variantes[0]
               || null;
+            const esPaqueteDetalle = String(seleccionado?.tipo_producto || '').trim().toLowerCase() === 'paquete'
+              || (Array.isArray(seleccionado?.paquete_detalle) && seleccionado.paquete_detalle.length > 0);
+            const detallePaquete = Array.isArray(seleccionado?.paquete_detalle) ? seleccionado.paquete_detalle : [];
+            const idxDetalleActivo = Math.max(0, Math.min(Number(seleccionado?.detalle_paquete_activo) || 0, Math.max(0, detallePaquete.length - 1)));
+            const detalleActivo = esPaqueteDetalle ? (detallePaquete[idxDetalleActivo] || {}) : null;
+            const modoUsoActivo = String(seleccionado?.modo_uso || '').trim();
+            const cuidadosActivo = String(seleccionado?.cuidados || '').trim();
+            const descripcionActiva = String(seleccionado?.descripcion || '').trim();
+            const ingredientesActivos = Array.isArray(seleccionado?.ingredientes) ? seleccionado.ingredientes : [];
+            const modoUsoFinal = esPaqueteDetalle
+              ? String(detalleActivo?.modo_uso || modoUsoActivo).trim()
+              : modoUsoActivo;
+            const cuidadosFinal = esPaqueteDetalle
+              ? String(detalleActivo?.cuidados || cuidadosActivo).trim()
+              : cuidadosActivo;
+            const descripcionFinal = esPaqueteDetalle
+              ? String(detalleActivo?.descripcion || descripcionActiva).trim()
+              : descripcionActiva;
+            const ingredientesFinal = esPaqueteDetalle
+              ? (Array.isArray(detalleActivo?.ingredientes) && detalleActivo.ingredientes.length
+                ? detalleActivo.ingredientes
+                : ingredientesActivos)
+              : ingredientesActivos;
             const variantesConPrecio = variantes.map((v) => ({
               ...v,
               precio_publico: Number(v?.precio_venta) > 0 ? Number(v.precio_venta) : precioVariante(seleccionado, v),
@@ -2192,6 +2754,24 @@ export default function Tienda({
                 </div>
                 <div className="tiendaDetalleLayout">
                   <div className="tiendaDetalleLateralImagen">
+                    {esPaqueteDetalle && detallePaquete.length > 0 && (
+                      <div className="tiendaDetalleProductoTabs">
+                        {detallePaquete.map((item, idx) => {
+                          const nombreTab = String(item?.receta_nombre || `Producto ${idx + 1}`);
+                          const activa = idx === idxDetalleActivo;
+                          return (
+                            <button
+                              key={`paquete-detalle-tab-${idx}-${nombreTab}`}
+                              type="button"
+                              className={activa ? 'tiendaDetalleProductoTab activa' : 'tiendaDetalleProductoTab'}
+                              onClick={() => seleccionarDetallePaquete(idx)}
+                            >
+                              {nombreTab}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div
                       className="tiendaDetalleColImagen"
                       onTouchStart={iniciarSwipeDetalle}
@@ -2218,7 +2798,7 @@ export default function Tienda({
                     )}
                     <div className="tiendaDetalleDescripcionDebajo">
                       <strong>Descripción</strong>
-                      <p>{seleccionado.descripcion || 'Sin descripción todavía.'}</p>
+                      <p>{descripcionFinal || 'Sin descripción todavía.'}</p>
                     </div>
                   </div>
                   <div className="tiendaDetalleColInfo">
@@ -2254,19 +2834,19 @@ export default function Tienda({
                     <div className="tiendaDetalleTabs">
                       <div className="tiendaDetalleTabItem">
                         <strong>Modo de uso</strong>
-                        <p>{String(seleccionado.modo_uso || '').trim() || 'Sin modo de uso todavía.'}</p>
+                        <p>{modoUsoFinal || 'Sin modo de uso todavía.'}</p>
                       </div>
                       <div className="tiendaDetalleTabItem">
                         <strong>Cuidados</strong>
-                        <p>{String(seleccionado.cuidados || '').trim() || 'Sin cuidados registrados.'}</p>
+                        <p>{cuidadosFinal || 'Sin cuidados registrados.'}</p>
                       </div>
                       <div className="tiendaDetalleTabItem">
                         <strong>Ingredientes</strong>
                         <ul>
-                          {(Array.isArray(seleccionado.ingredientes) ? seleccionado.ingredientes : []).map((ing, idx) => (
+                          {ingredientesFinal.map((ing, idx) => (
                             <li key={`${ing}-${idx}`}>{String(ing)}</li>
                           ))}
-                          {!Array.isArray(seleccionado.ingredientes) || !seleccionado.ingredientes.length ? <li>Sin ingredientes registrados.</li> : null}
+                          {!ingredientesFinal.length ? <li>Sin ingredientes registrados.</li> : null}
                         </ul>
                       </div>
                     </div>
@@ -2743,6 +3323,25 @@ export default function Tienda({
             )}
           </div>
         </div>
+      )}
+
+      {mostrarBotonArribaTienda && (
+        <button
+          type="button"
+          className="tiendaBotonSubir"
+          onClick={() => {
+            const contenedor = contenedorScrollRef.current;
+            if (contenedor && typeof contenedor.scrollTo === 'function') {
+              contenedor.scrollTo({ top: 0, behavior: 'smooth' });
+              return;
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          title="Volver al inicio"
+          aria-label="Volver al inicio"
+        >
+          ↑
+        </button>
       )}
     </div>
   );

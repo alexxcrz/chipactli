@@ -83,6 +83,17 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
     bdInventario.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
   });
 
+  const dbGetRecetas = (sql, params = []) => new Promise((resolve, reject) => {
+    bdRecetas.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+
+  const dbRunRecetas = (sql, params = []) => new Promise((resolve, reject) => {
+    bdRecetas.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+
   async function actualizarListaPreciosOrden({
     tipoItem,
     idReferencia,
@@ -768,6 +779,76 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
       res.json({ ok: true, total: ids.length });
     });
   });
+
+  const responderAjustesProduccion = async (req, res) => {
+    try {
+      const factorCosto = await dbGetRecetas(
+        "SELECT valor FROM recetas_ajustes WHERE clave='factor_costo_produccion'"
+      );
+      const factorVenta = await dbGetRecetas(
+        "SELECT valor FROM recetas_ajustes WHERE clave='factor_precio_venta'"
+      );
+      const redondeo = await dbGetRecetas(
+        "SELECT valor FROM recetas_ajustes WHERE clave='redondeo_precio'"
+      );
+
+      res.json({
+        factor_costo_produccion: Number(factorCosto?.valor) || 1.15,
+        factor_precio_venta: Number(factorVenta?.valor) || 2.5,
+        redondeo_precio: Number(redondeo?.valor) || 5
+      });
+    } catch {
+      res.status(500).json({ error: 'No se pudieron cargar los ajustes de producción' });
+    }
+  };
+
+  app.get('/recetas/ajustes-produccion', responderAjustesProduccion);
+  app.get('/api/recetas/ajustes-produccion', responderAjustesProduccion);
+
+  const guardarAjustesProduccionHandler = async (req, res) => {
+    try {
+      const factorCosto = Number(req.body?.factor_costo_produccion);
+      const factorVenta = Number(req.body?.factor_precio_venta);
+      const redondeo = Number(req.body?.redondeo_precio);
+
+      if (!Number.isFinite(factorCosto) || factorCosto <= 0) {
+        return res.status(400).json({ error: 'factor_costo_produccion inválido' });
+      }
+      if (!Number.isFinite(factorVenta) || factorVenta <= 0) {
+        return res.status(400).json({ error: 'factor_precio_venta inválido' });
+      }
+      if (!Number.isFinite(redondeo) || redondeo <= 0) {
+        return res.status(400).json({ error: 'redondeo_precio inválido' });
+      }
+
+      await dbRunRecetas(
+        `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+         VALUES ('factor_costo_produccion', ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP`,
+        [factorCosto]
+      );
+      await dbRunRecetas(
+        `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+         VALUES ('factor_precio_venta', ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP`,
+        [factorVenta]
+      );
+      await dbRunRecetas(
+        `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
+         VALUES ('redondeo_precio', ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP`,
+        [redondeo]
+      );
+
+      transmitir({ tipo: 'recetas_ajustes_actualizados' });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudieron guardar los ajustes de producción' });
+    }
+  };
+
+  app.put('/recetas/ajustes-produccion', guardarAjustesProduccionHandler);
+  app.put('/api/recetas/ajustes-produccion', guardarAjustesProduccionHandler);
 
   app.post("/recetas/calcular", (req, res) => {
     const { id_receta } = req.body;

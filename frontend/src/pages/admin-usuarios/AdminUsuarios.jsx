@@ -476,20 +476,22 @@ export default function AdminUsuarios() {
 
             {tabModal === 'general' && (
               <div className="tabPanelAdminUsuarios">
-                <label>Nombre de usuario</label>
+                <label htmlFor="adminUsuarioUsername">Nombre de usuario</label>
                 <input
+                  id="adminUsuarioUsername"
                   value={modalEditar.username}
                   onChange={(e) => actualizarCampoModal('username', e.target.value)}
                   disabled={modalEditar.rol === 'ceo'}
                 />
-                <label>Nombre</label>
+                <label htmlFor="adminUsuarioNombre">Nombre</label>
                 <input
+                  id="adminUsuarioNombre"
                   value={modalEditar.nombre}
                   onChange={(e) => actualizarCampoModal('nombre', e.target.value)}
                   disabled={modalEditar.rol === 'ceo'}
                 />
-                <label>Rol</label>
-                <input value={modalEditar.rol} disabled />
+                <label htmlFor="adminUsuarioRol">Rol</label>
+                <input id="adminUsuarioRol" value={modalEditar.rol} disabled />
                 <button className="boton" onClick={guardarDatosUsuario} disabled={modalEditar.rol === 'ceo'}>Guardar datos</button>
               </div>
             )}
@@ -577,8 +579,9 @@ export default function AdminUsuarios() {
 
             {tabModal === 'password' && (
               <div className="tabPanelAdminUsuarios">
-                <label>Contraseña temporal</label>
+                <label htmlFor="adminUsuarioPasswordTemporal">Contraseña temporal</label>
                 <PasswordInput
+                  id="adminUsuarioPasswordTemporal"
                   placeholder="Escribe una contraseña temporal"
                   value={modalEditar.passwordTemporal}
                   onChange={(e) => actualizarCampoModal('passwordTemporal', e.target.value)}

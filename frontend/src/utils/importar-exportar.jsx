@@ -109,7 +109,16 @@ export async function importarDatos(tipo, input) {
  */
 export function recargarSeccion(tipo) {
   if (tipo === 'todo') {
-    window.location.reload();
+    [
+      'inventario_actualizado',
+      'recetas_actualizado',
+      'produccion_actualizado',
+      'ventas_actualizado',
+      'categorias_actualizado',
+      'tienda_catalogo_actualizado'
+    ].forEach((eventoTipo) => {
+      window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: { tipo: eventoTipo } }));
+    });
   }
 }
 

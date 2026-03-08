@@ -94,7 +94,6 @@ export default function Recetas() {
 
     let timerRefrescoTiempoReal = null;
     const tiposRefrescar = new Set([
-      'tienda_catalogo_actualizado',
       'recetas_actualizado',
       'produccion_actualizado',
       'inventario_actualizado'
@@ -1736,8 +1735,9 @@ async function cambiarVisiblePaqueteReceta(idPaquete, visible, inputEl = null) {
     });
     const data = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(data?.error || 'No se pudo actualizar visibilidad');
+    paquete.activo = Boolean(visible) ? 1 : 0;
+    renderPaquetesRecetas();
     mostrarNotificacion(`Paquete ${visible ? 'visible' : 'oculto'} en tienda`, 'exito');
-    await cargarPaquetesRecetas();
   } catch (error) {
     if (inputEl) inputEl.checked = !Boolean(visible);
     mostrarNotificacion(error?.message || 'Error al actualizar visibilidad', 'error');

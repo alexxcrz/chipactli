@@ -10,6 +10,7 @@ let audioAlertaPreparado = false;
 
 let conteoAlertas = 0;
 let onEnterCerrarNotificacion = null;
+let timerCerrarNotificacion = null;
 
 export function actualizarUIAlertas() {
   const lista = document.getElementById('listaAlertas');
@@ -206,8 +207,9 @@ export function mostrarNotificacion(mensaje, tipo = 'exito') {
   }
   
   textoMensaje.textContent = mensaje;
+  modal.classList.remove('toast-hiding');
   modal.style.display = 'flex';
-  fondo.style.display = 'block';
+  if (fondo) fondo.style.display = 'none';
 
   if (onEnterCerrarNotificacion) {
     document.removeEventListener('keydown', onEnterCerrarNotificacion);
@@ -216,17 +218,45 @@ export function mostrarNotificacion(mensaje, tipo = 'exito') {
   onEnterCerrarNotificacion = (event) => {
     if (event.key === 'Enter' && modal.style.display !== 'none') {
       event.preventDefault();
-      cerrarNotificacion();
+      cerrarNotificacion({ animada: true });
     }
   };
 
   document.addEventListener('keydown', onEnterCerrarNotificacion);
+
+  if (timerCerrarNotificacion) {
+    clearTimeout(timerCerrarNotificacion);
+    timerCerrarNotificacion = null;
+  }
+
+  timerCerrarNotificacion = setTimeout(() => {
+    cerrarNotificacion({ animada: true });
+  }, 1450);
 }
 
-export function cerrarNotificacion() {
+export function cerrarNotificacion(opciones = {}) {
   const modal = document.getElementById('modalNotificacion');
   const fondo = document.getElementById('fondoNotificacion');
-  if (modal) modal.style.display = 'none';
+  const animada = Boolean(opciones?.animada);
+
+  if (timerCerrarNotificacion) {
+    clearTimeout(timerCerrarNotificacion);
+    timerCerrarNotificacion = null;
+  }
+
+  if (modal) {
+    if (animada && modal.style.display !== 'none') {
+      modal.classList.add('toast-hiding');
+      setTimeout(() => {
+        if (!modal.classList.contains('toast-hiding')) return;
+        modal.style.display = 'none';
+        modal.classList.remove('toast-hiding');
+      }, 170);
+    } else {
+      modal.style.display = 'none';
+      modal.classList.remove('toast-hiding');
+    }
+  }
   if (fondo) fondo.style.display = 'none';
 
   if (onEnterCerrarNotificacion) {

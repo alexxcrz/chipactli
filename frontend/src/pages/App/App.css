@@ -170,16 +170,25 @@ html, body {
   overscroll-behavior-y: none;
 }
 .app{
+  position: relative;
+  z-index: 0;
   min-height: 100dvh;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
   background-color: var(--bg);
+  color:#222;
+}
+
+.app::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background-image: url('/images/fondos.png');
   background-size: cover;
-  background-position: center;
+  background-position: center center;
   background-repeat: no-repeat;
-  background-attachment: scroll;
-  color:#222;
 }
 
 .appLogin{
@@ -926,45 +935,70 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 .modalNotificacion {
   display: none;
   position: fixed;
-  inset: 0;
-  z-index: 2000;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2200;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0;
+  pointer-events: none;
 }
 
 .modalNotificacion .contenidoModal {
-  width: 90%;
-  max-width: 420px;
-  min-width: 280px;
+  width: min(340px, calc(100vw - 20px));
+  min-width: 220px;
   margin: 0;
-  animation: slideInCenter 0.25s ease;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+  animation: toastIn 0.2s ease;
 }
 
-.modalNotificacion .encabezadoModal {
-  padding: 12px 16px;
-  border-radius: 24px 24px 0 0;
-}
-
-.modalNotificacion .encabezadoModal h3 {
-  font-size: 15px;
-}
+.modalNotificacion .encabezadoModal { display: none; }
 
 @keyframes slideInCenter {
   from { transform: translateY(-12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
-.modalNotificacion #mensajeNotificacion {
-  padding: 14px 16px 16px;
-  font-size: 13px;
-  color: var(--text-primary);
-  text-align: center;
+@keyframes toastIn {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
-.modalNotificacion.exito .contenidoModal { border-left: 5px solid var(--success); }
-.modalNotificacion.error .contenidoModal { border-left: 5px solid var(--danger); }
-.modalNotificacion.advertencia .contenidoModal { border-left: 5px solid var(--warning); }
+@keyframes toastOut {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(6px); opacity: 0; }
+}
+
+.modalNotificacion.toast-hiding .contenidoModal {
+  animation: toastOut 0.16s ease forwards;
+}
+
+.modalNotificacion #mensajeNotificacion {
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.modalNotificacion.exito .contenidoModal {
+  border-left: 4px solid #2e7d32;
+  background: #eef8ee;
+}
+
+.modalNotificacion.error .contenidoModal {
+  border-left: 4px solid #c62828;
+  background: #fdeeee;
+}
+
+.modalNotificacion.advertencia .contenidoModal {
+  border-left: 4px solid #f9a825;
+  background: #fff9e8;
+}
+
 .modalNotificacion.exito h3 { color: var(--success); }
 .modalNotificacion.error h3 { color: var(--danger); }
 .modalNotificacion.advertencia h3 { color: var(--warning); }
@@ -979,6 +1013,10 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   height: 100%;
   background: rgba(0,0,0,0.32);
   z-index: 1999;
+}
+
+.fondoNotificacion {
+  display: none !important;
 }
 
 .selectorPeriodo { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; width:100%; max-width:100%; }

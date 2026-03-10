@@ -11,6 +11,52 @@ let audioAlertaPreparado = false;
 let conteoAlertas = 0;
 let onEnterCerrarNotificacion = null;
 let timerCerrarNotificacion = null;
+const CLAVE_SONIDO_NOTIFICACION = 'chipactli_notif_sound';
+let sonidoSeleccionado = 'clasico';
+
+export const OPCIONES_SONIDO_NOTIFICACION = [
+  { value: 'clasico', label: 'Clásico' },
+  { value: 'suave', label: 'Suave' },
+  { value: 'campana', label: 'Campana' },
+  { value: 'digital', label: 'Digital' },
+  { value: 'silencio', label: 'Sin sonido' }
+];
+
+function cargarSonidoSeleccionado() {
+  if (typeof window === 'undefined') return;
+  try {
+    const guardado = String(localStorage.getItem(CLAVE_SONIDO_NOTIFICACION) || '').trim().toLowerCase();
+    if (OPCIONES_SONIDO_NOTIFICACION.some((item) => item.value === guardado)) {
+      sonidoSeleccionado = guardado;
+    }
+  } catch {
+    // Ignorar errores de storage.
+  }
+}
+
+function presetSonidoValido(preset) {
+  const clave = String(preset || '').trim().toLowerCase();
+  return OPCIONES_SONIDO_NOTIFICACION.some((item) => item.value === clave) ? clave : 'clasico';
+}
+
+export function obtenerSonidoNotificacion() {
+  return sonidoSeleccionado;
+}
+
+export function configurarSonidoNotificacion(preset) {
+  const clave = presetSonidoValido(preset);
+  sonidoSeleccionado = clave;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(CLAVE_SONIDO_NOTIFICACION, clave);
+    } catch {
+      // Ignorar errores de storage.
+    }
+  }
+  return clave;
+}
+
+cargarSonidoSeleccionado();
 
 export function actualizarUIAlertas() {
   const lista = document.getElementById('listaAlertas');
@@ -152,8 +198,13 @@ export function prepararAudioAlerta() {
   );
 }
 
-export function reproducirSonidoAlerta() {
+export function reproducirSonidoAlerta(preset = '') {
   try {
+    const tono = preset
+      ? presetSonidoValido(preset)
+      : presetSonidoValido(sonidoSeleccionado);
+    if (tono === 'silencio') return;
+
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
@@ -168,23 +219,93 @@ export function reproducirSonidoAlerta() {
     ganancia.gain.exponentialRampToValueAtTime(0.001, ahora + 0.6);
     ganancia.connect(audioCtx.destination);
 
-    const osc1 = audioCtx.createOscillator();
-    osc1.type = 'triangle';
-    osc1.frequency.setValueAtTime(440, ahora);
-    osc1.frequency.exponentialRampToValueAtTime(330, ahora + 0.3);
-    osc1.connect(ganancia);
-    osc1.start(ahora);
-    osc1.stop(ahora + 0.35);
+    const tocar = (tipo, frecuenciaInicio, frecuenciaFin, inicio, fin) => {
+      const osc = audioCtx.createOscillator();
+      osc.type = tipo;
+      osc.frequency.setValueAtTime(frecuenciaInicio, ahora + inicio);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, frecuenciaFin), ahora + fin);
+      osc.connect(ganancia);
+      osc.start(ahora + inicio);
+      osc.stop(ahora + fin);
+    };
 
-    const osc2 = audioCtx.createOscillator();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(660, ahora + 0.12);
-    osc2.frequency.exponentialRampToValueAtTime(520, ahora + 0.45);
-    osc2.connect(ganancia);
-    osc2.start(ahora + 0.1);
-    osc2.stop(ahora + 0.55);
+    if (tono === 'suave') {
+      tocar('sine', 520, 420, 0, 0.42);
+      tocar('sine', 640, 540, 0.12, 0.52);
+      return;
+    }
+
+    if (tono === 'campana') {
+      tocar('triangle', 880, 660, 0, 0.28);
+      tocar('triangle', 1180, 900, 0.2, 0.5);
+      return;
+    }
+
+    if (tono === 'digital') {
+      tocar('square', 880, 840, 0, 0.1);
+      tocar('square', 660, 620, 0.14, 0.24);
+      tocar('square', 980, 930, 0.28, 0.4);
+      return;
+    }
+
+    tocar('triangle', 440, 330, 0, 0.35);
+    tocar('sine', 660, 520, 0.1, 0.55);
   } catch (e) {
     // Silenciar errores de audio en navegadores con restricciones
+  }
+}
+
+export function notificacionesNativasDisponibles() {
+  return typeof window !== 'undefined' && typeof window.Notification !== 'undefined';
+}
+
+export function obtenerPermisoNotificacionesNativas() {
+  if (!notificacionesNativasDisponibles()) return 'unsupported';
+  return Notification.permission || 'default';
+}
+
+export async function solicitarPermisoNotificacionesNativas() {
+  if (!notificacionesNativasDisponibles()) return 'unsupported';
+  try {
+    const permiso = await Notification.requestPermission();
+    return permiso || 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+export async function mostrarNotificacionNativa({
+  titulo = 'CHIPACTLI',
+  mensaje = '',
+  tag = '',
+  datos = null,
+  sonido = ''
+} = {}) {
+  if (obtenerPermisoNotificacionesNativas() !== 'granted') return false;
+
+  const options = {
+    body: String(mensaje || '').trim(),
+    tag: String(tag || '').trim() || undefined,
+    data: datos || undefined,
+    icon: '/images/logo.png',
+    badge: '/images/logo.png'
+  };
+
+  try {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      const registro = await navigator.serviceWorker.getRegistration();
+      if (registro && typeof registro.showNotification === 'function') {
+        await registro.showNotification(String(titulo || 'CHIPACTLI'), options);
+      } else {
+        new Notification(String(titulo || 'CHIPACTLI'), options);
+      }
+    } else {
+      new Notification(String(titulo || 'CHIPACTLI'), options);
+    }
+    reproducirSonidoAlerta(sonido || sonidoSeleccionado);
+    return true;
+  } catch {
+    return false;
   }
 }
 

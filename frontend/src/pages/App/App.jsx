@@ -78,6 +78,17 @@ const MAPEO_PESTANA_PERMISO = {
   'admin-usuarios': 'admin_usuarios'
 };
 
+const TITULOS_PAGINA = {
+  inventario: 'Chipacti - inventario',
+  recetas: 'Chipacti - recetas',
+  produccion: 'Chipacti - produccion',
+  ventas: 'Chipacti - ventas',
+  tienda: 'Chipacti - tienda',
+  trastienda: 'Chipacti - tienda',
+  utensilios: 'Chipacti - utensilios',
+  'admin-usuarios': 'Chipacti - admin usuarios'
+};
+
 function normalizarPermisos(permisos, rol) {
   if (rol === 'ceo' || rol === 'admin') {
     return {
@@ -236,6 +247,10 @@ export default function App() {
     setPage(getPageFromHash());
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  React.useEffect(() => {
+    document.title = TITULOS_PAGINA[page] || 'Chipacti';
+  }, [page]);
 
   React.useEffect(() => {
     asegurarAtributosFormulario(document);
@@ -724,10 +739,11 @@ export default function App() {
       }
 
       if (tipo === 'tienda_orden_actualizada') {
-        const idOrden = evento?.id_orden ? `#${evento.id_orden}` : '';
+        const folio = String(evento?.folio || '').trim();
+        const refOrden = folio || (evento?.id_orden ? `#${evento.id_orden}` : '');
         agregarAlerta(
           `tienda:estado:${evento?.id_orden || Date.now()}`,
-          `Orden ${idOrden} marcada como ${estadoLegible(evento?.estado)}`.trim(),
+          `Orden ${refOrden} marcada como ${estadoLegible(evento?.estado)}`.trim(),
           'exito'
         );
         return;

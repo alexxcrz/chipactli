@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Tienda.css';
 import { API } from '../../utils/config.jsx';
-import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
+import {
+  configurarSonidoNotificacion,
+  mostrarNotificacion,
+  mostrarNotificacionNativa,
+  notificacionesNativasDisponibles,
+  obtenerPermisoNotificacionesNativas,
+  obtenerSonidoNotificacion,
+  OPCIONES_SONIDO_NOTIFICACION,
+  reproducirSonidoAlerta,
+  solicitarPermisoNotificacionesNativas
+} from '../../utils/notificaciones.jsx';
 import { mostrarConfirmacion } from '../../utils/modales.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
 
@@ -11,12 +21,28 @@ const API_TIENDA = import.meta.env.DEV
 
 const CLAVE_TOKEN_CLIENTE = 'tienda_cliente_token';
 const CLAVE_CARRITO_TIENDA = 'tienda_carrito_v2';
+const CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT = 'tienda_notif_pedidos_ultimo_prompt';
 const EXPIRACION_CARRITO_INVITADO_MS = 24 * 60 * 60 * 1000;
 const SECCIONES_INFO_LINKS = [
   { idx: 2, titulo: 'Nosotros' },
   { idx: 4, titulo: 'Términos y condiciones' },
   { idx: 5, titulo: 'Aviso de privacidad' }
 ];
+const METODOS_PAGO_BASE = [
+  { id: 'visa', label: 'Visa', activo: '1', logo_url: '/images/visa-logo.svg' },
+  { id: 'mastercard', label: 'MasterCard', activo: '1', logo_url: '/images/mastercard.svg' },
+  { id: 'amex', label: 'AMEX', activo: '1', logo_url: '/images/amex-logo.svg' },
+  { id: 'mercado_pago', label: 'Mercado Pago', activo: '1', logo_url: '/images/mercado-pago-badge.svg' },
+  { id: 'paypal', label: 'PayPal', activo: '0', logo_url: '' },
+  { id: 'oxxo', label: 'OXXO', activo: '0', logo_url: '' },
+  { id: 'spei', label: 'SPEI / Transferencia', activo: '1', logo_url: '' },
+  { id: 'debito_credito', label: 'Tarjeta Débito/Crédito', activo: '1', logo_url: '' },
+  { id: 'apple_pay', label: 'Apple Pay', activo: '0', logo_url: '' },
+  { id: 'google_pay', label: 'Google Pay', activo: '0', logo_url: '' },
+  { id: 'kueski_pay', label: 'Kueski Pay', activo: '0', logo_url: '' },
+  { id: 'a_plazos', label: 'Pago a plazos', activo: '0', logo_url: '' }
+];
+const METODOS_PAGO_BASE_SERIALIZADO = JSON.stringify(METODOS_PAGO_BASE);
 const CONFIG_DEFAULT = {
   promo_texto: '💖 ¡Últimas horas! Llévate productos favoritos con promoción especial.',
   footer_marca_titulo: 'CHIPACTLI',
@@ -40,12 +66,18 @@ const CONFIG_DEFAULT = {
   social_linkedin_url: '',
   social_linkedin_activo: '0',
   footer_pagos_texto: 'VISA · MasterCard · PayPal · AMEX · OXXO',
+  footer_pagos_logo_url: '/images/visa-logo.svg',
+  footer_pagos_logos: '/images/visa-logo.svg\n/images/mastercard.svg\n/images/amex-logo.svg\n/images/mercado-pago-badge.svg',
+  footer_pagos_metodos: METODOS_PAGO_BASE_SERIALIZADO,
+  footer_pagos_remover_fondo_png: '1',
   menu_todos_activo: '1',
   menu_lanzamientos_activo: '1',
   menu_favoritos_activo: '1',
   menu_ofertas_activo: '1',
   menu_accesorios_activo: '1',
   menu_categoria_activo: '1',
+  menu_tabs_personalizadas: '[]',
+  menu_tabs_base_eliminadas: '[]',
   info_link_1_label: '',
   info_link_1_url: '#',
   info_link_1_texto: '',
@@ -65,15 +97,303 @@ const CONFIG_DEFAULT = {
   info_link_5_label: 'Aviso de privacidad',
   info_link_5_url: '#',
   info_link_5_texto: 'Conoce cómo recopilamos, usamos y protegemos tus datos personales en CHIPACTLI.',
-  info_link_5_activo: '1'
+  info_link_5_activo: '1',
+  servicio_domicilio_habilitado: '0',
+  atencion_asuntos: 'Consulta de pedido\nCambio de dirección\nIncidencia con producto\nSugerencia\nOtro'
 };
 
 const PUNTO_ENTREGA_DEFAULT = { nombre: '', direccion: '', horario: '', activo: true };
+const DIRECCION_CLIENTE_DEFAULT = { alias: 'Casa', direccion: '', referencias: '', es_preferida: true };
+const ATENCION_ASUNTOS = [
+  'Consulta de pedido',
+  'Cambio de dirección',
+  'Incidencia con producto',
+  'Sugerencia',
+  'Otro'
+];
+
+const ESTATUS_PEDIDO_OPCIONES = [
+  { value: 'pendiente', label: 'Pendiente' },
+  { value: 'confirmado', label: 'Confirmado' },
+  { value: 'procesando', label: 'Procesando' },
+  { value: 'listo_para_envio', label: 'Listo para envío' },
+  { value: 'enviado_por_paqueteria', label: 'Enviado por paquetería' },
+  { value: 'en_transito', label: 'En tránsito' },
+  { value: 'en_reparto_local', label: 'En reparto local' },
+  { value: 'entregado', label: 'Entregado' },
+  { value: 'no_entregado', label: 'No entregado' },
+  { value: 'devuelto', label: 'Devuelto' },
+  { value: 'cancelado', label: 'Cancelado' }
+];
+
+const PAQUETERIAS_MX = [
+  { value: 'dhl', label: 'DHL' },
+  { value: 'fedex', label: 'FedEx' },
+  { value: 'estafeta', label: 'Estafeta' },
+  { value: 'redpack', label: 'Redpack' },
+  { value: 'paquetexpress', label: 'Paquetexpress' },
+  { value: 'castores', label: 'Transportes Castores' },
+  { value: 'tresguerras', label: 'Tresguerras' },
+  { value: 'sendex', label: 'Sendex' },
+  { value: 'jtexpress', label: 'JT Express' },
+  { value: '99minutos', label: '99 Minutos' },
+  { value: 'ampm', label: 'AMPM' },
+  { value: 'correos_demexico', label: 'Correos de México' },
+  { value: 'otra', label: 'Otra paquetería' }
+];
+
+const PAQUETERIA_TRACKING_URLS = {
+  dhl: 'https://www.dhl.com/mx-es/home/rastreo.html?tracking-id={guia}',
+  fedex: 'https://www.fedex.com/fedextrack/?trknbr={guia}',
+  estafeta: 'https://rastreo.estafeta.com/Rastreo/?tracking={guia}',
+  redpack: 'https://www.redpack.com.mx/es/rastreo/?guias={guia}',
+  paquetexpress: 'https://www.paquetexpress.com.mx/rastreo/?guia={guia}',
+  castores: 'https://www.castores.com.mx/rastreo/?guia={guia}',
+  tresguerras: 'https://www.tresguerras.com.mx/seguimiento?guia={guia}',
+  sendex: 'https://sendex.mx/rastreo/?guia={guia}',
+  jtexpress: 'https://www.jtexpress.mx/track?billcode={guia}',
+  '99minutos': 'https://track.99minutos.com/?guide={guia}',
+  ampm: 'https://ampm.com.mx/',
+  correos_demexico: 'https://www.correosdemexico.gob.mx/SSLServicios/SeguimientoEnvio/Seguimiento.aspx'
+};
+
+function etiquetaEstadoPedido(estado) {
+  const clave = String(estado || '').trim().toLowerCase();
+  const match = ESTATUS_PEDIDO_OPCIONES.find((item) => item.value === clave);
+  return match ? match.label : (clave || '-');
+}
+
+function etiquetaPaqueteria(paqueteria) {
+  const clave = String(paqueteria || '').trim().toLowerCase();
+  const match = PAQUETERIAS_MX.find((item) => item.value === clave);
+  return match ? match.label : (clave || 'Sin paquetería');
+}
+
+function construirLinkRastreo(paqueteria, numeroGuia) {
+  const clave = String(paqueteria || '').trim().toLowerCase();
+  const guia = String(numeroGuia || '').trim();
+  if (!clave || !guia) return '';
+  const plantilla = PAQUETERIA_TRACKING_URLS[clave] || '';
+  if (!plantilla) return '';
+  if (plantilla.includes('{guia}')) {
+    return plantilla.replace('{guia}', encodeURIComponent(guia));
+  }
+  return plantilla;
+}
+
+function mensajeEstadoPedidoCliente(estado) {
+  const clave = String(estado || '').trim().toLowerCase();
+  if (clave === 'confirmado') return 'Tu pedido fue confirmado por nuestro equipo.';
+  if (clave === 'enviado_por_paqueteria') return 'Tu pedido ya fue enviado por paquetería.';
+  if (clave === 'en_transito') return 'Tu pedido va en camino.';
+  if (clave === 'entregado') return 'Tu pedido fue entregado.';
+  if (clave === 'cancelado') return 'Tu pedido fue cancelado.';
+  return `Tu pedido cambió a ${etiquetaEstadoPedido(clave)}.`;
+}
+
+function tituloEstadoPedidoCliente(estado) {
+  const clave = String(estado || '').trim().toLowerCase();
+  if (clave === 'confirmado') return 'Pedido confirmado';
+  if (clave === 'enviado_por_paqueteria') return 'Pedido enviado';
+  if (clave === 'en_transito') return 'Pedido en tránsito';
+  if (clave === 'entregado') return 'Pedido entregado';
+  if (clave === 'cancelado') return 'Pedido cancelado';
+  return 'Pedido actualizado';
+}
+
+function pedidoEstaCerrado(estado) {
+  const clave = String(estado || '').trim().toLowerCase();
+  return clave === 'entregado' || clave === 'cancelado' || clave === 'devuelto' || clave === 'no_entregado';
+}
 
 function configActivo(valor, predeterminado = true) {
   if (valor === undefined || valor === null || valor === '') return predeterminado;
   const txt = String(valor).trim().toLowerCase();
   return !(txt === '0' || txt === 'false' || txt === 'no' || txt === 'off');
+}
+
+function obtenerAsuntosAtencionConfig(valor) {
+  const raw = String(valor || '').trim();
+  const lista = raw
+    .split(/\r?\n|,|;/)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  const unicos = Array.from(new Set(lista));
+  return unicos.length ? unicos : [...ATENCION_ASUNTOS];
+}
+
+function slugPestanaMenu(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim();
+}
+
+function obtenerTabsNavegacionConfig(valor) {
+  let lista = [];
+  try {
+    const parseado = JSON.parse(String(valor || '[]'));
+    lista = Array.isArray(parseado) ? parseado : [];
+  } catch {
+    lista = [];
+  }
+
+  return lista
+    .map((item, idx) => {
+      const label = String(item?.label || '').trim();
+      const categoria = String(item?.categoria || '').trim();
+      const activo = String(item?.activo ?? '1').trim() !== '0';
+      if (!label || !categoria) return null;
+      const idBase = String(item?.id || '').trim();
+      const id = idBase || slugPestanaMenu(`${label}-${categoria}-${idx + 1}`) || `tab-${idx + 1}`;
+      return { id, label, categoria, activo };
+    })
+    .filter(Boolean);
+}
+
+function obtenerTabsBaseEliminadasConfig(valor) {
+  try {
+    const parseado = JSON.parse(String(valor || '[]'));
+    if (!Array.isArray(parseado)) return [];
+    return Array.from(new Set(parseado.map((item) => String(item || '').trim()).filter(Boolean)));
+  } catch {
+    return [];
+  }
+}
+
+function obtenerLogosPagoConfig(valor) {
+  return String(valor || '')
+    .split(/\r?\n|,|;/)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function normalizarMetodoPagoItem(item, idx = 0) {
+  const idBase = String(item?.id || item?.label || `metodo-${idx + 1}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_');
+  const id = idBase || `metodo-${idx + 1}`;
+  return {
+    id,
+    label: String(item?.label || '').trim() || `Método ${idx + 1}`,
+    activo: String(item?.activo ?? '1') === '0' ? '0' : '1',
+    logo_url: String(item?.logo_url || '').trim()
+  };
+}
+
+function serializarMetodosPagoConfig(lista = []) {
+  return JSON.stringify((Array.isArray(lista) ? lista : []).map((item, idx) => normalizarMetodoPagoItem(item, idx)));
+}
+
+function obtenerMetodosPagoConfig(valor, config = {}) {
+  try {
+    const parseado = JSON.parse(String(valor || '[]'));
+    if (Array.isArray(parseado) && parseado.length) {
+      return parseado.map((item, idx) => normalizarMetodoPagoItem(item, idx));
+    }
+  } catch {
+    // Fallback a configuración legacy.
+  }
+
+  const base = METODOS_PAGO_BASE.map((item, idx) => normalizarMetodoPagoItem(item, idx));
+  const logosLegacy = obtenerLogosPagoConfig(config?.footer_pagos_logos);
+  if (!logosLegacy.length) return base;
+
+  const mapaPorId = new Map(base.map((item) => [item.id, { ...item }]));
+  const noAsignados = [];
+  logosLegacy.forEach((url) => {
+    const txt = String(url || '').toLowerCase();
+    if (txt.includes('visa')) {
+      mapaPorId.get('visa').logo_url = url;
+      return;
+    }
+    if (txt.includes('master')) {
+      mapaPorId.get('mastercard').logo_url = url;
+      return;
+    }
+    if (txt.includes('amex') || txt.includes('american')) {
+      mapaPorId.get('amex').logo_url = url;
+      return;
+    }
+    if (txt.includes('mercado')) {
+      mapaPorId.get('mercado_pago').logo_url = url;
+      return;
+    }
+    if (txt.includes('paypal')) {
+      mapaPorId.get('paypal').logo_url = url;
+      return;
+    }
+    if (txt.includes('oxxo')) {
+      mapaPorId.get('oxxo').logo_url = url;
+      return;
+    }
+    noAsignados.push(url);
+  });
+
+  const lista = Array.from(mapaPorId.values());
+  let cursor = 0;
+  for (let i = 0; i < lista.length && cursor < noAsignados.length; i += 1) {
+    if (lista[i].logo_url) continue;
+    lista[i].logo_url = noAsignados[cursor];
+    cursor += 1;
+  }
+  return lista;
+}
+
+function esLogoPng(ruta = '') {
+  const txt = String(ruta || '').trim().toLowerCase();
+  if (!txt) return false;
+  const limpio = txt.split('?')[0].split('#')[0];
+  return limpio.endsWith('.png');
+}
+
+async function removerFondoBlancoPng(url = '', umbral = 245) {
+  const src = String(url || '').trim();
+  if (!src || !esLogoPng(src)) return '';
+
+  const imagen = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('No se pudo cargar imagen para limpiar fondo.'));
+    img.src = src;
+  });
+
+  const width = Number(imagen.naturalWidth || imagen.width) || 0;
+  const height = Number(imagen.naturalHeight || imagen.height) || 0;
+  if (!width || !height) return '';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return '';
+
+  ctx.drawImage(imagen, 0, 0, width, height);
+  const frame = ctx.getImageData(0, 0, width, height);
+  const px = frame.data;
+
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i];
+    const g = px[i + 1];
+    const b = px[i + 2];
+    const a = px[i + 3];
+    if (a === 0) continue;
+
+    const esCasiBlanco = r >= umbral && g >= umbral && b >= umbral;
+    if (esCasiBlanco) {
+      px[i + 3] = 0;
+    }
+  }
+
+  ctx.putImageData(frame, 0, 0);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) return '';
+  return URL.createObjectURL(blob);
 }
 
 function apiUrl(path) {
@@ -201,6 +521,21 @@ function guardarCarritoGuardado(items, creadoEn) {
   }));
 }
 
+function extraerIdClienteToken(token) {
+  try {
+    const partes = String(token || '').split('.');
+    if (partes.length < 2) return 0;
+    const base64 = partes[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    const payload = JSON.parse(atob(base64 + padding));
+    return Number(payload?.id) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Tienda({
   modo = 'tienda',
   mostrarLogoAccesoSistema = false,
@@ -233,19 +568,39 @@ export default function Tienda({
   const [clienteToken, setClienteToken] = useState(() => localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '');
   const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
   const [cliente, setCliente] = useState(null);
-  const [perfil, setPerfil] = useState({ nombre: '', telefono: '', forma_pago_preferida: '' });
+  const [perfil, setPerfil] = useState({
+    nombre: '',
+    apellido_paterno: '',
+    apellido_materno: '',
+    email: '',
+    telefono: '',
+    fecha_nacimiento: '',
+    direccion_default: '',
+    forma_pago_preferida: ''
+  });
+  const [perfilModalTab, setPerfilModalTab] = useState('datos');
+  const [perfilPedidosTab, setPerfilPedidosTab] = useState('activos');
+  const [direccionesPerfil, setDireccionesPerfil] = useState([]);
+  const [direccionPerfilNueva, setDireccionPerfilNueva] = useState(DIRECCION_CLIENTE_DEFAULT);
+  const [mostrarModalNuevaDireccion, setMostrarModalNuevaDireccion] = useState(false);
+  const [direccionPerfilEditandoId, setDireccionPerfilEditandoId] = useState(null);
+  const [guardandoDireccionPerfil, setGuardandoDireccionPerfil] = useState(false);
+  const [atencionForm, setAtencionForm] = useState({ asunto: '', mensaje: '' });
+  const [enviandoAtencionPerfil, setEnviandoAtencionPerfil] = useState(false);
   const [checkout, setCheckout] = useState({ metodo_pago: 'efectivo', id_punto_entrega: '', notas: '' });
   const [ordenes, setOrdenes] = useState([]);
   const [puntosEntrega, setPuntosEntrega] = useState([]);
   const [adminPuntos, setAdminPuntos] = useState([]);
   const [adminClientes, setAdminClientes] = useState([]);
   const [adminOrdenes, setAdminOrdenes] = useState([]);
+  const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
   const [adminVista, setAdminVista] = useState('pedidos');
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
   const [busquedaAdmin, setBusquedaAdmin] = useState('');
   const [infoSeleccionada, setInfoSeleccionada] = useState(null);
   const [configTienda, setConfigTienda] = useState(CONFIG_DEFAULT);
   const [configTiendaAdmin, setConfigTiendaAdmin] = useState(CONFIG_DEFAULT);
+  const [activandoServicioDomicilio, setActivandoServicioDomicilio] = useState(false);
   const [nuevoPunto, setNuevoPunto] = useState(PUNTO_ENTREGA_DEFAULT);
   const [mostrarModalNuevoPunto, setMostrarModalNuevoPunto] = useState(false);
   const [modalPunto, setModalPunto] = useState({ visible: false, modo: 'ver', data: null });
@@ -265,17 +620,385 @@ export default function Tienda({
   const [filtroDescuentoProducto, setFiltroDescuentoProducto] = useState('');
   const [filtroExclusionGlobal, setFiltroExclusionGlobal] = useState('');
   const [descuentoDrafts, setDescuentoDrafts] = useState({});
+  const [tabsNavegacionAdmin, setTabsNavegacionAdmin] = useState([]);
+  const [tabsBaseEliminadasAdmin, setTabsBaseEliminadasAdmin] = useState([]);
   const [resenasDetalle, setResenasDetalle] = useState([]);
   const [cargandoResenas, setCargandoResenas] = useState(false);
   const [enviandoResena, setEnviandoResena] = useState(false);
   const [resenaNueva, setResenaNueva] = useState({ calificacion: 5, comentario: '' });
   const [mostrarWhatsForm, setMostrarWhatsForm] = useState(false);
   const [whatsForm, setWhatsForm] = useState({ nombre: '', mensaje: '' });
+  const [permisoNotificacionesPedidos, setPermisoNotificacionesPedidos] = useState(() => obtenerPermisoNotificacionesNativas());
+  const [mostrarPromptNotificacionesPedidos, setMostrarPromptNotificacionesPedidos] = useState(false);
+  const [sonidoNotificacionesPedidos, setSonidoNotificacionesPedidos] = useState(() => obtenerSonidoNotificacion());
+  const [sonidoNotificacionesPedidosDraft, setSonidoNotificacionesPedidosDraft] = useState(() => obtenerSonidoNotificacion());
+  const [notificacionesClientePedidos, setNotificacionesClientePedidos] = useState([]);
+  const [notificacionesTabPerfil, setNotificacionesTabPerfil] = useState('sin_leer');
   const [editorProducto, setEditorProducto] = useState(null);
+  const [subiendoLogoPagoId, setSubiendoLogoPagoId] = useState('');
   const bloqueoAperturaCarritoRef = useRef(0);
+  const inputLogoPagoArchivoRef = useRef(null);
+  const metodoPagoUploadTargetRef = useRef('');
   const contenedorScrollRef = useRef(null);
   const detalleTouchStartRef = useRef({ x: 0, y: 0 });
   const detalleTouchTrackingRef = useRef(false);
+  const eventosPedidoNotificadosRef = useRef(new Set());
+  const estadoOrdenesClienteRef = useRef(new Map());
+  const estadoOrdenesInicializadoRef = useRef(false);
+
+  const totalNoLeidasCliente = useMemo(() => (
+    (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
+  ), [notificacionesClientePedidos]);
+
+  const notificacionesClienteSinLeer = useMemo(
+    () => (Array.isArray(notificacionesClientePedidos)
+      ? notificacionesClientePedidos.filter((item) => !item?.leida)
+      : []),
+    [notificacionesClientePedidos]
+  );
+
+  const notificacionesClienteLeidas = useMemo(
+    () => (Array.isArray(notificacionesClientePedidos)
+      ? notificacionesClientePedidos.filter((item) => Boolean(item?.leida))
+      : []),
+    [notificacionesClientePedidos]
+  );
+
+  const ordenesPerfilActivas = useMemo(
+    () => (Array.isArray(ordenes) ? ordenes.filter((orden) => !pedidoEstaCerrado(orden?.estado)) : []),
+    [ordenes]
+  );
+
+  const ordenesPerfilCerradas = useMemo(
+    () => (Array.isArray(ordenes) ? ordenes.filter((orden) => pedidoEstaCerrado(orden?.estado)) : []),
+    [ordenes]
+  );
+
+  const servicioDomicilioActivoAdmin = configActivo(configTiendaAdmin?.servicio_domicilio_habilitado, false);
+  const servicioDomicilioActivoCliente = configActivo(configTienda?.servicio_domicilio_habilitado, false);
+  const nombreClienteCompleto = [perfil.nombre, perfil.apellido_paterno, perfil.apellido_materno]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const nombreClienteHeaderRaw = String(nombreClienteCompleto || cliente?.nombre || '').trim() || 'Cliente';
+  const nombreClienteHeader = String(nombreClienteHeaderRaw.split(/\s+/)[0] || 'Cliente').trim();
+  const asuntosAtencionDisponibles = useMemo(
+    () => obtenerAsuntosAtencionConfig(configTienda?.atencion_asuntos),
+    [configTienda?.atencion_asuntos]
+  );
+
+  const tabsNavegacionCliente = useMemo(
+    () => obtenerTabsNavegacionConfig(configTienda?.menu_tabs_personalizadas),
+    [configTienda?.menu_tabs_personalizadas]
+  );
+
+  const tabsBaseEliminadasClienteSet = useMemo(
+    () => new Set(obtenerTabsBaseEliminadasConfig(configTienda?.menu_tabs_base_eliminadas)),
+    [configTienda?.menu_tabs_base_eliminadas]
+  );
+
+  const metodosPagoFooter = useMemo(
+    () => obtenerMetodosPagoConfig(configTienda?.footer_pagos_metodos, configTienda),
+    [configTienda?.footer_pagos_metodos, configTienda?.footer_pagos_logos, configTienda?.footer_pagos_logo_url]
+  );
+
+  const metodosPagoFooterVisibles = useMemo(
+    () => metodosPagoFooter.filter((item) => String(item?.activo ?? '1') !== '0'),
+    [metodosPagoFooter]
+  );
+
+  const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
+  const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
+
+  const metodosPagoAdmin = useMemo(
+    () => obtenerMetodosPagoConfig(configTiendaAdmin?.footer_pagos_metodos, configTiendaAdmin),
+    [configTiendaAdmin?.footer_pagos_metodos, configTiendaAdmin?.footer_pagos_logos, configTiendaAdmin?.footer_pagos_logo_url]
+  );
+
+  const mapaSeccionesPersonalizadas = useMemo(() => {
+    const mapa = new Map();
+    tabsNavegacionCliente.forEach((tab) => {
+      if (!tab?.activo) return;
+      mapa.set(`custom:${tab.id}`, String(tab?.categoria || '').trim().toLowerCase());
+    });
+    return mapa;
+  }, [tabsNavegacionCliente]);
+
+  useEffect(() => {
+    let cancelado = false;
+    const urlsTemporales = [];
+
+    const procesar = async () => {
+      if (!metodosPagoFooterVisibles.length) {
+        setMetodosPagoRenderFooter([]);
+        return;
+      }
+
+      const resultado = await Promise.all(metodosPagoFooterVisibles.map(async (metodo) => {
+        const url = String(metodo?.logo_url || '').trim();
+        if (!url || !removerFondoPngFooter) {
+          return { ...metodo, logo_render_url: url };
+        }
+        try {
+          const limpio = await removerFondoBlancoPng(url);
+          if (limpio) {
+            urlsTemporales.push(limpio);
+            return { ...metodo, logo_render_url: limpio };
+          }
+          return { ...metodo, logo_render_url: url };
+        } catch {
+          return { ...metodo, logo_render_url: url };
+        }
+      }));
+
+      if (cancelado) {
+        urlsTemporales.forEach((tmp) => URL.revokeObjectURL(tmp));
+        return;
+      }
+      setMetodosPagoRenderFooter(resultado);
+    };
+
+    procesar();
+
+    return () => {
+      cancelado = true;
+      urlsTemporales.forEach((tmp) => URL.revokeObjectURL(tmp));
+    };
+  }, [metodosPagoFooterVisibles, removerFondoPngFooter]);
+
+  function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
+    const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
+    setTabsNavegacionAdmin(lista);
+    setTabsBaseEliminadasAdmin(obtenerTabsBaseEliminadasConfig(config?.menu_tabs_base_eliminadas));
+  }
+
+  function actualizarTabsNavegacionAdmin(updater) {
+    setTabsNavegacionAdmin((prev) => {
+      const base = Array.isArray(prev) ? prev : [];
+      const siguiente = typeof updater === 'function' ? updater(base) : (Array.isArray(updater) ? updater : base);
+      const serializado = JSON.stringify(siguiente.map((item) => ({
+        id: String(item?.id || '').trim(),
+        label: String(item?.label || '').trim(),
+        categoria: String(item?.categoria || '').trim(),
+        activo: item?.activo ? '1' : '0'
+      })));
+      setConfigTiendaAdmin((p) => ({ ...p, menu_tabs_personalizadas: serializado }));
+      return siguiente;
+    });
+  }
+
+  function actualizarTabsBaseEliminadasAdmin(updater) {
+    setTabsBaseEliminadasAdmin((prev) => {
+      const base = Array.isArray(prev) ? prev : [];
+      const siguiente = typeof updater === 'function' ? updater(base) : (Array.isArray(updater) ? updater : base);
+      const unicos = Array.from(new Set(siguiente.map((item) => String(item || '').trim()).filter(Boolean)));
+      setConfigTiendaAdmin((p) => ({ ...p, menu_tabs_base_eliminadas: JSON.stringify(unicos) }));
+      return unicos;
+    });
+  }
+
+  function eliminarPestanaBase(baseId, configKey, label) {
+    const id = String(baseId || '').trim();
+    const clave = String(configKey || '').trim();
+    if (!id) return;
+    actualizarTabsBaseEliminadasAdmin((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    if (clave) {
+      setConfigTiendaAdmin((prev) => ({ ...prev, [clave]: '0' }));
+    }
+    mostrarNotificacion(`Pestaña "${String(label || 'navegación')}" eliminada. Guarda configuración para aplicar.`, 'exito');
+  }
+
+  function actualizarMetodosPagoAdmin(updater) {
+    const base = Array.isArray(metodosPagoAdmin) ? metodosPagoAdmin : [];
+    const siguiente = typeof updater === 'function' ? updater(base) : base;
+    setConfigTiendaAdmin((prev) => ({
+      ...prev,
+      footer_pagos_metodos: serializarMetodosPagoConfig(siguiente)
+    }));
+  }
+
+  function editarMetodoPagoAdmin(idMetodo, cambios = {}) {
+    const id = String(idMetodo || '').trim();
+    if (!id) return;
+    actualizarMetodosPagoAdmin((prev) => prev.map((item) => (
+      item.id === id ? { ...item, ...cambios } : item
+    )));
+  }
+
+  function agregarMetodoPagoAdmin() {
+    const siguienteId = `metodo_${Date.now().toString(36)}`;
+    actualizarMetodosPagoAdmin((prev) => ([
+      ...prev,
+      { id: siguienteId, label: 'Nuevo método', activo: '1', logo_url: '' }
+    ]));
+  }
+
+  function abrirSelectorLogoMetodoPago(idMetodo) {
+    metodoPagoUploadTargetRef.current = String(idMetodo || '').trim();
+    inputLogoPagoArchivoRef.current?.click();
+  }
+
+  async function subirLogoPagoDesdeComputadora(event) {
+    const archivo = event?.target?.files?.[0] || null;
+    const idMetodo = String(metodoPagoUploadTargetRef.current || '').trim();
+    if (!archivo) return;
+    if (!idMetodo) {
+      mostrarNotificacion('Selecciona primero un método de pago para subir su imagen.', 'error');
+      if (event?.target) event.target.value = '';
+      return;
+    }
+
+    try {
+      setSubiendoLogoPagoId(idMetodo);
+      const formData = new FormData();
+      formData.append('imagen', archivo);
+
+      const data = await fetchAdmin('/api/uploads/tienda-imagen', {
+        method: 'POST',
+        body: formData
+      });
+
+      const url = String(data?.url || '').trim();
+      if (!url) throw new Error('No se recibió la URL del logo subido.');
+
+      editarMetodoPagoAdmin(idMetodo, { logo_url: url });
+      mostrarNotificacion('Logo agregado correctamente.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo subir el logo.', 'error');
+    } finally {
+      setSubiendoLogoPagoId('');
+      metodoPagoUploadTargetRef.current = '';
+      if (event?.target) event.target.value = '';
+    }
+  }
+
+  function agregarNotificacionClientePedido({ titulo, mensaje, tipo = 'pedido' }) {
+    const nueva = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      titulo: String(titulo || 'Pedido'),
+      mensaje: String(mensaje || '').trim(),
+      tipo: String(tipo || 'pedido'),
+      leida: false,
+      fecha: new Date().toISOString()
+    };
+    setNotificacionesClientePedidos((prev) => [nueva, ...(Array.isArray(prev) ? prev : [])].slice(0, 40));
+  }
+
+  function marcarNotificacionesClienteComoLeidas() {
+    setNotificacionesClientePedidos((prev) => (Array.isArray(prev)
+      ? prev.map((item) => ({ ...item, leida: true }))
+      : []));
+    if (!clienteToken) return;
+    fetchJson('/tienda/auth/notificaciones/marcar-leidas', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${clienteToken}` }
+    }).catch(() => {});
+  }
+
+  function limpiarNotificacionesCliente() {
+    setNotificacionesClientePedidos([]);
+    if (!clienteToken) return;
+    fetchJson('/tienda/auth/notificaciones', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${clienteToken}` }
+    }).catch(() => {});
+  }
+
+  async function marcarNotificacionClienteComoLeida(notificacionId) {
+    const id = Number(notificacionId) || 0;
+    setNotificacionesClientePedidos((prev) => (Array.isArray(prev)
+      ? prev.map((item) => (Number(item?.id) === id ? { ...item, leida: true } : item))
+      : []));
+    setNotificacionesTabPerfil('leidas');
+
+    if (!clienteToken || !id) return;
+    try {
+      await fetchJson(`/tienda/auth/notificaciones/${id}/marcar-leida`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${clienteToken}` }
+      });
+    } catch {
+      // Ignorar errores temporales de sincronización.
+    }
+  }
+
+  function revisarCambiosEstadoOrdenes(listaOrdenes = []) {
+    const ordenesLista = Array.isArray(listaOrdenes) ? listaOrdenes : [];
+    const mapaPrevio = estadoOrdenesClienteRef.current;
+    const mapaNuevo = new Map();
+    const firmaOrden = (orden) => {
+      const estado = String(orden?.estado || '').trim().toLowerCase();
+      const marcaTiempo = String(orden?.actualizado_en || orden?.creado_en || '').trim();
+      return `${estado}|${marcaTiempo}`;
+    };
+
+    if (!estadoOrdenesInicializadoRef.current) {
+      ordenesLista.forEach((orden) => {
+        const idOrden = Number(orden?.id) || 0;
+        if (!idOrden) return;
+        mapaNuevo.set(idOrden, firmaOrden(orden));
+      });
+      estadoOrdenesClienteRef.current = mapaNuevo;
+      estadoOrdenesInicializadoRef.current = true;
+      return;
+    }
+
+    ordenesLista.forEach((orden) => {
+      const idOrden = Number(orden?.id) || 0;
+      if (!idOrden) return;
+
+      const estadoActual = String(orden?.estado || '').trim().toLowerCase();
+      const firmaActual = firmaOrden(orden);
+      mapaNuevo.set(idOrden, firmaActual);
+
+      const firmaPrevia = String(mapaPrevio.get(idOrden) || '').trim();
+      if (!firmaPrevia) {
+        const keyNuevo = `tienda_orden_nueva:${idOrden}:nueva`;
+        if (eventosPedidoNotificadosRef.current.has(keyNuevo)) return;
+        eventosPedidoNotificadosRef.current.add(keyNuevo);
+
+        const folioNuevo = String(orden?.folio || '').trim();
+        const mensajeNuevo = folioNuevo
+          ? `Tu pedido ${folioNuevo} fue realizado correctamente.`
+          : 'Tu pedido fue realizado correctamente.';
+        agregarNotificacionClientePedido({ titulo: 'Pedido realizado', mensaje: mensajeNuevo, tipo: 'pedido_nuevo' });
+        if (permisoNotificacionesPedidos === 'granted') {
+          mostrarNotificacionNativa({
+            titulo: 'Pedido recibido',
+            mensaje: mensajeNuevo,
+            tag: `pedido:nuevo:fallback:${idOrden}`,
+            sonido: sonidoNotificacionesPedidos
+          });
+        }
+        return;
+      }
+
+      if (firmaPrevia === firmaActual) return;
+      const keyCambio = `tienda_orden_actualizada:${idOrden}:${estadoActual || 'actualizado'}:${firmaActual}`;
+      if (eventosPedidoNotificadosRef.current.has(keyCambio)) return;
+      eventosPedidoNotificadosRef.current.add(keyCambio);
+
+      const folio = String(orden?.folio || '').trim();
+      const mensajeEstado = mensajeEstadoPedidoCliente(estadoActual);
+      const mensajeFinal = folio ? `${mensajeEstado} (${folio})` : mensajeEstado;
+      agregarNotificacionClientePedido({
+        titulo: tituloEstadoPedidoCliente(estadoActual),
+        mensaje: mensajeFinal,
+        tipo: 'pedido_estado'
+      });
+      mostrarNotificacion(mensajeFinal, 'exito');
+      if (permisoNotificacionesPedidos === 'granted') {
+        mostrarNotificacionNativa({
+          titulo: tituloEstadoPedidoCliente(estadoActual),
+          mensaje: mensajeFinal,
+          tag: `pedido:estado:fallback:${idOrden}:${estadoActual || 'actualizado'}`,
+          sonido: sonidoNotificacionesPedidos
+        });
+      }
+    });
+
+    estadoOrdenesClienteRef.current = mapaNuevo;
+  }
 
   const opcionesMetodoPago = [
     { value: 'efectivo', label: 'Efectivo contra entrega' },
@@ -299,11 +1022,81 @@ export default function Tienda({
     if (!clienteToken) {
       setCliente(null);
       setOrdenes([]);
+      setDireccionesPerfil([]);
+      setMostrarPromptNotificacionesPedidos(false);
+      setNotificacionesClientePedidos([]);
+      estadoOrdenesClienteRef.current = new Map();
+      estadoOrdenesInicializadoRef.current = false;
       return;
     }
+    estadoOrdenesClienteRef.current = new Map();
+    estadoOrdenesInicializadoRef.current = false;
     cargarPerfil(clienteToken);
     cargarMisOrdenes(clienteToken);
+    cargarNotificacionesCliente(clienteToken);
+    cargarDireccionesPerfil(clienteToken);
   }, [clienteToken]);
+
+  useEffect(() => {
+    if (!clienteToken) return undefined;
+
+    const intervalo = setInterval(() => {
+      cargarMisOrdenes(clienteToken);
+      cargarNotificacionesCliente(clienteToken);
+    }, 5000);
+
+    return () => clearInterval(intervalo);
+  }, [clienteToken]);
+
+  useEffect(() => {
+    if (!clienteToken) return undefined;
+
+    const alVolverVisible = () => {
+      if (document.visibilityState === 'visible') {
+        cargarMisOrdenes(clienteToken);
+      }
+    };
+
+    document.addEventListener('visibilitychange', alVolverVisible);
+    return () => document.removeEventListener('visibilitychange', alVolverVisible);
+  }, [clienteToken]);
+
+  useEffect(() => {
+    setPermisoNotificacionesPedidos(obtenerPermisoNotificacionesNativas());
+  }, []);
+
+  useEffect(() => {
+    if (!clienteToken || !notificacionesNativasDisponibles()) {
+      setMostrarPromptNotificacionesPedidos(false);
+      return;
+    }
+
+    if (permisoNotificacionesPedidos !== 'default') {
+      setMostrarPromptNotificacionesPedidos(false);
+      return;
+    }
+
+    let ultimoPrompt = 0;
+    try {
+      ultimoPrompt = Number(localStorage.getItem(CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT) || 0);
+    } catch {
+      ultimoPrompt = 0;
+    }
+
+    const haceMasDeUnDia = (Date.now() - ultimoPrompt) > (24 * 60 * 60 * 1000);
+    setMostrarPromptNotificacionesPedidos(haceMasDeUnDia);
+  }, [clienteToken, permisoNotificacionesPedidos]);
+
+  useEffect(() => {
+    setSonidoNotificacionesPedidosDraft(sonidoNotificacionesPedidos);
+  }, [sonidoNotificacionesPedidos]);
+
+  useEffect(() => {
+    if (!mostrarModalPerfilCliente) return;
+    if (perfilModalTab !== 'direcciones') return;
+    if (!clienteToken) return;
+    cargarDireccionesPerfil(clienteToken);
+  }, [mostrarModalPerfilCliente, perfilModalTab, clienteToken]);
 
   useEffect(() => {
     const esCliente = Boolean(clienteToken);
@@ -332,9 +1125,12 @@ export default function Tienda({
       if (seccionActiva === 'ofertas') return Boolean(item?.es_oferta);
       if (seccionActiva === 'accesorios') return Boolean(item?.es_accesorio);
 
+      const categoriaCustom = mapaSeccionesPersonalizadas.get(seccionActiva);
+      if (categoriaCustom) return categoria === categoriaCustom;
+
       return true;
     });
-  }, [productos, filtro, categoriaActiva, seccionActiva]);
+  }, [productos, filtro, categoriaActiva, seccionActiva, mapaSeccionesPersonalizadas]);
 
   const categoriasDisponibles = useMemo(() => {
     const setCategorias = new Set();
@@ -347,16 +1143,24 @@ export default function Tienda({
 
   const controlesSecciones = useMemo(() => {
     const opciones = [
-      { key: 'todos', label: 'Todos', configKey: 'menu_todos_activo', predeterminado: true },
-      { key: 'lanzamientos', label: 'Lanzamientos', configKey: 'menu_lanzamientos_activo', predeterminado: true },
-      { key: 'favoritos', label: 'Favoritos', configKey: 'menu_favoritos_activo', predeterminado: true },
-      { key: 'ofertas', label: 'Ofertas', configKey: 'menu_ofertas_activo', predeterminado: true },
-      { key: 'accesorios', label: 'Accesorios', configKey: 'menu_accesorios_activo', predeterminado: true }
+      { id: 'todos', key: 'todos', label: 'Todos', configKey: 'menu_todos_activo', predeterminado: true },
+      { id: 'lanzamientos', key: 'lanzamientos', label: 'Lanzamientos', configKey: 'menu_lanzamientos_activo', predeterminado: true },
+      { id: 'favoritos', key: 'favoritos', label: 'Favoritos', configKey: 'menu_favoritos_activo', predeterminado: true },
+      { id: 'ofertas', key: 'ofertas', label: 'Ofertas', configKey: 'menu_ofertas_activo', predeterminado: true },
+      { id: 'accesorios', key: 'accesorios', label: 'Accesorios', configKey: 'menu_accesorios_activo', predeterminado: true }
     ];
-    return opciones.filter((item) => configActivo(configTienda?.[item.configKey], item.predeterminado));
-  }, [configTienda]);
+    const fijas = opciones.filter((item) => {
+      if (tabsBaseEliminadasClienteSet.has(item.id)) return false;
+      return configActivo(configTienda?.[item.configKey], item.predeterminado);
+    });
+    const personalizadas = tabsNavegacionCliente
+      .filter((tab) => tab?.activo)
+      .map((tab) => ({ key: `custom:${tab.id}`, label: tab.label }));
+    return [...fijas, ...personalizadas];
+  }, [configTienda, tabsNavegacionCliente, tabsBaseEliminadasClienteSet]);
 
-  const mostrarFiltroCategoria = configActivo(configTienda?.menu_categoria_activo, true);
+  const mostrarFiltroCategoria = !tabsBaseEliminadasClienteSet.has('menu_categoria')
+    && configActivo(configTienda?.menu_categoria_activo, true);
 
   useEffect(() => {
     if (esVistaTrastienda) return;
@@ -623,7 +1427,15 @@ export default function Tienda({
   }, [adminClientes, busquedaAdmin]);
 
   const resumenOrdenesAdmin = useMemo(() => {
-    const base = { total: adminOrdenes.length, pendiente: 0, procesando: 0, entregado: 0, cancelado: 0 };
+    const base = {
+      total: adminOrdenes.length,
+      pendiente: 0,
+      procesando: 0,
+      enviado_por_paqueteria: 0,
+      en_transito: 0,
+      entregado: 0,
+      cancelado: 0
+    };
     for (const orden of adminOrdenes) {
       const estado = String(orden?.estado || '').toLowerCase();
       if (Object.prototype.hasOwnProperty.call(base, estado)) {
@@ -631,6 +1443,20 @@ export default function Tienda({
       }
     }
     return base;
+  }, [adminOrdenes]);
+
+  useEffect(() => {
+    const draft = {};
+    for (const orden of (adminOrdenes || [])) {
+      const id = Number(orden?.id) || 0;
+      if (!id) continue;
+      draft[id] = {
+        estado: String(orden?.estado || 'pendiente').trim().toLowerCase(),
+        paqueteria: String(orden?.paqueteria || '').trim().toLowerCase(),
+        numero_guia: String(orden?.numero_guia || '').trim()
+      };
+    }
+    setSeguimientoDraftPorOrden(draft);
   }, [adminOrdenes]);
 
   function abrirCarrito() {
@@ -663,6 +1489,90 @@ export default function Tienda({
 
   function regresarPasoCheckout() {
     setPasoCheckout((prev) => Math.max(1, prev - 1));
+  }
+
+  async function habilitarNotificacionesPedidosCliente() {
+    if (!notificacionesNativasDisponibles()) {
+      mostrarNotificacion('Tu navegador no soporta notificaciones nativas', 'advertencia');
+      return;
+    }
+
+    const permiso = await solicitarPermisoNotificacionesNativas();
+    setPermisoNotificacionesPedidos(permiso);
+    try {
+      localStorage.setItem(CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT, String(Date.now()));
+    } catch {
+      // Ignorar errores de storage.
+    }
+
+    if (permiso === 'granted') {
+      setMostrarPromptNotificacionesPedidos(false);
+      await mostrarNotificacionNativa({
+        titulo: 'CHIPACTLI',
+        mensaje: 'Notificaciones de pedidos activadas.',
+        tag: 'tienda:notificaciones-activadas',
+        sonido: sonidoNotificacionesPedidos
+      });
+      mostrarNotificacion('Notificaciones de pedidos activadas', 'exito');
+      return;
+    }
+
+    if (permiso === 'denied') {
+      mostrarNotificacion('Bloqueaste las notificaciones. Puedes activarlas en ajustes del navegador.', 'advertencia');
+      return;
+    }
+
+    mostrarNotificacion('No se activaron las notificaciones todavía', 'advertencia');
+  }
+
+  function cambiarSonidoNotificacionesPedidos(valor) {
+    const nuevo = String(valor || '').trim().toLowerCase();
+    setSonidoNotificacionesPedidosDraft(nuevo);
+    reproducirSonidoAlerta(nuevo);
+  }
+
+  function guardarSonidoNotificacionesPedidos() {
+    const guardado = configurarSonidoNotificacion(sonidoNotificacionesPedidosDraft);
+    setSonidoNotificacionesPedidos(guardado);
+    if (guardado === 'silencio') {
+      mostrarNotificacion('Sonido guardado: sin sonido', 'exito');
+      return;
+    }
+    mostrarNotificacion('Sonido de notificaciones guardado', 'exito');
+  }
+
+  async function activarServicioDomicilioAdmin() {
+    if (activandoServicioDomicilio) return;
+    const yaActivo = configActivo(configTiendaAdmin?.servicio_domicilio_habilitado, false);
+    if (yaActivo) return;
+
+    const confirmar = await mostrarConfirmacion(
+      'Esta acción notificará a todos los clientes registrados y ocultará este check. ¿Continuar?',
+      'Activar servicio a domicilio'
+    );
+    if (!confirmar) return;
+
+    const passwordCeo = window.prompt('Ingresa la contraseña del CEO para confirmar:') || '';
+    if (!String(passwordCeo || '').trim()) {
+      mostrarNotificacion('Se requiere la contraseña del CEO', 'error');
+      return;
+    }
+
+    setActivandoServicioDomicilio(true);
+    try {
+      await fetchAdmin('/tienda/admin/servicio-domicilio/habilitar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password_ceo: passwordCeo })
+      });
+      await cargarConfigTiendaAdmin();
+      await cargarConfigTienda();
+      mostrarNotificacion('Servicio a domicilio activado y notificación enviada a clientes', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo activar el servicio a domicilio', 'error');
+    } finally {
+      setActivandoServicioDomicilio(false);
+    }
   }
 
   async function cargarProductos(opciones = {}) {
@@ -749,7 +1659,12 @@ export default function Tienda({
       setCliente(data?.cliente || null);
       setPerfil({
         nombre: data?.cliente?.nombre || '',
+        apellido_paterno: data?.cliente?.apellido_paterno || '',
+        apellido_materno: data?.cliente?.apellido_materno || '',
+        email: data?.cliente?.email || '',
         telefono: data?.cliente?.telefono || '',
+        fecha_nacimiento: data?.cliente?.fecha_nacimiento || '',
+        direccion_default: data?.cliente?.direccion_default || '',
         forma_pago_preferida: data?.cliente?.forma_pago_preferida || ''
       });
       setCheckout((prev) => ({
@@ -762,6 +1677,151 @@ export default function Tienda({
     }
   }
 
+  async function cargarDireccionesPerfil(token = clienteToken) {
+    if (!token) return;
+    try {
+      const data = await fetchJson('/tienda/auth/direcciones', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setDireccionesPerfil(Array.isArray(data?.direcciones) ? data.direcciones : []);
+    } catch {
+      setDireccionesPerfil([]);
+    }
+  }
+
+  async function cargarNotificacionesCliente(token = clienteToken) {
+    if (!token) return;
+    try {
+      const data = await fetchJson('/tienda/auth/notificaciones', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const lista = Array.isArray(data?.notificaciones) ? data.notificaciones : [];
+      setNotificacionesClientePedidos(lista.map((item) => ({
+        id: String(item?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+        titulo: String(item?.titulo || 'Pedido'),
+        mensaje: String(item?.mensaje || '').trim(),
+        tipo: String(item?.tipo || 'pedido'),
+        leida: Number(item?.leida) === 1,
+        fecha: String(item?.creado_en || new Date().toISOString())
+      })));
+    } catch {
+      // Ignorar error temporal para no romper la vista.
+    }
+  }
+
+  async function agregarDireccionPerfil() {
+    if (!clienteToken || guardandoDireccionPerfil) return;
+    const direccion = String(direccionPerfilNueva?.direccion || '').trim();
+    if (!direccion) {
+      mostrarNotificacion('Captura la dirección', 'error');
+      return;
+    }
+
+    setGuardandoDireccionPerfil(true);
+    try {
+      const esEdicion = Number(direccionPerfilEditandoId) > 0;
+      const endpoint = esEdicion
+        ? `/tienda/auth/direcciones/${direccionPerfilEditandoId}`
+        : '/tienda/auth/direcciones';
+      const method = esEdicion ? 'PATCH' : 'POST';
+
+      await fetchJson(endpoint, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${clienteToken}`
+        },
+        body: JSON.stringify({
+          alias: direccionPerfilNueva.alias,
+          direccion,
+          referencias: direccionPerfilNueva.referencias,
+          es_preferida: Boolean(direccionPerfilNueva.es_preferida)
+        })
+      });
+      setDireccionPerfilNueva(DIRECCION_CLIENTE_DEFAULT);
+      setDireccionPerfilEditandoId(null);
+      setMostrarModalNuevaDireccion(false);
+      await cargarDireccionesPerfil();
+      await cargarPerfil(clienteToken);
+      mostrarNotificacion(esEdicion ? 'Dirección actualizada' : 'Dirección guardada', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo guardar la dirección', 'error');
+    } finally {
+      setGuardandoDireccionPerfil(false);
+    }
+  }
+
+  async function marcarDireccionPreferidaPerfil(idDireccion) {
+    if (!clienteToken) return;
+    try {
+      await fetchJson(`/tienda/auth/direcciones/${idDireccion}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${clienteToken}`
+        },
+        body: JSON.stringify({ es_preferida: true })
+      });
+      await cargarDireccionesPerfil();
+      await cargarPerfil(clienteToken);
+      mostrarNotificacion('Dirección preferida actualizada', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo actualizar la dirección preferida', 'error');
+    }
+  }
+
+  async function eliminarDireccionPerfil(idDireccion) {
+    if (!clienteToken) return;
+    const ok = await mostrarConfirmacion('¿Eliminar esta dirección?', 'Eliminar dirección');
+    if (!ok) return;
+
+    try {
+      await fetchJson(`/tienda/auth/direcciones/${idDireccion}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${clienteToken}` }
+      });
+      await cargarDireccionesPerfil();
+      await cargarPerfil(clienteToken);
+      mostrarNotificacion('Dirección eliminada', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo eliminar la dirección', 'error');
+    }
+  }
+
+  async function enviarAtencionPerfil() {
+    if (!clienteToken || enviandoAtencionPerfil) return;
+    const asunto = String(atencionForm?.asunto || '').trim();
+    const mensaje = String(atencionForm?.mensaje || '').trim();
+    if (!asunto || !mensaje) {
+      mostrarNotificacion('Selecciona asunto y escribe tu mensaje', 'error');
+      return;
+    }
+
+    setEnviandoAtencionPerfil(true);
+    try {
+      await fetchJson('/tienda/auth/atencion', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${clienteToken}`
+        },
+        body: JSON.stringify({
+          asunto,
+          mensaje,
+          nombre: nombreClienteCompleto || perfil.nombre,
+          email: perfil.email,
+          telefono: perfil.telefono
+        })
+      });
+      setAtencionForm({ asunto: '', mensaje: '' });
+      mostrarNotificacion('Mensaje enviado a atención al cliente', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo enviar el mensaje', 'error');
+    } finally {
+      setEnviandoAtencionPerfil(false);
+    }
+  }
+
   useEffect(() => {
     if (!tokenInterno) return;
     cargarAdminPuntos();
@@ -769,7 +1829,13 @@ export default function Tienda({
     cargarAdminOrdenes();
     cargarConfigTiendaAdmin();
     cargarDescuentosAdmin();
-  }, [tokenInterno]);
+  }, [
+    tokenInterno,
+    clienteToken,
+    cliente?.id,
+    permisoNotificacionesPedidos,
+    sonidoNotificacionesPedidos
+  ]);
 
   useEffect(() => {
     const contenedor = contenedorScrollRef.current;
@@ -859,6 +1925,8 @@ export default function Tienda({
 
   useEffect(() => {
     let timerRefresco = null;
+    const idClienteActual = Number(cliente?.id) || extraerIdClienteToken(clienteToken) || 0;
+
     const onRealtime = (event) => {
       const tipo = String(event?.detail?.tipo || '').trim();
       if (!tipo) return;
@@ -885,6 +1953,91 @@ export default function Tienda({
       if (tokenInterno && tipo === 'tienda_descuentos_actualizados') {
         cargarDescuentosAdmin();
       }
+
+      if (tokenInterno && tipo === 'tienda_servicio_domicilio_habilitado') {
+        cargarConfigTiendaAdmin();
+      }
+
+      if (clienteToken && tipo === 'tienda_servicio_domicilio_habilitado') {
+        cargarConfigTienda();
+        const mensajeDomicilio = String(event?.detail?.mensaje || '').trim()
+          || 'Ya contamos con servicio a domicilio.';
+        agregarNotificacionClientePedido({
+          titulo: 'Servicio a domicilio activo',
+          mensaje: mensajeDomicilio,
+          tipo: 'servicio_domicilio'
+        });
+        mostrarNotificacion(mensajeDomicilio, 'exito');
+        if (permisoNotificacionesPedidos === 'granted') {
+          mostrarNotificacionNativa({
+            titulo: 'Servicio a domicilio activo',
+            mensaje: mensajeDomicilio,
+            tag: `tienda:domicilio:${Date.now()}`,
+            sonido: sonidoNotificacionesPedidos
+          });
+        }
+      }
+
+      const esEventoPedidoCliente = (tipo === 'tienda_orden_nueva' || tipo === 'tienda_orden_actualizada');
+      if (!clienteToken || !esEventoPedidoCliente) return;
+
+      const idClienteEvento = Number(event?.detail?.id_cliente) || 0;
+      if (idClienteActual && idClienteEvento && idClienteEvento !== idClienteActual) return;
+
+      cargarMisOrdenes(clienteToken);
+      cargarNotificacionesCliente(clienteToken);
+
+      const idOrden = Number(event?.detail?.id_orden) || 0;
+      const estado = String(event?.detail?.estado || '').trim().toLowerCase();
+      const claveEvento = `${tipo}:${idOrden}:${estado || 'nueva'}`;
+      if (eventosPedidoNotificadosRef.current.has(claveEvento)) return;
+      eventosPedidoNotificadosRef.current.add(claveEvento);
+      if (eventosPedidoNotificadosRef.current.size > 240) {
+        eventosPedidoNotificadosRef.current.clear();
+      }
+
+      if (tipo === 'tienda_orden_nueva') {
+        const folioNuevo = String(event?.detail?.folio || '').trim();
+        const mensajeNuevo = folioNuevo
+          ? `Tu pedido ${folioNuevo} fue realizado correctamente.`
+          : 'Tu pedido fue realizado correctamente.';
+        agregarNotificacionClientePedido({
+          titulo: 'Pedido realizado',
+          mensaje: mensajeNuevo,
+          tipo: 'pedido_nuevo'
+        });
+        mostrarNotificacion(mensajeNuevo, 'exito');
+        if (permisoNotificacionesPedidos === 'granted') {
+          mostrarNotificacionNativa({
+            titulo: 'Pedido recibido',
+            mensaje: mensajeNuevo,
+            tag: `pedido:nuevo:${idOrden || Date.now()}`,
+            sonido: sonidoNotificacionesPedidos
+          });
+        }
+        return;
+      }
+
+      const folio = String(event?.detail?.folio || '').trim();
+      const mensajeEstado = mensajeEstadoPedidoCliente(estado);
+      const mensajeFinal = folio
+        ? `${mensajeEstado} (${folio})`
+        : mensajeEstado;
+      agregarNotificacionClientePedido({
+        titulo: tituloEstadoPedidoCliente(estado),
+        mensaje: mensajeFinal,
+        tipo: 'pedido_estado'
+      });
+
+      mostrarNotificacion(mensajeFinal, 'exito');
+      if (permisoNotificacionesPedidos === 'granted') {
+        mostrarNotificacionNativa({
+          titulo: tituloEstadoPedidoCliente(estado),
+          mensaje: mensajeFinal,
+          tag: `pedido:estado:${idOrden || Date.now()}:${estado || 'actualizado'}`,
+          sonido: sonidoNotificacionesPedidos
+        });
+      }
     };
 
     window.addEventListener('chipactli:realtime', onRealtime);
@@ -892,7 +2045,7 @@ export default function Tienda({
       window.removeEventListener('chipactli:realtime', onRealtime);
       if (timerRefresco) clearTimeout(timerRefresco);
     };
-  }, [tokenInterno]);
+  }, [tokenInterno, clienteToken, cliente?.id, permisoNotificacionesPedidos, sonidoNotificacionesPedidos]);
 
   async function cargarConfigTienda() {
     try {
@@ -915,8 +2068,10 @@ export default function Tienda({
         normalizada.atencion_horario_lunes_viernes = String(normalizada.atencion_horario_lunes_sabado || '').trim();
       }
       setConfigTiendaAdmin(normalizada);
+      sincronizarTabsNavegacionAdminDesdeConfig(normalizada);
     } catch {
       setConfigTiendaAdmin(CONFIG_DEFAULT);
+      sincronizarTabsNavegacionAdminDesdeConfig(CONFIG_DEFAULT);
     }
   }
 
@@ -933,6 +2088,7 @@ export default function Tienda({
       }
       setConfigTiendaAdmin(conf);
       setConfigTienda(conf);
+      sincronizarTabsNavegacionAdminDesdeConfig(conf);
       mostrarNotificacion('Configuración de tienda guardada', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar configuración', 'error');
@@ -1169,12 +2325,39 @@ export default function Tienda({
     }
   }
 
-  async function actualizarEstadoOrdenAdmin(id, estado) {
+  function actualizarDraftSeguimientoOrden(id, cambios = {}) {
+    setSeguimientoDraftPorOrden((prev) => {
+      const actual = prev?.[id] || { estado: 'pendiente', paqueteria: '', numero_guia: '' };
+      return {
+        ...prev,
+        [id]: {
+          ...actual,
+          ...cambios
+        }
+      };
+    });
+  }
+
+  async function actualizarEstadoOrdenAdmin(id, cambios = {}) {
     try {
+      const payloadRaw = (typeof cambios === 'string') ? { estado: cambios } : (cambios || {});
+      const payload = {
+        estado: String(payloadRaw?.estado || '').trim().toLowerCase(),
+        paqueteria: String(payloadRaw?.paqueteria || '').trim().toLowerCase(),
+        numero_guia: String(payloadRaw?.numero_guia || '').trim()
+      };
+
+      if (!payload.estado) {
+        throw new Error('Selecciona un estado válido');
+      }
+      if (payload.estado === 'enviado_por_paqueteria' && (!payload.paqueteria || !payload.numero_guia)) {
+        throw new Error('Captura paquetería y número de guía para guardar este estatus');
+      }
+
       await fetchAdmin(`/tienda/admin/ordenes/${id}/estado`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ estado })
+        body: JSON.stringify(payload)
       });
       await cargarAdminOrdenes();
       mostrarNotificacion('Estado de pedido actualizado', 'exito');
@@ -1182,6 +2365,7 @@ export default function Tienda({
       mostrarNotificacion(error?.message || 'No se pudo actualizar estado', 'error');
     }
   }
+
 
   async function guardarClasificacionProducto(producto) {
     const recetaNombre = String(producto?.nombre_receta || '').trim();
@@ -1279,7 +2463,9 @@ export default function Tienda({
       const data = await fetchJson('/tienda/ordenes/mis', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setOrdenes(Array.isArray(data) ? data : []);
+      const lista = Array.isArray(data) ? data : [];
+      setOrdenes(lista);
+      revisarCambiosEstadoOrdenes(lista);
     } catch {
       setOrdenes([]);
     }
@@ -1576,6 +2762,20 @@ export default function Tienda({
         body: JSON.stringify(perfil)
       });
       setCliente(data?.cliente || null);
+      setPerfil({
+        nombre: data?.cliente?.nombre || perfil.nombre || '',
+        apellido_paterno: data?.cliente?.apellido_paterno || perfil.apellido_paterno || '',
+        apellido_materno: data?.cliente?.apellido_materno || perfil.apellido_materno || '',
+        email: data?.cliente?.email || perfil.email || '',
+        telefono: data?.cliente?.telefono || perfil.telefono || '',
+        fecha_nacimiento: data?.cliente?.fecha_nacimiento || perfil.fecha_nacimiento || '',
+        direccion_default: data?.cliente?.direccion_default || perfil.direccion_default || '',
+        forma_pago_preferida: data?.cliente?.forma_pago_preferida || perfil.forma_pago_preferida || ''
+      });
+      setCheckout((prev) => ({
+        ...prev,
+        metodo_pago: data?.cliente?.forma_pago_preferida || prev.metodo_pago
+      }));
       mostrarNotificacion('Perfil guardado', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar el perfil', 'error');
@@ -1702,8 +2902,40 @@ export default function Tienda({
             </>
           ) : (
             <>
-              <button className="boton" onClick={() => setMostrarModalPerfilCliente(true)}>Mi perfil</button>
-              <button className="boton" onClick={cerrarSesionCliente}>Salir cliente</button>
+              <div className="tiendaSaludoCliente" aria-label={`Cliente ${nombreClienteHeader}`}>
+                <span className="tiendaSaludoEnredadera" aria-hidden="true">
+                  <svg viewBox="0 0 140 18" role="presentation" focusable="false" preserveAspectRatio="none">
+                    <path d="M1 9 C20 2, 40 16, 60 9 C80 2, 100 16, 120 9 C128 6, 134 8, 139 9" />
+                    <ellipse cx="14" cy="5" rx="4" ry="2.2" transform="rotate(-25 14 5)" />
+                    <ellipse cx="29" cy="13" rx="4.3" ry="2.4" transform="rotate(22 29 13)" />
+                    <ellipse cx="45" cy="5" rx="4" ry="2.2" transform="rotate(-20 45 5)" />
+                    <ellipse cx="61" cy="13" rx="4.3" ry="2.4" transform="rotate(22 61 13)" />
+                    <ellipse cx="77" cy="5" rx="4" ry="2.2" transform="rotate(-24 77 5)" />
+                    <ellipse cx="93" cy="13" rx="4.3" ry="2.4" transform="rotate(22 93 13)" />
+                    <ellipse cx="109" cy="5" rx="4" ry="2.2" transform="rotate(-20 109 5)" />
+                    <ellipse cx="126" cy="12" rx="4" ry="2.2" transform="rotate(20 126 12)" />
+                  </svg>
+                </span>
+                <span className="tiendaSaludoLabel">Hola</span>
+                <strong className="tiendaSaludoNombre">{nombreClienteHeader}</strong>
+              </div>
+              <button
+                className="tiendaPerfilBtnNotifs"
+                onClick={() => {
+                  setPerfilModalTab('datos');
+                  setMostrarModalPerfilCliente(true);
+                }}
+                title="Perfil"
+                aria-label="Perfil"
+              >
+                <span className="tiendaPerfilIcon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                    <circle cx="12" cy="8" r="4.2" />
+                    <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
+                  </svg>
+                </span>
+                {totalNoLeidasCliente > 0 && <span className="tiendaPerfilBtnCount">{totalNoLeidasCliente}</span>}
+              </button>
             </>
           )}
           <button className="tiendaCartBtn" onClick={abrirCarrito}>
@@ -1720,6 +2952,15 @@ export default function Tienda({
           />
         </div>
       </div>
+      )}
+
+      {!esVistaTrastienda && clienteToken && mostrarPromptNotificacionesPedidos && (
+        <div className="tiendaNotifPedidosInline">
+          <span>Activa notificaciones para recibir cambios de estatus de tus pedidos.</span>
+          <button type="button" className="botonPequeno botonExito" onClick={habilitarNotificacionesPedidosCliente}>
+            Activar
+          </button>
+        </div>
       )}
 
       {!esVistaTrastienda && (
@@ -2035,10 +3276,9 @@ export default function Tienda({
                 {adminVista === 'pedidos' && (
                   <select value={filtroEstadoOrdenAdmin} onChange={(e) => setFiltroEstadoOrdenAdmin(e.target.value)}>
                     <option value="todos">Todos los estados</option>
-                    <option value="pendiente">Pendiente</option>
-                    <option value="procesando">Procesando</option>
-                    <option value="entregado">Entregado</option>
-                    <option value="cancelado">Cancelado</option>
+                    {ESTATUS_PEDIDO_OPCIONES.map((estado) => (
+                      <option key={`filtro-estado-${estado.value}`} value={estado.value}>{estado.label}</option>
+                    ))}
                   </select>
                 )}
               </div>
@@ -2124,12 +3364,80 @@ export default function Tienda({
                       value={configTiendaAdmin.footer_pagos_texto || ''}
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_pagos_texto: e.target.value }))}
                     />
+                    <SwitchConTexto
+                      checked={configActivo(configTiendaAdmin.footer_pagos_remover_fondo_png, true)}
+                      label="Quitar fondo blanco en PNG (logos footer)"
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_pagos_remover_fondo_png: e.target.checked ? '1' : '0' }))}
+                    />
+                    <span className="tiendaAdminLogosPagoHintWarn">
+                      Funciona mejor con fondos blancos lisos. Si el logo ya viene transparente (SVG/PNG), puedes desactivarlo.
+                    </span>
+                    <div className="tiendaAdminLogosPagoBox">
+                      <div className="tiendaAdminLogosPagoHead">
+                        <strong>Gestor de logos de pago</strong>
+                        <input
+                          ref={inputLogoPagoArchivoRef}
+                          type="file"
+                          accept="image/*,.svg"
+                          className="tiendaInputOculto"
+                          onChange={subirLogoPagoDesdeComputadora}
+                        />
+                        <button
+                          type="button"
+                          className="botonPequeno"
+                          onClick={agregarMetodoPagoAdmin}
+                        >
+                          + Agregar método
+                        </button>
+                      </div>
+                      <div className="tiendaAdminLogosPagoLista">
+                        {metodosPagoAdmin.map((metodo) => (
+                          <div key={`cfg-metodo-pago-${metodo.id}`} className="tiendaAdminMetodoPagoFila">
+                            <label className="tiendaAdminMetodoPagoSwitch" title="Mostrar u ocultar en footer">
+                              <input
+                                type="checkbox"
+                                checked={String(metodo?.activo ?? '1') !== '0'}
+                                onChange={(e) => editarMetodoPagoAdmin(metodo.id, { activo: e.target.checked ? '1' : '0' })}
+                              />
+                              <span>{String(metodo?.activo ?? '1') !== '0' ? 'Mostrar' : 'Oculto'}</span>
+                            </label>
+                            <input
+                              value={metodo.label}
+                              onChange={(e) => editarMetodoPagoAdmin(metodo.id, { label: e.target.value })}
+                              placeholder="Nombre del método"
+                            />
+                            <button
+                              type="button"
+                              className="botonPequeno"
+                              onClick={() => abrirSelectorLogoMetodoPago(metodo.id)}
+                              disabled={subiendoLogoPagoId === metodo.id}
+                            >
+                              {subiendoLogoPagoId === metodo.id ? 'Subiendo...' : 'Subir imagen'}
+                            </button>
+                            <input
+                              value={metodo.logo_url}
+                              onChange={(e) => editarMetodoPagoAdmin(metodo.id, { logo_url: e.target.value })}
+                              placeholder="/uploads/tienda/logo.png o https://..."
+                            />
+                          </div>
+                        ))}
+                        {!metodosPagoAdmin.length && (
+                          <span className="tiendaAdminLogosPagoHint">No hay logos agregados.</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <textarea
                     placeholder="Texto marca footer"
                     value={configTiendaAdmin.footer_marca_texto || ''}
                     onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_marca_texto: e.target.value }))}
                     rows={2}
+                  />
+                  <textarea
+                    placeholder="Asuntos de atención al cliente (uno por línea)"
+                    value={configTiendaAdmin.atencion_asuntos || ''}
+                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, atencion_asuntos: e.target.value }))}
+                    rows={4}
                   />
                   <div className="tiendaAdminHorariosBox">
                     <strong>Horarios de atención</strong>
@@ -2172,37 +3480,114 @@ export default function Tienda({
               )}
 
               {configAdminTab === 'nav' && (
-                <div className="tiendaAdminSwitchGrid">
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_todos_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_todos_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar botón "Todos"'}
-                  />
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_lanzamientos_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_lanzamientos_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar botón "Lanzamientos"'}
-                  />
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_favoritos_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_favoritos_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar botón "Favoritos"'}
-                  />
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_ofertas_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_ofertas_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar botón "Ofertas"'}
-                  />
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_accesorios_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_accesorios_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar botón "Accesorios"'}
-                  />
-                  <SwitchConTexto
-                    checked={configActivo(configTiendaAdmin.menu_categoria_activo, true)}
-                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, menu_categoria_activo: e.target.checked ? '1' : '0' }))}
-                    label={'Mostrar filtro de categorías'}
-                  />
+                <div className="tiendaAdminNavConfigWrap">
+                  <div className="tiendaAdminSwitchGrid">
+                    {[
+                      { id: 'todos', configKey: 'menu_todos_activo', label: 'Mostrar botón "Todos"', labelCorta: 'Todos', predeterminado: true },
+                      { id: 'lanzamientos', configKey: 'menu_lanzamientos_activo', label: 'Mostrar botón "Lanzamientos"', labelCorta: 'Lanzamientos', predeterminado: true },
+                      { id: 'favoritos', configKey: 'menu_favoritos_activo', label: 'Mostrar botón "Favoritos"', labelCorta: 'Favoritos', predeterminado: true },
+                      { id: 'ofertas', configKey: 'menu_ofertas_activo', label: 'Mostrar botón "Ofertas"', labelCorta: 'Ofertas', predeterminado: true },
+                      { id: 'accesorios', configKey: 'menu_accesorios_activo', label: 'Mostrar botón "Accesorios"', labelCorta: 'Accesorios', predeterminado: true },
+                      { id: 'menu_categoria', configKey: 'menu_categoria_activo', label: 'Mostrar filtro de categorías', labelCorta: 'Filtro de categorías', predeterminado: true }
+                    ]
+                      .filter((item) => !tabsBaseEliminadasAdmin.includes(item.id))
+                      .map((item) => (
+                        <div className="tiendaAdminSwitchRow" key={`nav-base-${item.id}`}>
+                          <SwitchConTexto
+                            checked={configActivo(configTiendaAdmin[item.configKey], item.predeterminado)}
+                            onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, [item.configKey]: e.target.checked ? '1' : '0' }))}
+                            label={item.label}
+                          />
+                          <button
+                            type="button"
+                            className="botonPequeno botonDanger tiendaAdminDeleteMini"
+                            onClick={() => eliminarPestanaBase(item.id, item.configKey, item.labelCorta)}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+
+                  <div className="tiendaAdminNavCustomBox">
+                    <div className="tiendaAdminNavCustomHead">
+                      <strong>Pestañas personalizadas</strong>
+                      <button
+                        type="button"
+                        className="botonPequeno botonExito"
+                        onClick={() => {
+                          actualizarTabsNavegacionAdmin((prev) => {
+                            const idx = (Array.isArray(prev) ? prev.length : 0) + 1;
+                            const id = slugPestanaMenu(`personalizada-${Date.now()}-${idx}`) || `personalizada-${idx}`;
+                            return [...(Array.isArray(prev) ? prev : []), {
+                              id,
+                              label: `Pestaña ${idx}`,
+                              categoria: '',
+                              activo: true
+                            }];
+                          });
+                        }}
+                      >
+                        + Nueva pestaña
+                      </button>
+                    </div>
+
+                    {!tabsNavegacionAdmin.length && (
+                      <p className="tiendaAdminNavCustomAyuda">Agrega pestañas para filtrar por categoría en la navegación principal.</p>
+                    )}
+
+                    <div className="tiendaAdminNavCustomGrid">
+                      {tabsNavegacionAdmin.map((tab, idx) => (
+                        <article key={`cfg-tab-nav-${tab.id}`} className="tiendaAdminNavCustomCard">
+                          <SwitchConTexto
+                            checked={Boolean(tab?.activo)}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              actualizarTabsNavegacionAdmin((prev) => prev.map((item, i) => (
+                                i === idx ? { ...item, activo: checked } : item
+                              )));
+                            }}
+                            label={'Pestaña activa'}
+                          />
+                          <input
+                            placeholder="Nombre de pestaña"
+                            value={String(tab?.label || '')}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              actualizarTabsNavegacionAdmin((prev) => prev.map((item, i) => (
+                                i === idx ? { ...item, label: value } : item
+                              )));
+                            }}
+                          />
+                          <select
+                            value={String(tab?.categoria || '')}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              actualizarTabsNavegacionAdmin((prev) => prev.map((item, i) => (
+                                i === idx ? { ...item, categoria: value } : item
+                              )));
+                            }}
+                          >
+                            <option value="">Selecciona categoría</option>
+                            {categoriasDisponibles.map((categoria) => (
+                              <option key={`cfg-tab-nav-cat-${tab.id}-${categoria}`} value={categoria}>{categoria}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="botonPequeno botonDanger"
+                            onClick={async () => {
+                              const ok = await mostrarConfirmacion('¿Eliminar esta pestaña personalizada?', 'Eliminar pestaña');
+                              if (!ok) return;
+                              actualizarTabsNavegacionAdmin((prev) => prev.filter((_, i) => i !== idx));
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2626,39 +4011,136 @@ export default function Tienda({
             {adminVista === 'pedidos' && (
               <div className="tiendaAdminForm">
                 <strong>Seguimiento de pedidos</strong>
+                {!servicioDomicilioActivoAdmin && (
+                  <div className="tiendaAdminServicioDomicilioAlert">
+                    <div>
+                      <strong>Servicio a domicilio para clientes</strong>
+                      <p>
+                        Al activarlo se enviará aviso a todos los clientes conectados. Es una acción única protegida con contraseña del CEO.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="boton botonExito"
+                      onClick={activarServicioDomicilioAdmin}
+                      disabled={activandoServicioDomicilio}
+                    >
+                      {activandoServicioDomicilio ? 'Activando...' : 'Activar servicio a domicilio'}
+                    </button>
+                  </div>
+                )}
                 <div className="tiendaAdminResumenPedidos">
                   <span>Total: <strong>{resumenOrdenesAdmin.total}</strong></span>
                   <span>Pendientes: <strong>{resumenOrdenesAdmin.pendiente}</strong></span>
                   <span>Procesando: <strong>{resumenOrdenesAdmin.procesando}</strong></span>
+                  <span>Enviados por paquetería: <strong>{resumenOrdenesAdmin.enviado_por_paqueteria}</strong></span>
+                  <span>En tránsito: <strong>{resumenOrdenesAdmin.en_transito}</strong></span>
                   <span>Entregados: <strong>{resumenOrdenesAdmin.entregado}</strong></span>
                   <span>Cancelados: <strong>{resumenOrdenesAdmin.cancelado}</strong></span>
                 </div>
                 <div className="tiendaAdminListado tiendaAdminListadoAmplio tiendaAdminListadoPedidos">
                   <div className="tiendaAdminOrdenGrid">
                   {ordenesAdminFiltradas.map((o) => (
-                    <div key={o.id} className="tiendaAdminFila tiendaAdminOrdenCard">
-                      <div className="tiendaAdminOrdenInfo">
-                        <strong>{o.folio}</strong>
-                        <div className="tiendaAdminSubtexto">{o.nombre_cliente} · {o.email_cliente || 'Sin correo'} · {o.telefono_cliente || 'Sin teléfono'}</div>
-                        <div className="tiendaAdminSubtexto">Entrega: {o.nombre_punto_entrega || '-'} · {o.direccion_entrega || '-'}</div>
-                        <div className="tiendaAdminSubtexto">Pago: {o.metodo_pago || '-'} · Total: {precio(o.total)} · {String(o.creado_en || '').replace('T', ' ').slice(0, 16)}</div>
-                        {String(o.notas || '').trim() && <div className="tiendaAdminSubtexto">Notas: {o.notas}</div>}
-                      </div>
-                      <div className="tiendaAdminOrdenAcciones">
-                        <select
-                          value={String(o.estado || 'pendiente')}
-                          onChange={(e) => actualizarEstadoOrdenAdmin(o.id, e.target.value)}
-                        >
-                          <option value="pendiente">Pendiente</option>
-                          <option value="procesando">Procesando</option>
-                          <option value="entregado">Entregado</option>
-                          <option value="cancelado">Cancelado</option>
-                        </select>
-                        <button type="button" className="botonPequeno" onClick={() => actualizarEstadoOrdenAdmin(o.id, 'pendiente')}>Marcar pendiente</button>
-                        <button type="button" className="botonPequeno botonExito" onClick={() => actualizarEstadoOrdenAdmin(o.id, 'entregado')}>Marcar entregado</button>
-                        <button type="button" className="botonPequeno botonDanger" onClick={() => actualizarEstadoOrdenAdmin(o.id, 'cancelado')}>Cancelar</button>
-                      </div>
-                    </div>
+                    (() => {
+                      const draft = seguimientoDraftPorOrden[o.id] || {
+                        estado: String(o.estado || 'pendiente').trim().toLowerCase(),
+                        paqueteria: String(o.paqueteria || '').trim().toLowerCase(),
+                        numero_guia: String(o.numero_guia || '').trim()
+                      };
+                      const estadoActual = String(o.estado || 'pendiente').trim().toLowerCase();
+                      const estadoSeleccionado = String(draft.estado || estadoActual || 'pendiente').trim().toLowerCase();
+                      const mostrarSeguimiento = estadoSeleccionado === 'enviado_por_paqueteria'
+                        || Boolean(draft.paqueteria || draft.numero_guia);
+                      const linkRastreo = construirLinkRastreo(draft.paqueteria, draft.numero_guia);
+
+                      return (
+                        <div key={o.id} className="tiendaAdminFila tiendaAdminOrdenCard">
+                          <div className="tiendaAdminOrdenInfo">
+                            <strong>{o.folio}</strong>
+                            <div className="tiendaAdminSubtexto">{o.nombre_cliente} · {o.email_cliente || 'Sin correo'} · {o.telefono_cliente || 'Sin teléfono'}</div>
+                            <div className="tiendaAdminSubtexto">Entrega: {o.nombre_punto_entrega || '-'} · {o.direccion_entrega || '-'}</div>
+                            <div className="tiendaAdminSubtexto">Pago: {o.metodo_pago || '-'} · Total: {precio(o.total)} · {String(o.creado_en || '').replace('T', ' ').slice(0, 16)}</div>
+                            <div className="tiendaAdminSubtexto">Estado actual: {etiquetaEstadoPedido(estadoActual)}</div>
+                            {String(o.notas || '').trim() && <div className="tiendaAdminSubtexto">Notas: {o.notas}</div>}
+                            {Boolean(draft.paqueteria || draft.numero_guia) && (
+                              <div className="tiendaAdminSubtexto">
+                                Envío: {draft.paqueteria ? etiquetaPaqueteria(draft.paqueteria) : 'Sin paquetería'}
+                                {draft.numero_guia ? ` · Guía: ${draft.numero_guia}` : ''}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="tiendaAdminOrdenAcciones">
+                            <label htmlFor={`orden-estado-${o.id}`} className="tiendaAdminMiniLabel">Estatus del pedido</label>
+                            <select
+                              id={`orden-estado-${o.id}`}
+                              value={estadoSeleccionado}
+                              onChange={(e) => {
+                                const nuevoEstado = String(e.target.value || '').trim().toLowerCase();
+                                const draftActual = seguimientoDraftPorOrden[o.id] || { estado: estadoActual, paqueteria: '', numero_guia: '' };
+                                actualizarDraftSeguimientoOrden(o.id, { estado: nuevoEstado });
+                                if (nuevoEstado === 'enviado_por_paqueteria') {
+                                  return;
+                                }
+                                actualizarEstadoOrdenAdmin(o.id, {
+                                  estado: nuevoEstado,
+                                  paqueteria: draftActual.paqueteria,
+                                  numero_guia: draftActual.numero_guia
+                                });
+                              }}
+                            >
+                              {ESTATUS_PEDIDO_OPCIONES.map((estado) => (
+                                <option key={`estado-${o.id}-${estado.value}`} value={estado.value}>{estado.label}</option>
+                              ))}
+                            </select>
+
+                            {mostrarSeguimiento && (
+                              <div className="tiendaAdminSeguimientoWrap">
+                                <label htmlFor={`orden-paqueteria-${o.id}`} className="tiendaAdminMiniLabel">Paquetería</label>
+                                <select
+                                  id={`orden-paqueteria-${o.id}`}
+                                  value={draft.paqueteria}
+                                  onChange={(e) => actualizarDraftSeguimientoOrden(o.id, { paqueteria: String(e.target.value || '').trim().toLowerCase() })}
+                                >
+                                  <option value="">Selecciona paquetería</option>
+                                  {PAQUETERIAS_MX.map((carrier) => (
+                                    <option key={`carrier-${o.id}-${carrier.value}`} value={carrier.value}>{carrier.label}</option>
+                                  ))}
+                                </select>
+
+                                <label htmlFor={`orden-guia-${o.id}`} className="tiendaAdminMiniLabel">Número de guía</label>
+                                <input
+                                  id={`orden-guia-${o.id}`}
+                                  type="text"
+                                  placeholder="Ej. 1234567890"
+                                  value={draft.numero_guia}
+                                  onChange={(e) => actualizarDraftSeguimientoOrden(o.id, { numero_guia: String(e.target.value || '').trim() })}
+                                />
+
+                                <button
+                                  type="button"
+                                  className="botonPequeno botonExito"
+                                  onClick={() => actualizarEstadoOrdenAdmin(o.id, {
+                                    estado: estadoSeleccionado,
+                                    paqueteria: draft.paqueteria,
+                                    numero_guia: draft.numero_guia
+                                  })}
+                                >
+                                  Guardar estatus y seguimiento
+                                </button>
+
+                                {linkRastreo && (
+                                  <a className="tiendaTrackingLink" href={linkRastreo} target="_blank" rel="noreferrer">
+                                    Abrir rastreo en paquetería
+                                  </a>
+                                )}
+                              </div>
+                            )}
+
+                          </div>
+                        </div>
+                      );
+                    })()
                   ))}
                   </div>
                   {!ordenesAdminFiltradas.length && <div className="tiendaVacio">No hay pedidos con ese filtro</div>}
@@ -2944,74 +4426,510 @@ export default function Tienda({
       {mostrarCarrito && <div className="tiendaOverlay" onClick={cerrarCarrito}></div>}
 
       {mostrarModalPerfilCliente && clienteToken && (
-        <div className="modal" style={{ display: 'flex' }} onClick={() => setMostrarModalPerfilCliente(false)}>
+        <div className="tiendaPerfilOverlay" onClick={() => setMostrarModalPerfilCliente(false)}>
           <div className="contenidoModal tiendaAuthModal tiendaPerfilModalPro" onClick={(e) => e.stopPropagation()}>
             <div className="encabezadoModal tiendaPerfilHeaderPro">
-              <h3>Perfil del cliente</h3>
+              <h3>Perfil</h3>
               <button className="cerrarModal" onClick={() => setMostrarModalPerfilCliente(false)}>&times;</button>
             </div>
-            <div className="tiendaPerfilLayoutPro">
-              <div className="tiendaPerfilPanelPro">
-                <h4>Datos de contacto</h4>
-                <div className="tiendaPerfil tiendaPerfilCamposPro">
-                  <input
-                    placeholder="Nombre"
-                    value={perfil.nombre}
-                    onChange={(e) => setPerfil((p) => ({ ...p, nombre: e.target.value }))}
-                  />
-                  <input
-                    placeholder="Teléfono"
-                    value={perfil.telefono}
-                    onChange={(e) => setPerfil((p) => ({ ...p, telefono: e.target.value }))}
-                  />
-                  <select
-                    value={perfil.forma_pago_preferida}
-                    onChange={(e) => setPerfil((p) => ({ ...p, forma_pago_preferida: e.target.value }))}
-                  >
-                    <option value="">Forma de pago preferida</option>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="tarjeta">Tarjeta terminal</option>
-                    <option value="mercado_pago">Mercado Pago</option>
-                  </select>
-                </div>
-                <div className="tiendaPerfilAcciones">
-                  <button className="boton botonExito" type="button" onClick={guardarPerfil}>Guardar perfil</button>
-                  <button className="boton botonDanger" type="button" onClick={cerrarSesionCliente}>Cerrar sesión</button>
-                </div>
-              </div>
+            <div className="tiendaPerfilMainTabs" role="tablist" aria-label="Secciones del perfil">
+              <button
+                type="button"
+                className={perfilModalTab === 'datos' ? 'tiendaTab activa' : 'tiendaTab'}
+                onClick={() => setPerfilModalTab('datos')}
+              >
+                Datos
+              </button>
+              <button
+                type="button"
+                className={perfilModalTab === 'ordenes' ? 'tiendaTab activa' : 'tiendaTab'}
+                onClick={() => setPerfilModalTab('ordenes')}
+              >
+                Órdenes
+              </button>
+              <button
+                type="button"
+                className={perfilModalTab === 'direcciones' ? 'tiendaTab activa' : 'tiendaTab'}
+                onClick={() => setPerfilModalTab('direcciones')}
+              >
+                Direcciones
+              </button>
+              <button
+                type="button"
+                className={perfilModalTab === 'atencion' ? 'tiendaTab activa' : 'tiendaTab'}
+                onClick={() => setPerfilModalTab('atencion')}
+              >
+                Atención
+              </button>
+              <button
+                type="button"
+                className={perfilModalTab === 'notificaciones' ? 'tiendaTab activa' : 'tiendaTab'}
+                onClick={() => setPerfilModalTab('notificaciones')}
+              >
+                Notificaciones
+                {totalNoLeidasCliente > 0 && <span className="tiendaPerfilTabDot" aria-hidden="true" />}
+              </button>
+            </div>
 
-              <div className="tiendaPerfilPanelPro tiendaPerfilPanelOrdenes">
-                <h4>Mis órdenes</h4>
-                <div className="tiendaOrdenes tiendaOrdenesPro">
-                  {ordenes.map((orden) => (
-                    <div key={orden.id} className="tiendaOrdenCardPro">
-                      <strong>{orden.folio}</strong>
-                      <span>Pago: {orden.metodo_pago}</span>
-                      <span>Total: {precio(orden.total)}</span>
-                      <span>Estado: {orden.estado}</span>
-                      {String(orden.estado).toLowerCase() === 'pendiente' && (
-                        <button
-                          className="botonPequeno botonDanger"
-                          type="button"
-                          onClick={async () => {
-                            const ok = await mostrarConfirmacion('¿Cancelar esta orden?', 'Cancelar orden');
-                            if (!ok) return;
-                            try {
-                              await fetchJson(`/tienda/ordenes/${orden.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clienteToken}` } });
-                              await cargarMisOrdenes();
-                              mostrarNotificacion('Orden cancelada', 'exito');
-                            } catch (error) {
-                              mostrarNotificacion(error?.message || 'No se pudo cancelar la orden', 'error');
+            <div className="tiendaPerfilLayoutPro">
+              {perfilModalTab === 'datos' && (
+                <div className="tiendaPerfilPanelPro tiendaPerfilPanelSolo">
+                  <h4>Mi perfil</h4>
+                  <div className="tiendaPerfilResumenGrid">
+                    <div className="tiendaPerfilResumenItem">
+                      <span>Cliente</span>
+                      <strong>{nombreClienteCompleto || cliente?.nombre || 'Sin nombre'}</strong>
+                    </div>
+                    <div className="tiendaPerfilResumenItem">
+                      <span>Correo</span>
+                      <strong>{cliente?.email || 'Sin correo'}</strong>
+                    </div>
+                  </div>
+                  <div className="tiendaPerfilCamposGrid2">
+                    <div className="tiendaPerfil tiendaPerfilCamposPro">
+                      <label htmlFor="perfilNombreCliente">Nombre</label>
+                      <input
+                        id="perfilNombreCliente"
+                        placeholder="Nombre"
+                        value={perfil.nombre}
+                        onChange={(e) => setPerfil((p) => ({ ...p, nombre: e.target.value }))}
+                      />
+
+                      <label htmlFor="perfilApellidoPaternoCliente">Apellido paterno</label>
+                      <input
+                        id="perfilApellidoPaternoCliente"
+                        placeholder="Apellido paterno"
+                        value={perfil.apellido_paterno}
+                        onChange={(e) => setPerfil((p) => ({ ...p, apellido_paterno: e.target.value }))}
+                      />
+
+                      <label htmlFor="perfilApellidoMaternoCliente">Apellido materno</label>
+                      <input
+                        id="perfilApellidoMaternoCliente"
+                        placeholder="Apellido materno"
+                        value={perfil.apellido_materno}
+                        onChange={(e) => setPerfil((p) => ({ ...p, apellido_materno: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="tiendaPerfil tiendaPerfilCamposPro">
+                      <label htmlFor="perfilEmailCliente">Correo electrónico</label>
+                      <input
+                        id="perfilEmailCliente"
+                        type="email"
+                        placeholder="Correo"
+                        value={perfil.email}
+                        onChange={(e) => setPerfil((p) => ({ ...p, email: e.target.value }))}
+                      />
+
+                      <label htmlFor="perfilTelefonoCliente">Teléfono</label>
+                      <input
+                        id="perfilTelefonoCliente"
+                        placeholder="Teléfono"
+                        value={perfil.telefono}
+                        onChange={(e) => setPerfil((p) => ({ ...p, telefono: e.target.value }))}
+                      />
+
+                      <label htmlFor="perfilFechaNacimientoCliente">Cumpleaños</label>
+                      <input
+                        id="perfilFechaNacimientoCliente"
+                        type="date"
+                        value={perfil.fecha_nacimiento}
+                        onChange={(e) => setPerfil((p) => ({ ...p, fecha_nacimiento: e.target.value }))}
+                      />
+
+                      <label htmlFor="perfilPagoPreferidoCliente">Forma de pago preferida</label>
+                      <select
+                        id="perfilPagoPreferidoCliente"
+                        value={perfil.forma_pago_preferida}
+                        onChange={(e) => setPerfil((p) => ({ ...p, forma_pago_preferida: e.target.value }))}
+                      >
+                        <option value="">Forma de pago preferida</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="tarjeta">Tarjeta terminal</option>
+                        <option value="mercado_pago">Mercado Pago</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="tiendaPerfilAcciones">
+                    <button className="boton botonExito" type="button" onClick={guardarPerfil}>Guardar perfil</button>
+                    <button className="boton botonDanger" type="button" onClick={cerrarSesionCliente}>Cerrar sesión</button>
+                  </div>
+                </div>
+              )}
+
+              {perfilModalTab === 'ordenes' && (
+                <div className="tiendaPerfilPanelPro tiendaPerfilPanelSolo tiendaPerfilPanelOrdenes">
+                  <h4>Mis órdenes</h4>
+                  <div className="tiendaPedidosTabsPerfil">
+                    <button
+                      type="button"
+                      className={perfilPedidosTab === 'activos' ? 'tiendaTab activa' : 'tiendaTab'}
+                      onClick={() => setPerfilPedidosTab('activos')}
+                    >
+                      Activos ({ordenesPerfilActivas.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={perfilPedidosTab === 'cerrados' ? 'tiendaTab activa' : 'tiendaTab'}
+                      onClick={() => setPerfilPedidosTab('cerrados')}
+                    >
+                      Cerrados ({ordenesPerfilCerradas.length})
+                    </button>
+                  </div>
+
+                  <div className="tiendaOrdenes tiendaOrdenesPro">
+                    {(perfilPedidosTab === 'cerrados' ? ordenesPerfilCerradas : ordenesPerfilActivas).map((orden) => (
+                      <div key={orden.id} className="tiendaOrdenCardPro">
+                        {(() => {
+                          const linkRastreo = construirLinkRastreo(orden?.paqueteria, orden?.numero_guia);
+                          return (
+                            <>
+                              <strong>{orden.folio}</strong>
+                              <span>Pago: {orden.metodo_pago}</span>
+                              <span>Total: {precio(orden.total)}</span>
+                              <span>Estado: {etiquetaEstadoPedido(orden.estado)}</span>
+                              {String(orden?.paqueteria || '').trim() && <span>Paquetería: {etiquetaPaqueteria(orden.paqueteria)}</span>}
+                              {String(orden?.numero_guia || '').trim() && <span>Guía: {orden.numero_guia}</span>}
+                              {linkRastreo && (
+                                <a className="tiendaTrackingLink" href={linkRastreo} target="_blank" rel="noreferrer">
+                                  Rastrear paquete
+                                </a>
+                              )}
+                            </>
+                          );
+                        })()}
+                        {String(orden.estado).toLowerCase() === 'pendiente' && (
+                          <button
+                            className="botonPequeno botonDanger"
+                            type="button"
+                            onClick={async () => {
+                              const ok = await mostrarConfirmacion('¿Cancelar esta orden?', 'Cancelar orden');
+                              if (!ok) return;
+                              try {
+                                await fetchJson(`/tienda/ordenes/${orden.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clienteToken}` } });
+                                await cargarMisOrdenes();
+                                mostrarNotificacion('Orden cancelada', 'exito');
+                              } catch (error) {
+                                mostrarNotificacion(error?.message || 'No se pudo cancelar la orden', 'error');
+                              }
+                            }}
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {!(perfilPedidosTab === 'cerrados' ? ordenesPerfilCerradas : ordenesPerfilActivas).length && (
+                      <div className="tiendaVacio">
+                        {perfilPedidosTab === 'cerrados'
+                          ? 'No tienes pedidos cerrados todavía.'
+                          : 'No tienes pedidos activos en este momento.'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {perfilModalTab === 'direcciones' && (
+                <div className="tiendaPerfilPanelPro tiendaPerfilPanelSolo">
+                  <div className="tiendaDireccionesHead">
+                    <h4>Mis direcciones</h4>
+                    <button
+                      type="button"
+                      className="boton botonExito"
+                      onClick={() => {
+                        setDireccionPerfilNueva(DIRECCION_CLIENTE_DEFAULT);
+                        setDireccionPerfilEditandoId(null);
+                        setMostrarModalNuevaDireccion(true);
+                      }}
+                    >
+                      + Agregar dirección
+                    </button>
+                  </div>
+                  <small className="tiendaPerfilLeyendaDireccion">
+                    {servicioDomicilioActivoCliente
+                      ? 'Selecciona una dirección preferida para entregas a domicilio.'
+                      : 'Próximamente activaremos servicio a domicilio. Puedes dejar tus direcciones desde ahora.'}
+                  </small>
+
+                  <div className="tiendaDireccionesLista">
+                    {!direccionesPerfil.length && (
+                      <div className="tiendaVacio">Aún no tienes direcciones registradas.</div>
+                    )}
+                    {direccionesPerfil.map((direccion) => (
+                      <article key={`direccion-${direccion.id}`} className="tiendaDireccionCard">
+                        <div className="tiendaDireccionCardHead">
+                          <label className="tiendaDireccionPreferida">
+                            <input
+                              type="radio"
+                              name="direccionPreferida"
+                              checked={Number(direccion.es_preferida) === 1}
+                              onChange={() => marcarDireccionPreferidaPerfil(direccion.id)}
+                            />
+                            <span>Preferida</span>
+                          </label>
+                          <div className="tiendaDireccionAcciones">
+                            <button
+                              type="button"
+                              className="botonPequeno"
+                              onClick={() => {
+                                setDireccionPerfilNueva({
+                                  alias: String(direccion.alias || '').trim() || 'Casa',
+                                  direccion: String(direccion.direccion || '').trim(),
+                                  referencias: String(direccion.referencias || '').trim(),
+                                  es_preferida: Number(direccion.es_preferida) === 1
+                                });
+                                setDireccionPerfilEditandoId(Number(direccion.id) || null);
+                                setMostrarModalNuevaDireccion(true);
+                              }}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className="botonPequeno botonDanger"
+                              onClick={() => eliminarDireccionPerfil(direccion.id)}
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
+                        <strong>{direccion.alias || 'Dirección'}</strong>
+                        <p>{direccion.direccion}</p>
+                        {String(direccion.referencias || '').trim() && <small>{direccion.referencias}</small>}
+                      </article>
+                    ))}
+                  </div>
+
+                  {mostrarModalNuevaDireccion && (
+                    <div className="tiendaDireccionModalBackdrop" onClick={() => setMostrarModalNuevaDireccion(false)}>
+                      <div className="tiendaDireccionModalCard" onClick={(e) => e.stopPropagation()}>
+                        <div className="tiendaDireccionModalHead">
+                          <h5>{Number(direccionPerfilEditandoId) > 0 ? 'Editar dirección' : 'Nueva dirección'}</h5>
+                          <button
+                            type="button"
+                            className="botonPequeno"
+                            onClick={() => {
+                              setMostrarModalNuevaDireccion(false);
+                              setDireccionPerfilEditandoId(null);
+                              setDireccionPerfilNueva(DIRECCION_CLIENTE_DEFAULT);
+                            }}
+                          >
+                            Cerrar
+                          </button>
+                        </div>
+
+                        <div className="tiendaPerfil tiendaPerfilCamposPro tiendaDireccionNuevaBox">
+                          <label htmlFor="perfilDireccionAlias">Alias</label>
+                          <input
+                            id="perfilDireccionAlias"
+                            placeholder="Casa, Trabajo, Familiar..."
+                            value={direccionPerfilNueva.alias}
+                            onChange={(e) => setDireccionPerfilNueva((prev) => ({ ...prev, alias: e.target.value }))}
+                          />
+
+                          <label htmlFor="perfilDireccionTexto">Dirección</label>
+                          <textarea
+                            id="perfilDireccionTexto"
+                            rows={3}
+                            placeholder="Calle, número, colonia, ciudad..."
+                            value={direccionPerfilNueva.direccion}
+                            onChange={(e) => setDireccionPerfilNueva((prev) => ({ ...prev, direccion: e.target.value }))}
+                          />
+
+                          <label htmlFor="perfilDireccionRef">Referencias</label>
+                          <input
+                            id="perfilDireccionRef"
+                            placeholder="Entre calles, color de fachada, etc."
+                            value={direccionPerfilNueva.referencias}
+                            onChange={(e) => setDireccionPerfilNueva((prev) => ({ ...prev, referencias: e.target.value }))}
+                          />
+
+                          <label className="tiendaDireccionPreferidaCheck">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(direccionPerfilNueva.es_preferida)}
+                              onChange={(e) => setDireccionPerfilNueva((prev) => ({ ...prev, es_preferida: e.target.checked }))}
+                            />
+                            <span>Marcar como dirección preferida</span>
+                          </label>
+
+                          <button
+                            type="button"
+                            className="boton botonExito"
+                            onClick={agregarDireccionPerfil}
+                            disabled={guardandoDireccionPerfil}
+                          >
+                            {guardandoDireccionPerfil
+                              ? 'Guardando...'
+                              : Number(direccionPerfilEditandoId) > 0
+                                ? 'Actualizar dirección'
+                                : 'Guardar dirección'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {perfilModalTab === 'atencion' && (
+                <div className="tiendaPerfilPanelPro tiendaPerfilPanelSolo">
+                  <h4>Atención al cliente</h4>
+                  <div className="tiendaAtencionGrid">
+                    <div className="tiendaAtencionIntro">
+                      <h5>Tu opinión cuenta, envíanos un mensaje.</h5>
+                      <p>
+                        Si tu consulta o incidencia está relacionada con una compra, incluye tu número de pedido para atenderte más rápido.
+                      </p>
+                      <div className="tiendaAtencionMeta">
+                        <span><strong>Correo:</strong> {configTienda.atencion_correo || 'atc@chipactli.mx'}</span>
+                        <span><strong>Horario:</strong> {configTienda.atencion_horario_lunes_viernes || '09:00 a.m. - 06:00 p.m.'}</span>
+                      </div>
+                    </div>
+
+                    <div className="tiendaPerfil tiendaPerfilCamposPro">
+                      <label htmlFor="perfilAtencionAsunto">Asunto</label>
+                      <select
+                        id="perfilAtencionAsunto"
+                        value={atencionForm.asunto}
+                        onChange={(e) => setAtencionForm((prev) => ({ ...prev, asunto: e.target.value }))}
+                      >
+                        <option value="">Selecciona un asunto</option>
+                        {asuntosAtencionDisponibles.map((asunto) => (
+                          <option key={`asunto-${asunto}`} value={asunto}>{asunto}</option>
+                        ))}
+                      </select>
+
+                      <label htmlFor="perfilAtencionMensaje">Mensaje</label>
+                      <textarea
+                        id="perfilAtencionMensaje"
+                        rows={6}
+                        placeholder="Describe detalladamente tu consulta"
+                        value={atencionForm.mensaje}
+                        onChange={(e) => setAtencionForm((prev) => ({ ...prev, mensaje: e.target.value }))}
+                      />
+
+                      <button
+                        type="button"
+                        className="boton botonExito"
+                        onClick={enviarAtencionPerfil}
+                        disabled={enviandoAtencionPerfil}
+                      >
+                        {enviandoAtencionPerfil ? 'Enviando...' : 'Enviar mensaje'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {perfilModalTab === 'notificaciones' && (
+                <div className="tiendaPerfilPanelPro tiendaPerfilPanelSolo">
+                  <div className="tiendaNotifsPerfilHead">
+                    <h4>Notificaciones</h4>
+                    <div className="tiendaNotifsPerfilHeadActions">
+                      <button type="button" className="botonPequeno" onClick={marcarNotificacionesClienteComoLeidas}>Marcar todas leídas</button>
+                      <button type="button" className="botonPequeno" onClick={limpiarNotificacionesCliente}>Limpiar historial</button>
+                    </div>
+                  </div>
+                  {mostrarPromptNotificacionesPedidos && (
+                    <div className="tiendaNotifPedidosPrompt">
+                      <strong>Activa notificaciones de pedidos</strong>
+                      <p>Te avisaremos cuando tu pedido se realice o cambie de estatus.</p>
+                      <button type="button" className="boton botonExito" onClick={habilitarNotificacionesPedidosCliente}>
+                        Activar notificaciones
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="tiendaNotifPedidosConfig">
+                    <span>
+                      Estado de notificaciones: {
+                        !notificacionesNativasDisponibles()
+                          ? 'No disponible en este navegador'
+                          : permisoNotificacionesPedidos === 'granted'
+                            ? 'Activadas'
+                            : permisoNotificacionesPedidos === 'denied'
+                              ? 'Bloqueadas'
+                              : 'Pendientes'
+                      }
+                    </span>
+                    <div className="tiendaNotifPedidosConfigRow">
+                      <label htmlFor="tiendaSonidoNotificacionesPedidos">Sonido</label>
+                      <select
+                        id="tiendaSonidoNotificacionesPedidos"
+                        value={sonidoNotificacionesPedidosDraft}
+                        onChange={(e) => cambiarSonidoNotificacionesPedidos(e.target.value)}
+                      >
+                        {OPCIONES_SONIDO_NOTIFICACION.map((opcion) => (
+                          <option key={`sonido-notif-${opcion.value}`} value={opcion.value}>{opcion.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {sonidoNotificacionesPedidosDraft !== sonidoNotificacionesPedidos && (
+                      <button type="button" className="botonPequeno botonExito" onClick={guardarSonidoNotificacionesPedidos}>
+                        Guardar sonido
+                      </button>
+                    )}
+                    {notificacionesNativasDisponibles() && permisoNotificacionesPedidos !== 'granted' && (
+                      <button type="button" className="botonPequeno" onClick={habilitarNotificacionesPedidosCliente}>
+                        Habilitar notificaciones
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="tiendaNotifsClienteLista tiendaNotifsClienteListaPerfil">
+                    <div className="tiendaNotifsTabsPerfil">
+                      <button
+                        type="button"
+                        className={notificacionesTabPerfil === 'sin_leer' ? 'tiendaTab activa' : 'tiendaTab'}
+                        onClick={() => setNotificacionesTabPerfil('sin_leer')}
+                      >
+                        Sin leer ({notificacionesClienteSinLeer.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={notificacionesTabPerfil === 'leidas' ? 'tiendaTab activa' : 'tiendaTab'}
+                        onClick={() => setNotificacionesTabPerfil('leidas')}
+                      >
+                        Leídas ({notificacionesClienteLeidas.length})
+                      </button>
+                    </div>
+
+                    {!(notificacionesTabPerfil === 'sin_leer' ? notificacionesClienteSinLeer : notificacionesClienteLeidas).length && (
+                      <div className="tiendaVacio">No hay notificaciones registradas todavía.</div>
+                    )}
+                    {(notificacionesTabPerfil === 'sin_leer' ? notificacionesClienteSinLeer : notificacionesClienteLeidas).map((item) => {
+                      const esLeida = Boolean(item?.leida);
+                      return (
+                        <article
+                          key={`perfil-notif-${item.id}`}
+                          className={esLeida ? 'tiendaNotifsClienteItem' : 'tiendaNotifsClienteItem tiendaNotifsClienteItemNueva'}
+                          onClick={() => {
+                            if (esLeida) return;
+                            marcarNotificacionClienteComoLeida(item.id);
+                          }}
+                          role={!esLeida ? 'button' : undefined}
+                          tabIndex={!esLeida ? 0 : -1}
+                          onKeyDown={(e) => {
+                            if (esLeida) return;
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              marcarNotificacionClienteComoLeida(item.id);
                             }
                           }}
-                        >Cancelar</button>
-                      )}
-                    </div>
-                  ))}
-                  {!ordenes.length && <div className="tiendaVacio">Aún no tienes órdenes.</div>}
+                        >
+                          <strong>{item.titulo}</strong>
+                          <p>{item.mensaje}</p>
+                          <span>{String(item.fecha || '').replace('T', ' ').slice(0, 16)}</span>
+                        </article>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -3173,7 +5091,29 @@ export default function Tienda({
               {item.label}
             </button>
           ))}
-          <div className="tiendaFooterPagos">{configTienda.footer_pagos_texto}</div>
+          <div className="tiendaFooterPagos">
+            {metodosPagoRenderFooter.length ? (
+              <div className="tiendaFooterPagosLogosWrap">
+                {metodosPagoRenderFooter.map((metodo, idx) => (
+                  String(metodo?.logo_render_url || '').trim() ? (
+                    <img
+                      key={`footer-logo-pago-${metodo.id}-${idx}`}
+                      src={String(metodo.logo_render_url).trim()}
+                      alt={metodo?.label || `Método de pago ${idx + 1}`}
+                      className="tiendaFooterPagosLogos"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span key={`footer-txt-pago-${metodo.id}-${idx}`} className="tiendaFooterPagoTextoItem">
+                      {metodo?.label || `Método de pago ${idx + 1}`}
+                    </span>
+                  )
+                ))}
+              </div>
+            ) : (
+              <span>{configTienda.footer_pagos_texto}</span>
+            )}
+          </div>
         </div>
       </footer>}
 

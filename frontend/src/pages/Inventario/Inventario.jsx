@@ -116,6 +116,13 @@ function escapeHtml(s) {
     .replaceAll("'", '&#39;');
 }
 
+function escaparParaInlineJs(valor) {
+  return texto(valor)
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'")
+    .replace(/\r?\n/g, ' ');
+}
+
 function agruparPorProveedor(lista = []) {
   const mapa = new Map();
   (Array.isArray(lista) ? lista : []).forEach((it) => {
@@ -377,8 +384,6 @@ function guardarProveedorReciente(proveedor) {
 }
 
 async function cargarOpcionesProveedorInsumo() {
-  const select = document.getElementById('proveedorInsumo');
-  if (!select) return;
   let proveedores = [];
   try {
     const data = await fetchAPIJSON(`${API}/inventario/proveedores`);
@@ -390,11 +395,24 @@ async function cargarOpcionesProveedorInsumo() {
     proveedores = [];
   }
 
-  select.innerHTML = `<option value="">Selecciona proveedor</option>${proveedores.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}`;
+  const cargarSelectProveedor = (idSelect, preferido = '') => {
+    const select = document.getElementById(idSelect);
+    if (!select) return;
+    const actual = texto(select.value).trim() || texto(preferido).trim();
+    let opciones = [...proveedores];
+    if (actual && !opciones.includes(actual)) opciones.push(actual);
+    opciones = opciones.sort(cmpTexto);
+    select.innerHTML = `<option value="">Selecciona proveedor</option>${opciones.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}`;
+    if (actual) select.value = actual;
+  };
 
   const reciente = obtenerProveedorRecienteGuardado();
-  if (reciente && proveedores.includes(reciente)) {
-    select.value = reciente;
+  cargarSelectProveedor('proveedorInsumo', reciente);
+  cargarSelectProveedor('editProveedorInsumo');
+
+  const selectAgregar = document.getElementById('proveedorInsumo');
+  if (selectAgregar && !texto(selectAgregar.value).trim() && reciente && proveedores.includes(reciente)) {
+    selectAgregar.value = reciente;
   }
 }
 
@@ -417,6 +435,14 @@ async function cargarInventario() {
     if (!cuerpo) return;
 
     const lista = Array.isArray(inventarioData) ? inventarioData : [];
+    const totalPendientes = lista.filter((ins) => Number(ins?.pendiente || 0) === 1).length;
+    const botonPendientes = document.getElementById('btnPendientesInventario');
+    if (botonPendientes) {
+      botonPendientes.textContent = totalPendientes > 0
+        ? `⏳ Revisar pendientes (${totalPendientes})`
+        : '⏳ Revisar pendientes';
+    }
+
     if (!lista.length) {
       cuerpo.innerHTML = '<tr><td colspan="10" style="text-align:center">No hay insumos</td></tr>';
       return;
@@ -431,13 +457,16 @@ async function cargarInventario() {
       fragment.appendChild(filaGrupo);
 
       grupo.items.forEach((insumo) => {
+        const nombreInsumoSeguro = escaparParaInlineJs(insumo?.nombre);
+        const esPendiente = Number(insumo?.pendiente || 0) === 1;
         const porcentaje = Number(insumo.cantidad_total || 0) > 0
           ? Math.min(100, Math.max(0, (Number(insumo.cantidad_disponible || 0) / Number(insumo.cantidad_total || 0)) * 100))
           : 0;
         const clase = porcentaje <= 25 ? 'porcentajeBajo' : porcentaje <= 50 ? 'porcentajeMedio' : 'porcentajeAlto';
         const fila = document.createElement('tr');
+        if (esPendiente) fila.className = 'filaInventarioPendiente';
         fila.innerHTML = `
-          <td>${escapeHtml(insumo.codigo || '')}</td>
+          <td>${esPendiente ? `<span class="codigoPendienteInventario">${escapeHtml(insumo.codigo || '')}</span>` : escapeHtml(insumo.codigo || '')}</td>
           <td>${escapeHtml(insumo.nombre || '')}</td>
           <td>${escapeHtml(insumo.proveedor || '') || '<span style="color:#999">Sin proveedor</span>'}</td>
           <td>${escapeHtml(abrevUnidad(insumo.unidad || ''))}</td>
@@ -448,7 +477,7 @@ async function cargarInventario() {
           <td><div class="barraPorcentaje"><div class="barraPorcentajeRelleno ${clase}" style="width:${porcentaje.toFixed(0)}%"></div><span class="textoPorcentaje">${porcentaje.toFixed(0)}%</span></div></td>
           <td>
             <button onclick="window.inventario.editarInsumo(${insumo.id})" class="botonPequeno">✏️</button>
-            <button onclick="window.inventario.mostrarHistorialInsumo(${insumo.id}, '${escapeHtml(texto(insumo.nombre).replaceAll('\\', '\\\\').replaceAll("'", "\\'"))}')" class="botonPequeno">📜</button>
+            <button onclick="window.inventario.mostrarHistorialInsumo(${insumo.id}, '${nombreInsumoSeguro}')" class="botonPequeno">📜</button>
             <button onclick="window.inventario.eliminarInsumo(${insumo.id})" class="botonPequeno botonDanger">🗑️</button>
           </td>
         `;
@@ -460,6 +489,38 @@ async function cargarInventario() {
   } catch (error) {
     console.error('Error cargando inventario:', error);
   }
+}
+
+function mostrarPendientesInventario() {
+  const modal = document.getElementById('modalPendientesInventario');
+  const cuerpo = document.getElementById('cuerpoPendientesInventario');
+  if (!modal || !cuerpo) return;
+
+  const pendientes = (Array.isArray(inventarioData) ? inventarioData : [])
+    .filter((item) => Number(item?.pendiente || 0) === 1)
+    .sort((a, b) => cmpTexto(a?.nombre, b?.nombre));
+
+  if (!pendientes.length) {
+    cuerpo.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666">No hay insumos pendientes</td></tr>';
+  } else {
+    cuerpo.innerHTML = pendientes.map((item) => `
+      <tr class="filaInventarioPendiente">
+        <td><span class="codigoPendienteInventario">${escapeHtml(item?.codigo || '')}</span></td>
+        <td>${escapeHtml(item?.nombre || '')}</td>
+        <td>${escapeHtml(item?.proveedor || '') || '<span style="color:#999">Sin proveedor</span>'}</td>
+        <td>${escapeHtml(abrevUnidad(item?.unidad || ''))}</td>
+        <td>
+          <button class="botonPequeno" type="button" onclick="window.inventario.editarInsumo(${Number(item?.id || 0)}); window.inventario.cerrarModalPendientesInventario();">✏️ Editar</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  abrirModal('modalPendientesInventario');
+}
+
+function cerrarModalPendientesInventario() {
+  cerrarModal('modalPendientesInventario');
 }
 
 async function cargarEstadisticasInventario() {
@@ -739,6 +800,7 @@ async function cargarOrdenes(targetId = 'listaOrdenes', filtro = 'creadas') {
     }
 
     cont.innerHTML = filtradas.map((orden) => {
+      const numeroOrdenSeguro = escaparParaInlineJs(orden?.numero_orden || '');
       const estado = texto(orden?.estado || 'pendiente');
       const estadoHtml = estado === 'surtida'
         ? '<span style="color:#2e7d32;font-weight:700">Surtida</span>'
@@ -754,7 +816,7 @@ async function cargarOrdenes(targetId = 'listaOrdenes', filtro = 'creadas') {
             <div>${estadoHtml}</div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               ${estado !== 'surtida' ? `<button class="botonPequeno botonExito" type="button" onclick="window.inventario.surtirOrdenCompleta(${Number(orden?.id || 0)})">✅ Surtir todo</button>` : ''}
-              <button class="botonPequeno botonDanger" type="button" onclick="window.inventario.eliminarOrdenCompra(${Number(orden?.id || 0)}, '${escapeHtml(texto(orden?.numero_orden || '').replaceAll('\\', '\\\\').replaceAll("'", "\\'"))}')">🗑️ Eliminar</button>
+              <button class="botonPequeno botonDanger" type="button" onclick="window.inventario.eliminarOrdenCompra(${Number(orden?.id || 0)}, '${numeroOrdenSeguro}')">🗑️ Eliminar</button>
             </div>
           </div>
           <ul>${(orden.items || []).map((item) => renderItemOrdenConAcciones(item)).join('') || '<li>Sin insumos</li>'}</ul>
@@ -1447,10 +1509,35 @@ async function agregarInsumo(event) {
 async function editarInsumo(id) {
   try {
     const insumo = await fetchAPIJSON(`${API}/inventario/${id}`);
+    const esPendiente = Number(insumo?.pendiente || 0) === 1;
+
+    await cargarOpcionesProveedorInsumo();
+
     document.getElementById('idEditInsumo').value = insumo.id;
-    document.getElementById('editCodigoInsumo').value = insumo.codigo || '';
+    const inputCodigo = document.getElementById('editCodigoInsumo');
+    const estadoPendiente = document.getElementById('editPendienteInsumo');
+    const avisoPendiente = document.getElementById('avisoPendienteInsumo');
+
+    if (estadoPendiente) estadoPendiente.value = esPendiente ? '1' : '0';
+    if (inputCodigo) {
+      inputCodigo.value = insumo.codigo || '';
+      inputCodigo.readOnly = !esPendiente;
+      inputCodigo.classList.toggle('inputCodigoPendienteInventario', esPendiente);
+    }
+    if (avisoPendiente) avisoPendiente.style.display = esPendiente ? 'block' : 'none';
+
     document.getElementById('editNombreInsumo').value = insumo.nombre || '';
-    document.getElementById('editProveedorInsumo').value = insumo.proveedor || '';
+    const selectProveedor = document.getElementById('editProveedorInsumo');
+    if (selectProveedor) {
+      const proveedorInsumo = texto(insumo.proveedor).trim();
+      if (proveedorInsumo && !Array.from(selectProveedor.options).some((op) => texto(op.value).trim() === proveedorInsumo)) {
+        const option = document.createElement('option');
+        option.value = proveedorInsumo;
+        option.textContent = proveedorInsumo;
+        selectProveedor.appendChild(option);
+      }
+      selectProveedor.value = proveedorInsumo;
+    }
     document.getElementById('editUnidadInsumo').value = insumo.unidad || '';
     document.getElementById('editCantidadInsumo').value = insumo.cantidad_total || 0;
     document.getElementById('editCostoInsumo').value = insumo.costo_total || 0;
@@ -1463,8 +1550,22 @@ async function editarInsumo(id) {
 async function guardarEditarInsumo(event) {
   event?.preventDefault();
   const id = document.getElementById('idEditInsumo')?.value;
+  const codigo = texto(document.getElementById('editCodigoInsumo')?.value).trim();
+  const esPendiente = Number(document.getElementById('editPendienteInsumo')?.value || 0) === 1;
+
+  if (esPendiente) {
+    if (!codigo) {
+      mostrarNotificacion('El código final es obligatorio para un insumo pendiente', 'error');
+      return;
+    }
+    if (codigo.toUpperCase().startsWith('PEND-')) {
+      mostrarNotificacion('Ingresa un código real para liberar este insumo pendiente', 'error');
+      return;
+    }
+  }
+
   const payload = {
-    codigo: document.getElementById('editCodigoInsumo')?.value,
+    codigo,
     nombre: document.getElementById('editNombreInsumo')?.value,
     proveedor: texto(document.getElementById('editProveedorInsumo')?.value).trim(),
     unidad: document.getElementById('editUnidadInsumo')?.value,
@@ -1545,16 +1646,17 @@ async function mostrarHistorialInversion() {
 
     listaDiv.innerHTML = historialPorFecha.map((dia) => {
       const fecha = new Date(dia.fecha).toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const fechaClave = encodeURIComponent(texto(dia?.fecha));
       return `
         <div style="border:2px solid #ddd;border-radius:8px;margin-bottom:15px;overflow:hidden">
-          <div onclick="window.inventario.toggleHistorialFecha('${dia.fecha}')" style="background:#f5f5f5;padding:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none">
+          <div onclick="window.inventario.toggleHistorialFecha('${fechaClave}')" style="background:#f5f5f5;padding:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none">
             <div style="flex:1">
               <h4 style="margin:0;color:#333;font-size:16px;text-transform:capitalize">${fecha}</h4>
               <p style="margin:5px 0 0 0;font-size:12px;color:#666">${dia.total_insumos} insumo(s) agregado(s) · Total: $${Number(dia.total_costo || 0).toFixed(2)}</p>
             </div>
-            <button id="boton-${dia.fecha}" style="background:none;border:none;font-size:18px;cursor:pointer;padding:0 10px">▶</button>
+            <button id="boton-${fechaClave}" style="background:none;border:none;font-size:18px;cursor:pointer;padding:0 10px">▶</button>
           </div>
-          <div id="detalles-${dia.fecha}" style="display:none;padding:12px;background:#fff">
+          <div id="detalles-${fechaClave}" style="display:none;padding:12px;background:#fff">
             ${(dia.insumos || []).map((insumo) => `
               <div style="display:grid;grid-template-columns:120px 1fr 120px 120px;gap:8px;padding:6px 0;border-bottom:1px solid #eee">
                 <span>${insumo.hora}</span>
@@ -1635,6 +1737,8 @@ export default function Inventario() {
       guardarEditarInsumo,
       eliminarInsumo,
       mostrarHistorialInsumo,
+      mostrarPendientesInventario,
+      cerrarModalPendientesInventario,
       filtrarInventario,
       mostrarHistorialInversion,
       eliminarHistorialFecha,
@@ -1657,6 +1761,7 @@ export default function Inventario() {
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
           <input type="text" className="cajaBusqueda" id="busquedaInventario" placeholder="🔍 Buscar insumo..." onChange={(e) => filtrarInventario(e.target.value)} style={{ width: '220px' }} />
           <button className="boton" onClick={() => abrirModalAgregarInsumo()}>➥ Agregar Insumo</button>
+          <button id="btnPendientesInventario" className="boton" onClick={() => mostrarPendientesInventario()}>⏳ Revisar pendientes</button>
           <button className="boton" onClick={() => mostrarHistorialInversion()}>📊 Historial Inversión</button>
         </div>
       </div>
@@ -1787,7 +1892,19 @@ export default function Inventario() {
             <div className="filaFormulario filaFormulario-CodigoNombre"><input id="codigoInsumo" type="text" placeholder="Código" required /><input id="nombreInsumo" type="text" placeholder="Nombre" required /></div>
             <div className="filaFormulario" style={{ display: 'grid', gridTemplateColumns: '1.05fr 0.65fr 0.75fr 0.8fr', gap: '8px' }}>
               <select id="proveedorInsumo" required><option value="">Selecciona proveedor</option></select>
-              <input id="unidadInsumo" type="text" placeholder="Unidad" required />
+              <select id="unidadInsumo" required>
+                <option value="">Unidad</option>
+                <option value="g">Gramos (g)</option>
+                <option value="kg">Kilogramos (kg)</option>
+                <option value="ml">Mililitros (ml)</option>
+                <option value="l">Litros (l)</option>
+                <option value="pz">Piezas (pz)</option>
+                <option value="cda">Cucharadas (cda)</option>
+                <option value="cdta">Cucharaditas (cdta)</option>
+                <option value="taza">Tazas</option>
+                <option value="oz">Onzas (oz)</option>
+                <option value="go">Gotas (go)</option>
+              </select>
               <input id="cantidadInsumo" type="number" step="0.01" min="0" placeholder="Cantidad" required />
               <input id="costoInsumo" type="number" step="0.01" min="0" placeholder="Costo" required />
             </div>
@@ -1801,11 +1918,52 @@ export default function Inventario() {
           <div className="encabezadoModal"><h3>Editar Insumo</h3><button className="cerrarModal" onClick={() => cerrarModal('modalEditarInsumo')}>&times;</button></div>
           <form onSubmit={guardarEditarInsumo} className="cajaFormulario">
             <input id="idEditInsumo" type="hidden" />
+            <input id="editPendienteInsumo" type="hidden" />
             <div className="filaFormulario filaFormulario-CodigoNombre"><input id="editCodigoInsumo" type="text" readOnly /><input id="editNombreInsumo" type="text" required /></div>
-            <div className="filaFormulario"><input id="editProveedorInsumo" type="text" placeholder="Proveedor" /></div>
-            <div className="filaFormulario filaFormulario-UnidadCantidadCosto"><input id="editUnidadInsumo" type="text" required /><input id="editCantidadInsumo" type="number" step="0.01" min="0" required /><input id="editCostoInsumo" type="number" step="0.01" min="0" required /></div>
+            <p id="avisoPendienteInsumo" className="avisoPendienteInventario" style={{ display: 'none' }}>
+              Este insumo est\u00e1 pendiente. Captura el c\u00f3digo real para liberarlo y marcarlo como disponible.
+            </p>
+            <div className="filaFormulario">
+              <select id="editProveedorInsumo" required>
+                <option value="">Selecciona proveedor</option>
+              </select>
+            </div>
+            <div className="filaFormulario filaFormulario-UnidadCantidadCosto">
+              <select id="editUnidadInsumo" required>
+                <option value="">Unidad</option>
+                <option value="g">Gramos (g)</option>
+                <option value="kg">Kilogramos (kg)</option>
+                <option value="ml">Mililitros (ml)</option>
+                <option value="l">Litros (l)</option>
+                <option value="pz">Piezas (pz)</option>
+                <option value="cda">Cucharadas (cda)</option>
+                <option value="cdta">Cucharaditas (cdta)</option>
+                <option value="taza">Tazas</option>
+                <option value="oz">Onzas (oz)</option>
+                <option value="go">Gotas (go)</option>
+              </select>
+              <input id="editCantidadInsumo" type="number" step="0.01" min="0" required />
+              <input id="editCostoInsumo" type="number" step="0.01" min="0" required />
+            </div>
             <button className="boton botonExito" type="submit">Guardar cambios</button>
           </form>
+        </div>
+      </div>
+
+      <div id="modalPendientesInventario" className="modal" onClick={() => cerrarModalPendientesInventario()}>
+        <div className="contenidoModal" style={{ maxWidth: '900px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="encabezadoModal">
+            <h3>Insumos pendientes</h3>
+            <button className="cerrarModal" onClick={() => cerrarModalPendientesInventario()}>&times;</button>
+          </div>
+          <div className="cajaFormulario" style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+            <table>
+              <thead>
+                <tr><th>C\u00f3digo</th><th>Nombre</th><th>Proveedor</th><th>Unidad</th><th>Acciones</th></tr>
+              </thead>
+              <tbody id="cuerpoPendientesInventario"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 

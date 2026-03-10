@@ -415,14 +415,50 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_clientes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT,
+      apellido_paterno TEXT,
+      apellido_materno TEXT,
       email TEXT UNIQUE,
       password_hash TEXT,
       telefono TEXT,
+      fecha_nacimiento TEXT,
       direccion_default TEXT,
       forma_pago_preferida TEXT,
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_clientes_direcciones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_cliente INTEGER,
+      alias TEXT,
+      direccion TEXT,
+      referencias TEXT,
+      es_preferida INTEGER DEFAULT 0,
+      activo INTEGER DEFAULT 1,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_direcciones_cliente
+      ON tienda_clientes_direcciones (id_cliente, activo, es_preferida, actualizado_en DESC)`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_atencion_clientes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_cliente INTEGER,
+      nombre_cliente TEXT,
+      email_cliente TEXT,
+      telefono_cliente TEXT,
+      asunto TEXT,
+      mensaje TEXT,
+      estado TEXT DEFAULT 'abierto',
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_atencion_clientes_estado
+      ON tienda_atencion_clientes (estado, creado_en DESC)`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_ordenes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -492,6 +528,22 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_notificaciones_cliente (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_cliente INTEGER,
+      id_orden INTEGER,
+      tipo TEXT,
+      titulo TEXT,
+      mensaje TEXT,
+      leida INTEGER DEFAULT 0,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id),
+      FOREIGN KEY(id_orden) REFERENCES tienda_ordenes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_notificaciones_cliente
+      ON tienda_notificaciones_cliente (id_cliente, leida, id DESC)`);
+
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_config (
       clave TEXT PRIMARY KEY,
       valor TEXT,
@@ -560,6 +612,25 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       }
       if (!columnas.some(col => col.name === "nombre_punto_entrega")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN nombre_punto_entrega TEXT");
+      }
+      if (!columnas.some(col => col.name === "paqueteria")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN paqueteria TEXT");
+      }
+      if (!columnas.some(col => col.name === "numero_guia")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN numero_guia TEXT");
+      }
+    });
+
+    bdVentas.all("PRAGMA table_info(tienda_clientes)", (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === "apellido_paterno")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN apellido_paterno TEXT");
+      }
+      if (!columnas.some((col) => col.name === "apellido_materno")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN apellido_materno TEXT");
+      }
+      if (!columnas.some((col) => col.name === "fecha_nacimiento")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN fecha_nacimiento TEXT");
       }
     });
   });

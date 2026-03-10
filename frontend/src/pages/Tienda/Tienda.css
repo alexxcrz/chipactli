@@ -86,6 +86,21 @@
   margin-bottom: 12px;
 }
 
+.tiendaNotifPedidosInline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px dashed #c8d8cf;
+  background: #f5fbf8;
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  color: #365246;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .tiendaCategoriasBar .tiendaTab,
 .tiendaCategoriasBar .tiendaCategoriaSelect {
   flex: 0 0 auto;
@@ -221,6 +236,7 @@
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  position: relative;
 }
 
 .tiendaAccesoRapidoBtn {
@@ -263,6 +279,22 @@
 }
 
 .tiendaCartBtn {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid #5e8f66;
+  background: linear-gradient(180deg, #f5fbf7 0%, #e7f3eb 100%);
+  position: relative;
+  font-size: 21px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 16px rgba(80, 55, 20, 0.2);
+}
+
+.tiendaBellBtn {
   width: 44px;
   height: 44px;
   padding: 0;
@@ -275,6 +307,172 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.tiendaBellCount {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.tiendaPerfilBtnNotifs {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid #5e8f66;
+  background: linear-gradient(180deg, #f5fbf7 0%, #e7f3eb 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(80, 55, 20, 0.2);
+}
+
+.tiendaPerfilIcon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tiendaPerfilIcon svg {
+  width: 22px;
+  height: 22px;
+  stroke: #4a7c59;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tiendaPerfilBtnCount {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.tiendaSaludoCliente {
+  position: relative;
+  min-width: 0;
+  max-width: min(30vw, 180px);
+  padding: 0 0 0 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.05;
+  overflow: visible;
+}
+
+.tiendaSaludoEnredadera {
+  display: block;
+  width: 100%;
+  min-width: 88px;
+  height: 14px;
+  margin-bottom: 1px;
+}
+
+.tiendaSaludoEnredadera svg {
+  width: 100%;
+  height: 100%;
+  fill: rgba(116, 161, 121, 0.35);
+  stroke: #6a9a6f;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tiendaSaludoLabel {
+  color: #99a3ac;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.tiendaSaludoNombre {
+  color: #212121;
+  font-size: clamp(14px, 1.35vw, 21px);
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tiendaNotifsClientePanel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(360px, 92vw);
+  max-height: 420px;
+  border: 1px solid #d0ddd6;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.18);
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.tiendaNotifsClienteHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid #e2ebe6;
+}
+
+.tiendaNotifsClienteLista {
+  padding: 8px;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaNotifsClienteItem {
+  border: 1px solid #dbe6e0;
+  border-radius: 10px;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  background: #f9fcfa;
+}
+
+.tiendaNotifsClienteItem p {
+  margin: 0;
+  color: #3b5046;
+  font-size: 13px;
+}
+
+.tiendaNotifsClienteItem span {
+  color: #60756b;
+  font-size: 11px;
 }
 
 .tiendaCartCount {
@@ -525,9 +723,9 @@
   z-index: 3301;
   transform: translateX(110%);
   transition: transform 0.25s ease;
-  border-radius: 22px;
-  border: 1px solid #d9c9b2;
-  background: linear-gradient(180deg, #f7f1e8 0%, #efe4d4 100%);
+  border-radius: 24px;
+  border: 2px solid #cdb895;
+  background: linear-gradient(180deg, #fbf7ef 0%, #f1e7d7 100%);
   box-shadow: 0 20px 45px rgba(57, 38, 20, 0.28);
   padding: 12px;
 }
@@ -542,16 +740,18 @@
   justify-content: space-between;
   position: sticky;
   top: 0;
-  background: rgba(247, 241, 232, 0.94);
+  background: linear-gradient(180deg, rgba(95, 139, 101, 0.95) 0%, rgba(74, 124, 89, 0.95) 100%);
   backdrop-filter: blur(2px);
-  border-bottom: 1px solid #ddcdb8;
-  padding-bottom: 8px;
+  border: 1px solid rgba(218, 236, 224, 0.45);
+  border-radius: 16px;
+  padding: 10px 12px;
   z-index: 2;
 }
 
 .tiendaLateralHeader h2 {
   margin: 0;
-  color: #345a44;
+  color: #f7fff9;
+  letter-spacing: 0.3px;
 }
 
 .tiendaCheckoutPasos {
@@ -939,6 +1139,128 @@
 .tiendaFooterPagos {
   margin-top: 10px;
   font-weight: 800;
+}
+
+.tiendaFooterPagosLogos {
+  display: block;
+  width: min(340px, 100%);
+  height: auto;
+  object-fit: contain;
+}
+
+.tiendaFooterPagosLogosWrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.tiendaFooterPagosLogosWrap .tiendaFooterPagosLogos {
+  width: auto;
+  max-width: 150px;
+  max-height: 34px;
+}
+
+.tiendaFooterPagoTextoItem {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d6e0da;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #3a5145;
+  background: #f8fcfa;
+  font-weight: 700;
+}
+
+.tiendaAdminLogosPagoBox {
+  border: 1px solid #dce6e1;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fbfa;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaAdminLogosPagoHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tiendaAdminLogosPagoQuick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tiendaAdminLogosPagoLista {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaAdminMetodoPagoFila {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #dbe4df;
+  border-radius: 12px;
+  padding: 8px;
+  background: #fff;
+}
+
+.tiendaAdminMetodoPagoSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4b6659;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tiendaAdminMetodoPagoSwitch input {
+  width: 16px;
+  height: 16px;
+}
+
+.tiendaAdminLogosPagoHint {
+  font-size: 12px;
+  color: #658275;
+}
+
+.tiendaAdminLogosPagoHintWarn {
+  font-size: 12px;
+  color: #8a5a1f;
+}
+
+.tiendaInputOculto {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .tiendaAdminLogosPagoLista {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaAdminMetodoPagoFila {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1480px) {
+  .tiendaAdminLogosPagoLista {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .tiendaAdminLogosPagoLista {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tiendaInfoTab {
@@ -1877,14 +2199,29 @@
 
 .tiendaAdminOrdenGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 12px;
 }
 
 .tiendaAdminClienteCard,
 .tiendaAdminOrdenCard {
   align-items: flex-start;
   gap: 10px;
+}
+
+.tiendaAdminOrdenCard {
+  /* Override generic .tiendaAdminFila flex layout to prevent overlapping cards */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  align-items: start;
+  border: 1px solid #d6e1db;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.tiendaAdminOrdenCard + .tiendaAdminOrdenCard {
+  box-shadow: inset 0 1px 0 #e2ebe6;
 }
 
 .tiendaAdminClienteMeta,
@@ -1894,12 +2231,92 @@
   gap: 4px;
 }
 
+.tiendaAdminOrdenInfo {
+  min-width: 0;
+}
+
 .tiendaAdminResumenPedidos {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   font-size: 13px;
   color: #31433b;
+}
+
+.tiendaAdminServicioDomicilioAlert {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d5c08f;
+  background: linear-gradient(180deg, #fff9ec 0%, #fff4de 100%);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.tiendaAdminServicioDomicilioAlert p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #6c5a35;
+}
+
+.tiendaAdminNavConfigWrap {
+  display: grid;
+  gap: 12px;
+}
+
+.tiendaAdminNavCustomBox {
+  border: 1px dashed #c7d8cf;
+  border-radius: 12px;
+  background: #f8fcfa;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.tiendaAdminNavCustomHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaAdminNavCustomAyuda {
+  margin: 0;
+  font-size: 12px;
+  color: #5a6f64;
+}
+
+.tiendaAdminNavCustomGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaAdminNavCustomCard {
+  border: 1px solid #d4e3db;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.tiendaAdminSwitchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.tiendaAdminDeleteMini {
+  font-size: 11px;
+  padding: 3px 8px;
+  min-height: 26px;
+  border-radius: 8px;
+  line-height: 1;
+  box-shadow: none;
 }
 
 .tiendaAdminResumenPedidos span {
@@ -1911,7 +2328,7 @@
 
 .tiendaAdminOrdenAcciones {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 6px;
   min-width: 250px;
 }
@@ -1920,41 +2337,210 @@
   grid-column: 1 / -1;
 }
 
+.tiendaAdminMiniLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: #40544a;
+}
+
+.tiendaAdminSeguimientoWrap {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  border: 1px dashed #c7d8cf;
+  border-radius: 10px;
+  padding: 8px;
+  background: #f8fcfa;
+}
+
 .tiendaAdminOrdenAcciones .botonPequeno {
   width: 100%;
 }
 
+.tiendaTrackingLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border: 1px solid #b8ccbf;
+  border-radius: 999px;
+  background: #edf7f1;
+  color: #1f6b46;
+  font-weight: 800;
+  font-size: 12px;
+  text-decoration: none;
+  padding: 6px 10px;
+}
+
+.tiendaTrackingLink:hover {
+  background: #e2f2e8;
+}
+
+.tiendaNotifPedidosPrompt {
+  border: 1px dashed #c3d3ca;
+  background: #f6fbf8;
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.tiendaNotifPedidosPrompt p {
+  margin: 0;
+  font-size: 13px;
+  color: #4c5f56;
+}
+
+.tiendaNotifPedidosConfig {
+  border: 1px solid #d6e1db;
+  background: #f8fcfa;
+  border-radius: 12px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.tiendaNotifPedidosConfig span {
+  font-size: 11px;
+  color: #395247;
+  font-weight: 700;
+}
+
+.tiendaNotifPedidosConfigRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.tiendaNotifPedidosConfigRow label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #45584f;
+}
+
+.tiendaPerfilOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 4px;
+  padding-top: max(4px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.55);
+}
+
 .tiendaPerfilModalPro {
-  width: min(980px, 96vw);
-  max-width: min(980px, 96vw);
+  width: min(1540px, calc(100vw - 8px)) !important;
+  max-width: min(1540px, calc(100vw - 8px)) !important;
+  height: calc(100dvh - 8px) !important;
+  max-height: calc(100dvh - 8px) !important;
   background: linear-gradient(180deg, #f7f1e8 0%, #efe5d6 100%);
   border: 1px solid #d6c6ad;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin: 0 !important;
+  align-self: stretch;
 }
 
 .tiendaPerfilHeaderPro {
+  background: linear-gradient(180deg, #5d8f64 0%, #4a7c59 100%);
+  border-bottom: 1px solid #d8eadf;
+  padding: 10px 14px !important;
+  min-height: 74px;
+}
+
+.tiendaPerfilHeaderPro h3 {
+  color: #f6fff8;
+  font-size: clamp(24px, 2.2vw, 32px);
+}
+
+.tiendaPerfilMainTabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px 0;
   border-bottom: 1px solid #dfcfb8;
 }
 
+.tiendaPerfilMainTabs .tiendaTab {
+  border: 1px solid #ccb89c;
+  background: #f6efe5;
+  font-weight: 800;
+  position: relative;
+}
+
+.tiendaPerfilTabDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #d9534f;
+  display: inline-block;
+  margin-left: 6px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
 .tiendaPerfilLayoutPro {
-  display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 14px;
+  display: block;
   padding: 10px;
+  overflow: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  flex: 1;
 }
 
 .tiendaPerfilPanelPro {
   border: 1px solid #ddcdb8;
-  border-radius: 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.84);
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tiendaPerfilPanelSolo {
+  min-height: calc(100vh - 220px);
 }
 
 .tiendaPerfilPanelPro h4 {
   margin: 0;
   color: #355a46;
+  font-size: 22px;
+}
+
+.tiendaPerfilResumenGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tiendaPerfilResumenItem {
+  border: 1px solid #dbe5df;
+  border-radius: 10px;
+  background: #f7fbf9;
+  padding: 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.tiendaPerfilResumenItem span {
+  font-size: 11px;
+  color: #60776b;
+  font-weight: 700;
+}
+
+.tiendaPerfilResumenItem strong {
+  font-size: 13px;
+  color: #355246;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tiendaPerfilCamposPro {
@@ -1962,22 +2548,220 @@
   padding: 0;
 }
 
+.tiendaPerfilCamposGrid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaPerfilCamposPro label {
+  font-size: 12px;
+  color: #4f6459;
+  font-weight: 700;
+}
+
+.tiendaPerfilLeyendaDireccion {
+  color: #5f6f67;
+  font-size: 11px;
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
+
 .tiendaPerfilPanelOrdenes {
-  min-height: 260px;
+  min-height: 0;
 }
 
 .tiendaOrdenesPro {
-  max-height: 360px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-height: min(56vh, 620px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .tiendaOrdenCardPro {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: 1fr;
+  gap: 4px 8px;
   border: 1px solid #d9e3dd;
-  border-radius: 10px;
+  border-radius: 9px;
+  background: #fff;
+  padding: 8px;
+  font-size: 14px;
+}
+
+.tiendaPedidosTabsPerfil {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tiendaPedidosTabsPerfil .tiendaTab {
+  border: 1px solid #cfe0d8;
+  background: #f8fcfa;
+  font-size: 12px;
+}
+
+.tiendaNotifsClienteListaPerfil {
+  max-height: min(52vh, 560px);
+  overflow: auto;
+  border: 1px dashed #cddbd3;
+  border-radius: 12px;
+  padding: 8px;
+  background: #fcfffd;
+}
+
+.tiendaNotifsPerfilHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tiendaNotifsPerfilHeadActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tiendaNotifsTabsPerfil {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.tiendaNotifsTabsPerfil .tiendaTab {
+  border: 1px solid #cfe0d8;
+  background: #f8fcfa;
+  font-size: 12px;
+}
+
+.tiendaNotifsClienteItemNueva {
+  border-color: #c9dcd1;
+  background: #f1f9f4;
+  cursor: pointer;
+}
+
+.tiendaNotifsClienteItemNueva:hover {
+  background: #e9f5ee;
+}
+
+.tiendaDireccionesLista {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaDireccionesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaDireccionCard {
+  border: 1px solid #d9e4de;
+  border-radius: 12px;
   background: #fff;
   padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.tiendaDireccionCard p,
+.tiendaDireccionCard small {
+  margin: 0;
+  color: #44584e;
+}
+
+.tiendaDireccionCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tiendaDireccionAcciones {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tiendaDireccionPreferida,
+.tiendaDireccionPreferidaCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #3e5549;
+  font-weight: 700;
+}
+
+.tiendaDireccionNuevaBox h5,
+.tiendaAtencionIntro h5 {
+  margin: 0;
+  color: #304d40;
+  font-size: 20px;
+}
+
+.tiendaDireccionModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+
+.tiendaDireccionModalCard {
+  width: min(720px, 96vw);
+  max-height: min(84vh, 760px);
+  overflow: auto;
+  border: 1px solid #d4e2da;
+  border-radius: 14px;
+  background: #fff;
+  padding: 10px;
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.24);
+}
+
+.tiendaDireccionModalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tiendaAtencionGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.tiendaAtencionIntro {
+  border: 1px solid #d8e3de;
+  border-radius: 12px;
+  background: #f8fcfa;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaAtencionIntro p {
+  margin: 0;
+  color: #40564b;
+}
+
+.tiendaAtencionMeta {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #3f574b;
 }
 
 .tiendaAdminListado {
@@ -1986,6 +2770,12 @@
   border: 1px dashed #d5e0da;
   border-radius: 8px;
   padding: 6px;
+}
+
+.tiendaAdminListado.tiendaAdminListadoAmplio,
+.tiendaAdminListado.tiendaAdminListadoPedidos {
+  max-height: none;
+  overflow: visible;
 }
 
 .tiendaAdminFila {
@@ -2315,6 +3105,8 @@
 .tiendaAdminSubtexto {
   color: #607068;
   font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tiendaDescuentoPanel {
@@ -2450,10 +3242,51 @@
   }
 
   .tiendaPerfilLayoutPro {
+    max-height: calc(100vh - 144px);
+  }
+
+  .tiendaPerfilCamposGrid2,
+  .tiendaAtencionGrid {
     grid-template-columns: 1fr;
   }
 
+  .tiendaDireccionesLista {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaOrdenesPro {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaPerfilModalPro {
+    width: min(1040px, 98vw);
+    max-width: min(1040px, 98vw);
+    height: calc(100dvh - 10px) !important;
+    max-height: calc(100dvh - 10px) !important;
+  }
+
+  .tiendaAdminServicioDomicilioAlert {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminNavCustomGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaNotifsClientePanel {
+    width: min(340px, 94vw);
+    right: 0;
+  }
+
   .tiendaAdminBuscadorWrap {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminOrdenGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminOrdenCard {
     grid-template-columns: 1fr;
   }
 
@@ -2751,11 +3584,69 @@
 }
 
 @media (max-width: 768px) {
+  .tiendaPerfilModalPro {
+    width: 99vw;
+    max-width: 99vw;
+    height: calc(100dvh - 4px) !important;
+    max-height: calc(100dvh - 4px) !important;
+    border-radius: 12px;
+  }
+
+  .tiendaPerfilLayoutPro {
+    padding: 6px;
+    gap: 6px;
+    max-height: calc(100vh - 136px);
+  }
+
+  .tiendaPerfilMainTabs {
+    overflow-x: auto;
+    padding: 6px 6px 0;
+  }
+
+  .tiendaOrdenCardPro {
+    grid-template-columns: 1fr;
+    font-size: 13px;
+  }
+
+  .tiendaOrdenesPro {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaDireccionesLista {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaPerfilResumenGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaNotifsClientePanel {
+    left: 0;
+    right: auto;
+    width: min(94vw, 340px);
+  }
 }
 
 @media (max-width: 480px) {
   .tiendaHeaderAcciones {
     gap: 4px;
+  }
+
+  .tiendaSaludoCliente {
+    max-width: min(40vw, 130px);
+  }
+
+  .tiendaSaludoEnredadera {
+    min-width: 70px;
+    height: 12px;
+  }
+
+  .tiendaSaludoLabel {
+    font-size: 10px;
+  }
+
+  .tiendaSaludoNombre {
+    font-size: clamp(12px, 3.8vw, 16px);
   }
 
   .tiendaHeaderAcciones .boton {

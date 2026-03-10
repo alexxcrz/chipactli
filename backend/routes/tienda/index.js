@@ -4,6 +4,8 @@ import { convertirCantidad } from "../../utils/index.js";
 import { transmitir } from "../../utils/index.js";
 
 const TIENDA_JWT_SECRET = process.env.TIENDA_JWT_SECRET || process.env.JWT_SECRET || "chipactli_tienda_jwt_secret";
+const PREFIJO_FOLIO_TIENDA = 'CHV';
+const LONGITUD_CONSECUTIVO_TIENDA = 7;
 
 function dbGet(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -136,6 +138,26 @@ function claveRecetaNombre(valor = "") {
     .replace(/\s+/g, " ");
 }
 
+function mensajeEstadoPedidoCliente(estado = '') {
+  const clave = String(estado || '').trim().toLowerCase();
+  if (clave === 'confirmado') return 'Tu pedido fue confirmado por nuestro equipo.';
+  if (clave === 'enviado_por_paqueteria') return 'Tu pedido ya fue enviado por paquetería.';
+  if (clave === 'en_transito') return 'Tu pedido va en camino.';
+  if (clave === 'entregado') return 'Tu pedido fue entregado.';
+  if (clave === 'cancelado') return 'Tu pedido fue cancelado.';
+  return `Tu pedido cambió a ${clave || 'actualizado'}.`;
+}
+
+function tituloEstadoPedidoCliente(estado = '') {
+  const clave = String(estado || '').trim().toLowerCase();
+  if (clave === 'confirmado') return 'Pedido confirmado';
+  if (clave === 'enviado_por_paqueteria') return 'Pedido enviado';
+  if (clave === 'en_transito') return 'Pedido en tránsito';
+  if (clave === 'entregado') return 'Pedido entregado';
+  if (clave === 'cancelado') return 'Pedido cancelado';
+  return 'Pedido actualizado';
+}
+
 function crearTokenCliente(cliente) {
   return jwt.sign(
     {
@@ -196,7 +218,14 @@ const CONFIG_DEFAULT = {
   social_x_activo: '0',
   social_linkedin_url: '',
   social_linkedin_activo: '0',
-  footer_pagos_texto: 'VISA · MasterCard · PayPal · AMEX · OXXO'
+  footer_pagos_texto: 'VISA · MasterCard · PayPal · AMEX · OXXO',
+  footer_pagos_logo_url: '/images/visa-logo.svg',
+  footer_pagos_logos: '/images/visa-logo.svg\n/images/mastercard.svg\n/images/amex-logo.svg\n/images/mercado-pago-badge.svg',
+  footer_pagos_metodos: '[{"id":"visa","label":"Visa","activo":"1","logo_url":"/images/visa-logo.svg"},{"id":"mastercard","label":"MasterCard","activo":"1","logo_url":"/images/mastercard.svg"},{"id":"amex","label":"AMEX","activo":"1","logo_url":"/images/amex-logo.svg"},{"id":"mercado_pago","label":"Mercado Pago","activo":"1","logo_url":"/images/mercado-pago-badge.svg"},{"id":"paypal","label":"PayPal","activo":"0","logo_url":""},{"id":"oxxo","label":"OXXO","activo":"0","logo_url":""},{"id":"spei","label":"SPEI / Transferencia","activo":"1","logo_url":""},{"id":"debito_credito","label":"Tarjeta Débito/Crédito","activo":"1","logo_url":""},{"id":"apple_pay","label":"Apple Pay","activo":"0","logo_url":""},{"id":"google_pay","label":"Google Pay","activo":"0","logo_url":""},{"id":"kueski_pay","label":"Kueski Pay","activo":"0","logo_url":""},{"id":"a_plazos","label":"Pago a plazos","activo":"0","logo_url":""}]',
+  footer_pagos_remover_fondo_png: '1',
+  menu_tabs_personalizadas: '[]',
+  menu_tabs_base_eliminadas: '[]',
+  servicio_domicilio_habilitado: '0'
 };
 
 async function obtenerResumenResenas(bdVentas) {
@@ -746,6 +775,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     const stock = variantes.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
     return {
       ...grupo,
+      // Mostrar el nombre completo tal como existe en recetas (incluye sufijos entre parentesis)
+      // sin romper la agrupacion interna por nombre base.
+      nombre_receta: String(varianteActiva?.receta_nombre || grupo.nombre_receta || '').trim(),
       variantes,
       stock,
       disponible: stock > 0,
@@ -947,7 +979,23 @@ async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventa
   };
 }
 
-export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario) {
+async function generarFolioOrdenTienda(bdVentas) {
+  const row = await dbGet(
+    bdVentas,
+    `SELECT folio
+     FROM tienda_ordenes
+     WHERE folio LIKE ?
+     ORDER BY folio DESC, id DESC
+     LIMIT 1`,
+    [`${PREFIJO_FOLIO_TIENDA}%`]
+  );
+  const actual = String(row?.folio || '').trim();
+  const match = actual.match(/^CHV(\d+)$/);
+  const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
+  return `${PREFIJO_FOLIO_TIENDA}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_TIENDA, '0')}`;
+}
+
+export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario, bdAdmin = null) {
   app.get('/tienda/config', async (req, res) => {
     try {
       const config = await obtenerConfigTienda(bdVentas);
@@ -986,6 +1034,82 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       res.json({ ok: true, config });
     } catch {
       res.status(500).json({ error: 'No se pudo guardar configuración' });
+    }
+  });
+
+  app.post('/tienda/admin/servicio-domicilio/habilitar', authInterno, async (req, res) => {
+    try {
+      if (!bdAdmin) return res.status(500).json({ error: 'Base administrativa no disponible' });
+
+      const rolUsuario = String(req.usuario?.rol || '').trim().toLowerCase();
+      if (rolUsuario !== 'ceo') {
+        return res.status(403).json({ error: 'Solo el CEO puede activar esta opción' });
+      }
+
+      const passwordCeo = String(req.body?.password_ceo || '');
+      if (!passwordCeo) {
+        return res.status(400).json({ error: 'Debes capturar la contraseña del CEO' });
+      }
+
+      const usernameActual = String(req.usuario?.username || '').trim().toLowerCase();
+      let ceo = null;
+      if (usernameActual) {
+        ceo = await dbGet(
+          bdAdmin,
+          "SELECT username, password_hash, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) LIMIT 1",
+          [usernameActual]
+        );
+      }
+      if (!ceo || String(ceo?.rol || '').trim().toLowerCase() !== 'ceo') {
+        ceo = await dbGet(
+          bdAdmin,
+          "SELECT username, password_hash, rol FROM usuarios WHERE rol = 'ceo' ORDER BY id ASC LIMIT 1"
+        );
+      }
+      if (!ceo) return res.status(404).json({ error: 'No se encontró usuario CEO' });
+
+      const passOk = await bcrypt.compare(passwordCeo, String(ceo.password_hash || ''));
+      if (!passOk) return res.status(401).json({ error: 'Contraseña CEO inválida' });
+
+      const yaActivo = await dbGet(
+        bdVentas,
+        "SELECT valor FROM tienda_config WHERE clave = 'servicio_domicilio_habilitado' LIMIT 1"
+      );
+      if (String(yaActivo?.valor || '').trim() === '1') {
+        return res.json({ ok: true, activo: true, ya_estaba_activo: true });
+      }
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_config (clave, valor, actualizado_en)
+         VALUES ('servicio_domicilio_habilitado', '1', CURRENT_TIMESTAMP)
+         ON CONFLICT(clave) DO UPDATE SET valor = '1', actualizado_en = CURRENT_TIMESTAMP`
+      );
+
+      const mensajeDomicilio = 'Ya contamos con servicio a domicilio. ¡Gracias por tu preferencia!';
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_notificaciones_cliente (id_cliente, id_orden, tipo, titulo, mensaje, leida, creado_en)
+         SELECT id, NULL, 'servicio_domicilio', 'Servicio a domicilio activo', ?, 0, CURRENT_TIMESTAMP
+         FROM tienda_clientes`
+        ,
+        [mensajeDomicilio]
+      );
+
+      const totalClientesNotificados = await dbGet(
+        bdVentas,
+        `SELECT COUNT(*) AS total
+         FROM tienda_clientes`
+      );
+
+      transmitir({
+        tipo: 'tienda_servicio_domicilio_habilitado',
+        mensaje: mensajeDomicilio
+      });
+
+      return res.json({ ok: true, activo: true, total_clientes_notificados: Number(totalClientesNotificados?.total) || 0 });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo activar servicio a domicilio' });
     }
   });
 
@@ -1085,7 +1209,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const ordenes = await dbAll(
         bdVentas,
         `SELECT id, folio, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, total, moneda,
-                id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, creado_en
+                id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas,
+                paqueteria, numero_guia, creado_en
          FROM tienda_ordenes
          ORDER BY id DESC`
       );
@@ -1099,18 +1224,71 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const id = Number(req.params.id);
       const estado = String(req.body?.estado || "").trim().toLowerCase();
-      const permitidos = new Set(["pendiente", "procesando", "entregado", "cancelado"]);
+      const paqueteria = String(req.body?.paqueteria || "").trim();
+      const numeroGuia = String(req.body?.numero_guia || "").trim();
+      const permitidos = new Set([
+        "pendiente",
+        "confirmado",
+        "procesando",
+        "listo_para_envio",
+        "enviado_por_paqueteria",
+        "en_transito",
+        "en_reparto_local",
+        "entregado",
+        "no_entregado",
+        "cancelado",
+        "devuelto"
+      ]);
       if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Orden inválida" });
       if (!permitidos.has(estado)) return res.status(400).json({ error: "Estado inválido" });
+      if (estado === "enviado_por_paqueteria" && (!paqueteria || !numeroGuia)) {
+        return res.status(400).json({ error: "Para envío por paquetería debes capturar paquetería y número de guía" });
+      }
 
       const resultado = await dbRun(
         bdVentas,
-        "UPDATE tienda_ordenes SET estado = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
-        [estado, id]
+        "UPDATE tienda_ordenes SET estado = ?, paqueteria = ?, numero_guia = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
+        [estado, paqueteria, numeroGuia, id]
       );
 
       if (!resultado.changes) return res.status(404).json({ error: "Orden no encontrada" });
-      transmitir({ tipo: 'tienda_orden_actualizada', id_orden: id, estado });
+      const ordenActualizada = await dbGet(
+        bdVentas,
+        `SELECT id, id_cliente, folio
+         FROM tienda_ordenes
+         WHERE id = ?`,
+        [id]
+      );
+
+      transmitir({
+        tipo: 'tienda_orden_actualizada',
+        id_orden: id,
+        id_cliente: Number(ordenActualizada?.id_cliente) || 0,
+        folio: String(ordenActualizada?.folio || ''),
+        estado,
+        paqueteria,
+        numero_guia: numeroGuia
+      });
+
+      const idClienteNotificacion = Number(ordenActualizada?.id_cliente) || 0;
+      if (idClienteNotificacion > 0) {
+        const folioNot = String(ordenActualizada?.folio || '').trim();
+        const mensajeBase = mensajeEstadoPedidoCliente(estado);
+        const mensajeFinal = folioNot ? `${mensajeBase} (${folioNot})` : mensajeBase;
+        await dbRun(
+          bdVentas,
+          `INSERT INTO tienda_notificaciones_cliente
+           (id_cliente, id_orden, tipo, titulo, mensaje, leida, creado_en)
+           VALUES (?, ?, 'pedido_estado', ?, ?, 0, CURRENT_TIMESTAMP)`,
+          [
+            idClienteNotificacion,
+            id,
+            tituloEstadoPedidoCliente(estado),
+            mensajeFinal
+          ]
+        );
+      }
+
       transmitir({ tipo: 'ventas_actualizado' });
       res.json({ ok: true });
     } catch {
@@ -1315,8 +1493,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const hash = await bcrypt.hash(password, 10);
       const creado = await dbRun(
         bdVentas,
-        `INSERT INTO tienda_clientes (nombre, email, password_hash, telefono, direccion_default, forma_pago_preferida, creado_en, actualizado_en)
-         VALUES (?, ?, ?, ?, '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, creado_en, actualizado_en)
+         VALUES (?, '', '', ?, ?, ?, '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [nombre, email, hash, telefono]
       );
 
@@ -1353,8 +1531,11 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         cliente: {
           id: cliente.id,
           nombre: cliente.nombre,
+          apellido_paterno: cliente.apellido_paterno || "",
+          apellido_materno: cliente.apellido_materno || "",
           email: cliente.email,
           telefono: cliente.telefono || "",
+          fecha_nacimiento: cliente.fecha_nacimiento || "",
           direccion_default: cliente.direccion_default || "",
           forma_pago_preferida: cliente.forma_pago_preferida || ""
         }
@@ -1368,7 +1549,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const cliente = await dbGet(
         bdVentas,
-        "SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
+        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
         [req.cliente.id]
       );
       if (!cliente) return res.status(404).json({ exito: false, mensaje: "Cliente no encontrado" });
@@ -1381,30 +1562,292 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   app.patch("/tienda/auth/perfil", authCliente, async (req, res) => {
     try {
       const nombre = String(req.body?.nombre || "").trim();
+      const apellidoPaterno = String(req.body?.apellido_paterno || "").trim();
+      const apellidoMaterno = String(req.body?.apellido_materno || "").trim();
+      const email = String(req.body?.email || "").trim().toLowerCase();
       const telefono = String(req.body?.telefono || "").trim();
+      const fechaNacimiento = String(req.body?.fecha_nacimiento || "").trim();
       const direccionDefault = String(req.body?.direccion_default || "").trim();
       const formaPago = String(req.body?.forma_pago_preferida || "").trim();
+
+      if (email) {
+        const existeCorreo = await dbGet(
+          bdVentas,
+          "SELECT id FROM tienda_clientes WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) AND id <> ? LIMIT 1",
+          [email, req.cliente.id]
+        );
+        if (existeCorreo) {
+          return res.status(409).json({ exito: false, mensaje: "Ese correo ya está registrado en otra cuenta" });
+        }
+      }
 
       await dbRun(
         bdVentas,
         `UPDATE tienda_clientes
          SET nombre = COALESCE(NULLIF(?, ''), nombre),
+             apellido_paterno = ?,
+             apellido_materno = ?,
+             email = COALESCE(NULLIF(?, ''), email),
              telefono = ?,
+             fecha_nacimiento = ?,
              direccion_default = ?,
              forma_pago_preferida = ?,
              actualizado_en = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [nombre, telefono, direccionDefault, formaPago, req.cliente.id]
+        [nombre, apellidoPaterno, apellidoMaterno, email, telefono, fechaNacimiento, direccionDefault, formaPago, req.cliente.id]
       );
 
       const cliente = await dbGet(
         bdVentas,
-        "SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
+        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
         [req.cliente.id]
       );
       return res.json({ exito: true, cliente });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "No se pudo actualizar el perfil" });
+    }
+  });
+
+  app.get('/tienda/auth/direcciones', authCliente, async (req, res) => {
+    try {
+      const rows = await dbAll(
+        bdVentas,
+        `SELECT id, alias, direccion, referencias, es_preferida, activo, creado_en, actualizado_en
+         FROM tienda_clientes_direcciones
+         WHERE id_cliente = ? AND activo = 1
+         ORDER BY es_preferida DESC, actualizado_en DESC, id DESC`,
+        [req.cliente.id]
+      );
+      res.json({ exito: true, direcciones: rows || [] });
+    } catch {
+      res.status(500).json({ exito: false, mensaje: 'No se pudieron cargar direcciones' });
+    }
+  });
+
+  app.post('/tienda/auth/direcciones', authCliente, async (req, res) => {
+    try {
+      const alias = String(req.body?.alias || '').trim();
+      const direccion = String(req.body?.direccion || '').trim();
+      const referencias = String(req.body?.referencias || '').trim();
+      const esPreferida = boolToInt(req.body?.es_preferida);
+
+      if (!direccion) {
+        return res.status(400).json({ exito: false, mensaje: 'La dirección es obligatoria' });
+      }
+
+      if (esPreferida === 1) {
+        await dbRun(
+          bdVentas,
+          `UPDATE tienda_clientes_direcciones
+           SET es_preferida = 0, actualizado_en = CURRENT_TIMESTAMP
+           WHERE id_cliente = ? AND activo = 1`,
+          [req.cliente.id]
+        );
+      }
+
+      const insert = await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_clientes_direcciones (id_cliente, alias, direccion, referencias, es_preferida, activo, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [req.cliente.id, alias, direccion, referencias, esPreferida]
+      );
+
+      if (esPreferida === 1) {
+        await dbRun(
+          bdVentas,
+          `UPDATE tienda_clientes
+           SET direccion_default = ?, actualizado_en = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [direccion, req.cliente.id]
+        );
+      }
+
+      const creada = await dbGet(
+        bdVentas,
+        `SELECT id, alias, direccion, referencias, es_preferida, activo, creado_en, actualizado_en
+         FROM tienda_clientes_direcciones WHERE id = ? LIMIT 1`,
+        [insert.lastID]
+      );
+      return res.json({ exito: true, direccion: creada });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo guardar la dirección' });
+    }
+  });
+
+  app.patch('/tienda/auth/direcciones/:id', authCliente, async (req, res) => {
+    try {
+      const idDireccion = Number(req.params.id);
+      if (!Number.isFinite(idDireccion) || idDireccion <= 0) {
+        return res.status(400).json({ exito: false, mensaje: 'Dirección inválida' });
+      }
+
+      const actual = await dbGet(
+        bdVentas,
+        `SELECT id, id_cliente, alias, direccion, referencias, es_preferida, activo
+         FROM tienda_clientes_direcciones WHERE id = ? LIMIT 1`,
+        [idDireccion]
+      );
+      if (!actual || Number(actual.id_cliente) !== Number(req.cliente.id) || Number(actual.activo) !== 1) {
+        return res.status(404).json({ exito: false, mensaje: 'Dirección no encontrada' });
+      }
+
+      const alias = String(req.body?.alias ?? actual.alias ?? '').trim();
+      const direccion = String(req.body?.direccion ?? actual.direccion ?? '').trim();
+      const referencias = String(req.body?.referencias ?? actual.referencias ?? '').trim();
+      const esPreferida = boolToInt(tieneClave(req.body || {}, 'es_preferida') ? req.body?.es_preferida : actual.es_preferida);
+
+      if (!direccion) {
+        return res.status(400).json({ exito: false, mensaje: 'La dirección es obligatoria' });
+      }
+
+      if (esPreferida === 1) {
+        await dbRun(
+          bdVentas,
+          `UPDATE tienda_clientes_direcciones
+           SET es_preferida = 0, actualizado_en = CURRENT_TIMESTAMP
+           WHERE id_cliente = ? AND activo = 1`,
+          [req.cliente.id]
+        );
+      }
+
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_clientes_direcciones
+         SET alias = ?, direccion = ?, referencias = ?, es_preferida = ?, actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [alias, direccion, referencias, esPreferida, idDireccion]
+      );
+
+      if (esPreferida === 1) {
+        await dbRun(
+          bdVentas,
+          `UPDATE tienda_clientes
+           SET direccion_default = ?, actualizado_en = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [direccion, req.cliente.id]
+        );
+      }
+
+      const actualizada = await dbGet(
+        bdVentas,
+        `SELECT id, alias, direccion, referencias, es_preferida, activo, creado_en, actualizado_en
+         FROM tienda_clientes_direcciones WHERE id = ? LIMIT 1`,
+        [idDireccion]
+      );
+      return res.json({ exito: true, direccion: actualizada });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo actualizar la dirección' });
+    }
+  });
+
+  app.delete('/tienda/auth/direcciones/:id', authCliente, async (req, res) => {
+    try {
+      const idDireccion = Number(req.params.id);
+      if (!Number.isFinite(idDireccion) || idDireccion <= 0) {
+        return res.status(400).json({ exito: false, mensaje: 'Dirección inválida' });
+      }
+
+      const actual = await dbGet(
+        bdVentas,
+        `SELECT id, id_cliente, direccion, es_preferida, activo
+         FROM tienda_clientes_direcciones WHERE id = ? LIMIT 1`,
+        [idDireccion]
+      );
+      if (!actual || Number(actual.id_cliente) !== Number(req.cliente.id) || Number(actual.activo) !== 1) {
+        return res.status(404).json({ exito: false, mensaje: 'Dirección no encontrada' });
+      }
+
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_clientes_direcciones
+         SET activo = 0, es_preferida = 0, actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [idDireccion]
+      );
+
+      if (Number(actual.es_preferida) === 1) {
+        const otraPreferida = await dbGet(
+          bdVentas,
+          `SELECT id, direccion
+           FROM tienda_clientes_direcciones
+           WHERE id_cliente = ? AND activo = 1
+           ORDER BY actualizado_en DESC, id DESC
+           LIMIT 1`,
+          [req.cliente.id]
+        );
+
+        if (otraPreferida) {
+          await dbRun(
+            bdVentas,
+            `UPDATE tienda_clientes_direcciones
+             SET es_preferida = 1, actualizado_en = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [otraPreferida.id]
+          );
+          await dbRun(
+            bdVentas,
+            `UPDATE tienda_clientes
+             SET direccion_default = ?, actualizado_en = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [String(otraPreferida.direccion || ''), req.cliente.id]
+          );
+        } else {
+          await dbRun(
+            bdVentas,
+            `UPDATE tienda_clientes
+             SET direccion_default = '', actualizado_en = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [req.cliente.id]
+          );
+        }
+      }
+
+      return res.json({ exito: true });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo eliminar la dirección' });
+    }
+  });
+
+  app.post('/tienda/auth/atencion', authCliente, async (req, res) => {
+    try {
+      const asunto = String(req.body?.asunto || '').trim();
+      const mensaje = String(req.body?.mensaje || '').trim();
+      const nombre = String(req.body?.nombre || '').trim();
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const telefono = String(req.body?.telefono || '').trim();
+
+      if (!asunto || !mensaje) {
+        return res.status(400).json({ exito: false, mensaje: 'Asunto y mensaje son obligatorios' });
+      }
+
+      const perfilCliente = await dbGet(
+        bdVentas,
+        `SELECT id, nombre, email, telefono
+         FROM tienda_clientes
+         WHERE id = ? LIMIT 1`,
+        [req.cliente.id]
+      );
+      if (!perfilCliente) {
+        return res.status(404).json({ exito: false, mensaje: 'Cliente no encontrado' });
+      }
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_atencion_clientes (id_cliente, nombre_cliente, email_cliente, telefono_cliente, asunto, mensaje, estado, creado_en, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, 'abierto', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          req.cliente.id,
+          nombre || String(perfilCliente.nombre || ''),
+          email || String(perfilCliente.email || ''),
+          telefono || String(perfilCliente.telefono || ''),
+          asunto,
+          mensaje
+        ]
+      );
+
+      return res.json({ exito: true, mensaje: 'Mensaje enviado correctamente' });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo enviar tu mensaje' });
     }
   });
 
@@ -1692,7 +2135,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         String(puntoEntrega.horario || '').trim()
       ].filter(Boolean).join(' · ');
 
-      const folio = `ORD-${Date.now()}`;
+      const folio = await generarFolioOrdenTienda(bdVentas);
       const insertOrden = await dbRun(
         bdVentas,
         `INSERT INTO tienda_ordenes
@@ -1764,11 +2207,24 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       transmitir({
         tipo: 'tienda_orden_nueva',
         id_orden: insertOrden.lastID,
+        id_cliente: Number(cliente.id) || 0,
         folio,
         total,
         cliente: cliente.nombre,
         metodo_pago: metodoPago
       });
+
+      const mensajePedidoNuevo = folio
+        ? `Tu pedido ${folio} fue realizado correctamente.`
+        : 'Tu pedido fue realizado correctamente.';
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_notificaciones_cliente
+         (id_cliente, id_orden, tipo, titulo, mensaje, leida, creado_en)
+         VALUES (?, ?, 'pedido_nuevo', 'Pedido realizado', ?, 0, CURRENT_TIMESTAMP)`,
+        [Number(cliente.id) || 0, insertOrden.lastID, mensajePedidoNuevo]
+      );
+
       if (cantidadAutoVendida > 0) {
         transmitir({ tipo: 'produccion_actualizado' });
       }
@@ -1794,12 +2250,87 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const ordenes = await dbAll(
         bdVentas,
-        "SELECT id, folio, metodo_pago, estado, total, moneda, referencia_externa, detalle_pago, creado_en FROM tienda_ordenes WHERE id_cliente = ? ORDER BY id DESC",
+        `SELECT id, folio, metodo_pago, estado, total, moneda, referencia_externa, detalle_pago,
+          paqueteria, numero_guia, creado_en, actualizado_en
+         FROM tienda_ordenes
+         WHERE id_cliente = ?
+         ORDER BY id DESC`,
         [req.cliente.id]
       );
       res.json(ordenes);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar las órdenes" });
+    }
+  });
+
+  app.get('/tienda/auth/notificaciones', authCliente, async (req, res) => {
+    try {
+      const rows = await dbAll(
+        bdVentas,
+        `SELECT id, id_orden, tipo, titulo, mensaje, leida, creado_en
+         FROM tienda_notificaciones_cliente
+         WHERE id_cliente = ?
+         ORDER BY id DESC
+         LIMIT 100`,
+        [req.cliente.id]
+      );
+      res.json({ exito: true, notificaciones: rows || [] });
+    } catch {
+      res.status(500).json({ exito: false, mensaje: 'No se pudieron cargar notificaciones' });
+    }
+  });
+
+  app.post('/tienda/auth/notificaciones/marcar-leidas', authCliente, async (req, res) => {
+    try {
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_notificaciones_cliente
+         SET leida = 1
+         WHERE id_cliente = ? AND leida = 0`,
+        [req.cliente.id]
+      );
+      res.json({ exito: true });
+    } catch {
+      res.status(500).json({ exito: false, mensaje: 'No se pudieron actualizar notificaciones' });
+    }
+  });
+
+  app.post('/tienda/auth/notificaciones/:id/marcar-leida', authCliente, async (req, res) => {
+    try {
+      const idNotificacion = Number(req.params.id);
+      if (!Number.isFinite(idNotificacion) || idNotificacion <= 0) {
+        return res.status(400).json({ exito: false, mensaje: 'Notificación inválida' });
+      }
+
+      const resultado = await dbRun(
+        bdVentas,
+        `UPDATE tienda_notificaciones_cliente
+         SET leida = 1
+         WHERE id = ? AND id_cliente = ?`,
+        [idNotificacion, req.cliente.id]
+      );
+
+      if (!resultado?.changes) {
+        return res.status(404).json({ exito: false, mensaje: 'Notificación no encontrada' });
+      }
+
+      return res.json({ exito: true });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo actualizar la notificación' });
+    }
+  });
+
+  app.delete('/tienda/auth/notificaciones', authCliente, async (req, res) => {
+    try {
+      await dbRun(
+        bdVentas,
+        `DELETE FROM tienda_notificaciones_cliente
+         WHERE id_cliente = ?`,
+        [req.cliente.id]
+      );
+      res.json({ exito: true });
+    } catch {
+      res.status(500).json({ exito: false, mensaje: 'No se pudo limpiar historial' });
     }
   });
 }

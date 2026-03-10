@@ -674,7 +674,7 @@ registrarRutasRecetas(app, bdRecetasRutas, bdInventarioRutas);
 registrarRutasProduccion(app, bdProduccionRutas, bdRecetasRutas, bdInventarioRutas, bdVentasRutas);
 registrarRutasCortesias(app, bdVentasRutas, bdProduccionRutas);
 registrarRutasVentas(app, bdVentasRutas, bdProduccionRutas, bdInventarioRutas, bdRecetasRutas);
-registrarRutasTienda(app, bdProduccionRutas, bdRecetasRutas, bdVentasRutas, bdInventarioRutas);
+registrarRutasTienda(app, bdProduccionRutas, bdRecetasRutas, bdVentasRutas, bdInventarioRutas, bdAdminAuth);
 
 // Rutas de backup
 app.post("/api/backup/crear", async (req, res) => {

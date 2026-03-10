@@ -401,6 +401,123 @@
   padding: 4px 2px;
 }
 
+.tituloIngredientesRecetaModal {
+  margin: 0 0 12px 0;
+  color: #1a1a1a;
+  font-size: 16px;
+}
+
+.listaIngredientesRecetaModal {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.itemIngredienteRecetaModal {
+  padding: 10px 2px 10px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: transparent;
+}
+
+.itemIngredienteRecetaPendiente {
+  border-bottom-color: rgba(211, 47, 47, 0.25);
+}
+
+.itemIngredienteRecetaInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.itemIngredienteRecetaLineaPrincipal {
+  margin-bottom: 5px;
+}
+
+.itemIngredienteRecetaNombre {
+  font-size: 14px;
+  color: #232323;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.itemIngredienteRecetaNombre::before {
+  content: '\2022';
+  color: #7c776f;
+  font-size: 13px;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.itemIngredienteRecetaFilaEdicion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 20px;
+}
+
+.itemIngredienteRecetaControles {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.itemIngredienteRecetaEditarTexto {
+  font-size: 11px;
+  color: #8b857c;
+}
+
+.inputCantidadIngredienteRecetaModal {
+  width: 70px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid #ddd7cd;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 12px;
+  background: #fff;
+}
+
+.unidadIngredienteRecetaModal {
+  min-width: 34px;
+  text-align: center;
+  font-size: 12px;
+  color: #5f594f;
+}
+
+.itemIngredienteRecetaAcciones {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.botonGuardarIngredienteReceta {
+  background: #4a9b5e;
+  padding: 3px 8px;
+}
+
+.itemIngredienteRecetaVacio {
+  padding: 10px;
+  color: #999;
+}
+
+@media (max-width: 760px) {
+  .itemIngredienteRecetaFilaEdicion {
+    flex-direction: column;
+    align-items: flex-start;
+    padding-left: 18px;
+  }
+}
+
 @media (max-width: 700px) {
   .fichaTiendaFormularioCompacta {
     grid-template-columns: 1fr;

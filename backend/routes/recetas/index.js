@@ -70,7 +70,8 @@ function resolverNombreInsumoEliminado(bdInventario, idInsumo, callback) {
 
 export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
   const textoPlano = (valor) => String(valor || '').trim();
-  const PREFIJO_ORDEN_COMPRA = 'ORCHI';
+  const PREFIJO_ORDEN_COMPRA = 'CHIOC';
+  const LONGITUD_CONSECUTIVO_OC = 7;
 
   const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
     bdInventario.run(sql, params, function onRun(err) {
@@ -216,13 +217,13 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
       [`${PREFIJO_ORDEN_COMPRA}%`],
       (err, row) => {
         if (err) {
-          callback(`${PREFIJO_ORDEN_COMPRA}000001`);
+          callback(`${PREFIJO_ORDEN_COMPRA}${String(1).padStart(LONGITUD_CONSECUTIVO_OC, '0')}`);
           return;
         }
         const actual = String(row?.numero_orden || '').trim();
-        const match = actual.match(/^ORCHI(\d+)$/);
+        const match = actual.match(/^CHIOC(\d+)$/);
         const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
-        callback(`${PREFIJO_ORDEN_COMPRA}${String(consecutivo).padStart(6, '0')}`);
+        callback(`${PREFIJO_ORDEN_COMPRA}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_OC, '0')}`);
       }
     );
   };

@@ -5,6 +5,16 @@ import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modale
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
+function escaparParaInlineJs(valor) {
+  return String(valor || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\u2028\u2029]/g, ' ')
+    .replace(/\r?\n/g, ' ');
+}
+
 export default function Recetas() {
   useEffect(() => {
     window.recetas = {
@@ -141,7 +151,7 @@ export default function Recetas() {
           <button className="boton" onClick={() => abrirModalEscaladoCategoria()}>📋 Escalar por categoría</button>
           <button className="boton" onClick={() => abrirModalArchivadoRecetas()}>🗂️ Archivar recetas</button>
           <button className="boton" onClick={() => abrirModal('modalCategoria')}>➕ Nueva Categoría</button>
-          <button className="boton" onClick={() => abrirModal('modalReceta')}>➥ Nueva Receta</button>
+          <button className="boton" onClick={() => abrirModalNuevaReceta()}>➥ Nueva Receta</button>
         </div>
       </div>
 
@@ -173,22 +183,22 @@ export default function Recetas() {
         </div>
       </div>
 
-      <div id="modalReceta" className="modal" onClick={() => cerrarModal('modalReceta')}>
+      <div id="modalReceta" className="modal" onClick={() => cerrarModalNuevaReceta()}>
         <div className="contenidoModal" onClick={e => e.stopPropagation()}>
-          <div className="encabezadoModal"><h3>Nueva Receta</h3><button className="cerrarModal" onClick={() => cerrarModal('modalReceta')}>&times;</button></div>
+          <div className="encabezadoModal"><h3>Nueva Receta</h3><button className="cerrarModal" onClick={() => cerrarModalNuevaReceta()}>&times;</button></div>
           <form id="formularioReceta" onSubmit={guardarReceta} className="cajaFormulario">
             <div className="recetaFilaDatosPrincipales">
-              <input id="nombreReceta" type="text" placeholder="Nombre de receta" required />
-              <select id="categoriaReceta" required></select>
-              <input id="gramajeReceta" type="number" step="0.01" min="0" placeholder="Gramaje (opcional)" />
+              <input id="nombreReceta" type="text" placeholder="Nombre de receta" required onKeyDown={(e) => manejarEnterModalReceta(e, 'nombre', false)} />
+              <select id="categoriaReceta" required onKeyDown={(e) => manejarEnterModalReceta(e, 'categoria', false)}></select>
+              <input id="gramajeReceta" type="number" step="0.01" min="0" placeholder="Gramaje (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'gramaje', false)} />
             </div>
             <div className="recetaFilaInsumo">
               <div className="recetaBusquedaInsumoWrap">
-                <input id="insumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
+                <input id="insumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} onKeyDown={(e) => manejarEnterModalReceta(e, 'busqueda', false)} autoComplete="off" />
                 <input id="idInsumoSeleccionado" type="hidden" />
                 <div id="listaBusquedaInsumos"></div>
               </div>
-              <input id="cantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" />
+              <input id="cantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', false)} />
               <select id="unidadIngrediente" disabled>
                 <option value="">Seleccionar</option>
                 <option value="g">Gramos (g)</option>
@@ -202,7 +212,7 @@ export default function Recetas() {
                 <option value="oz">Onzas (oz)</option>
                 <option value="gotas">Gotas (go)</option>
               </select>
-              <input id="proveedorIngrediente" type="text" placeholder="Proveedor (opcional)" />
+              <input id="proveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', false)} />
               <button type="button" className="boton" onClick={() => agregarIngrediente(false)}>+ Ing.</button>
             </div>
             <table>
@@ -220,17 +230,17 @@ export default function Recetas() {
           <form onSubmit={guardarEditarReceta} className="cajaFormulario">
             <input id="idEditReceta" type="hidden" />
             <div className="recetaFilaDatosPrincipales">
-              <input id="editNombreReceta" type="text" required />
-              <select id="editCategoriaReceta" required></select>
-              <input id="editGramajeReceta" type="number" step="0.01" min="0" />
+              <input id="editNombreReceta" type="text" required onKeyDown={(e) => manejarEnterModalReceta(e, 'nombre', true)} />
+              <select id="editCategoriaReceta" required onKeyDown={(e) => manejarEnterModalReceta(e, 'categoria', true)}></select>
+              <input id="editGramajeReceta" type="number" step="0.01" min="0" onKeyDown={(e) => manejarEnterModalReceta(e, 'gramaje', true)} />
             </div>
             <div className="recetaFilaInsumo">
               <div className="recetaBusquedaInsumoWrap">
-                <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} autoComplete="off" />
+                <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} onKeyDown={(e) => manejarEnterModalReceta(e, 'busqueda', true)} autoComplete="off" />
                 <input id="editIdInsumoSeleccionado" type="hidden" />
                 <div id="editListaBusquedaInsumos"></div>
               </div>
-              <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" />
+              <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', true)} />
               <select id="editUnidadIngrediente" disabled>
                 <option value="">Seleccionar</option>
                 <option value="g">Gramos (g)</option>
@@ -244,7 +254,7 @@ export default function Recetas() {
                 <option value="oz">Onzas (oz)</option>
                 <option value="gotas">Gotas (go)</option>
               </select>
-              <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" />
+              <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', true)} />
               <button type="button" className="boton" onClick={() => agregarIngrediente(true)}>+ Ing.</button>
             </div>
             <table>
@@ -489,6 +499,8 @@ export default function Recetas() {
 
 let categoriaRecetaActual = null;
 let ingredientesTemporales = [];
+let ultimoEnterNuevaRecetaMs = 0;
+let ultimoEnterEditarRecetaMs = 0;
 let cargandoRecetas = false;
 let categoriaMenuActiva = null;
 let nombreCategoriaMenuActivo = '';
@@ -1320,6 +1332,7 @@ async function cargarListadoRecetas(opciones = {}) {
     }
 
     for (const receta of recetas) {
+      const nombreRecetaSeguro = escaparParaInlineJs(receta?.nombre);
       const visibleRecetaTienda = Boolean(visibilidadTienda.get(claveNombreReceta(receta?.nombre)));
       const respDetalle = await fetch(`${API}/recetas/${receta.id}`);
       const detalle = await respDetalle.json();
@@ -1374,7 +1387,7 @@ async function cargarListadoRecetas(opciones = {}) {
                 <input
                   type="checkbox"
                   ${visibleRecetaTienda ? 'checked' : ''}
-                  onchange="window.recetas.cambiarVisibleRecetaTienda(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}', this.checked, this)"
+                  onchange="window.recetas.cambiarVisibleRecetaTienda(${receta.id}, '${nombreRecetaSeguro}', this.checked, this)"
                 />
                 <span class="switchMiniSlider"></span>
               </label>
@@ -1390,11 +1403,11 @@ async function cargarListadoRecetas(opciones = {}) {
             </div>
           </div>
           <div style="display:flex;gap:5px;flex-wrap:wrap">
-            <button onclick="window.recetas.abrirProduccionRapida(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}', ${(capacidad.costo_por_pieza || 0)})" class="botonPequeno" style="background:#ff9800" title="Producir">🎰</button>
+            <button onclick="window.recetas.abrirProduccionRapida(${receta.id}, '${nombreRecetaSeguro}', ${(capacidad.costo_por_pieza || 0)})" class="botonPequeno" style="background:#ff9800" title="Producir">🎰</button>
             <button onclick="window.recetas.editarReceta(${receta.id})" class="botonPequeno" title="Editar receta">✏️</button>
             <button onclick="window.recetas.abrirFichaTiendaReceta(${receta.id})" class="botonPequeno" style="background:#4a7c59" title="Editar ficha de tienda">🛍️</button>
-            <button onclick="window.recetas.abrirEscalarReceta(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}', ${receta.gramaje || 0})" class="botonPequeno" style="background:#3498db" title="Copiar con escalado">📋</button>
-            <button onclick="window.recetas.archivarReceta(${receta.id}, '${receta.nombre.replace(/'/g, "\\'")}')" class="botonPequeno" style="background:#607d8b" title="Archivar receta">🗂️</button>
+            <button onclick="window.recetas.abrirEscalarReceta(${receta.id}, '${nombreRecetaSeguro}', ${receta.gramaje || 0})" class="botonPequeno" style="background:#3498db" title="Copiar con escalado">📋</button>
+            <button onclick="window.recetas.archivarReceta(${receta.id}, '${nombreRecetaSeguro}')" class="botonPequeno" style="background:#607d8b" title="Archivar receta">🗂️</button>
             <button onclick="window.recetas.mostrarIngredientes(${receta.id})" class="botonPequeno" title="Ver ingredientes">👁️</button>
           </div>
         </div>
@@ -1911,6 +1924,41 @@ async function agregarReceta(event) {
   return guardarReceta(event);
 }
 
+function limpiarFormularioNuevaReceta() {
+  const formulario = document.getElementById('formularioReceta');
+  formulario?.reset();
+
+  const unidad = document.getElementById('unidadIngrediente');
+  if (unidad) {
+    unidad.value = '';
+    unidad.disabled = true;
+  }
+
+  const idInsumo = document.getElementById('idInsumoSeleccionado');
+  if (idInsumo) idInsumo.value = '';
+
+  const listaBusqueda = document.getElementById('listaBusquedaInsumos');
+  if (listaBusqueda) listaBusqueda.innerHTML = '';
+
+  ingredientesTemporales = [];
+  actualizarTablaIngredientes();
+}
+
+function abrirModalNuevaReceta() {
+  limpiarFormularioNuevaReceta();
+  abrirModal('modalReceta');
+  setTimeout(() => {
+    const campoNombre = document.getElementById('nombreReceta');
+    campoNombre?.focus();
+    campoNombre?.select?.();
+  }, 30);
+}
+
+function cerrarModalNuevaReceta() {
+  limpiarFormularioNuevaReceta();
+  cerrarModal('modalReceta');
+}
+
 async function guardarReceta(event) {
   if (event) event.preventDefault();
   const nombre = document.getElementById('nombreReceta')?.value;
@@ -1938,10 +1986,7 @@ async function guardarReceta(event) {
     });
 
     if (respuesta.ok) {
-      document.getElementById('formularioReceta')?.reset();
-      ingredientesTemporales = [];
-      actualizarTablaIngredientes();
-      cerrarModal('modalReceta');
+      cerrarModalNuevaReceta();
       mostrarNotificacion('Receta guardada', 'exito');
       await cargarListadoRecetas();
       await cargarPestanasCategorias();
@@ -1976,8 +2021,96 @@ async function editarReceta(id) {
     actualizarTablaIngredientes();
 
     abrirModal('modalEditarReceta');
+    setTimeout(() => {
+      const campoBuscar = document.getElementById('editInsumoSeleccionado');
+      campoBuscar?.focus();
+      campoBuscar?.select?.();
+    }, 30);
   } catch (error) {
     console.error(error);
+  }
+}
+
+function intentarGuardarConDobleEnter(esEdicion = false) {
+  const ahora = Date.now();
+  const ultimo = esEdicion ? ultimoEnterEditarRecetaMs : ultimoEnterNuevaRecetaMs;
+  if (ahora - ultimo <= 800) {
+    if (esEdicion) {
+      guardarEditarReceta();
+      ultimoEnterEditarRecetaMs = 0;
+    } else {
+      guardarReceta();
+      ultimoEnterNuevaRecetaMs = 0;
+    }
+    return true;
+  }
+  if (esEdicion) ultimoEnterEditarRecetaMs = ahora;
+  else ultimoEnterNuevaRecetaMs = ahora;
+  return false;
+}
+
+function manejarEnterModalReceta(event, campo, esEdicion = false) {
+  if (event.key !== 'Enter') return;
+  if (event.shiftKey) return;
+
+  const prefijo = esEdicion ? 'edit' : '';
+  const idBusqueda = esEdicion ? 'editInsumoSeleccionado' : 'insumoSeleccionado';
+  const idInsumo = esEdicion ? 'editIdInsumoSeleccionado' : 'idInsumoSeleccionado';
+  const idCantidad = esEdicion ? 'editCantidadIngrediente' : 'cantidadIngrediente';
+  const idProveedor = esEdicion ? 'editProveedorIngrediente' : 'proveedorIngrediente';
+
+  const moverFoco = (id) => {
+    event.preventDefault();
+    setTimeout(() => {
+      const el = document.getElementById(id);
+      el?.focus();
+      if (el && (el.tagName === 'INPUT')) el.select?.();
+    }, 0);
+  };
+
+  if (campo === 'nombre') {
+    moverFoco(`${prefijo}CategoriaReceta`);
+    return;
+  }
+
+  if (campo === 'categoria') {
+    moverFoco(`${prefijo}GramajeReceta`);
+    return;
+  }
+
+  if (campo === 'gramaje') {
+    moverFoco(idBusqueda);
+    return;
+  }
+
+  if (campo === 'busqueda') {
+    event.preventDefault();
+    const textoBusqueda = String(document.getElementById(idBusqueda)?.value || '').trim();
+    const insumoSeleccionado = String(document.getElementById(idInsumo)?.value || '').trim();
+
+    // Doble Enter en búsqueda vacía guarda receta.
+    if (!textoBusqueda && !insumoSeleccionado) {
+      if (ingredientesTemporales.length > 0) {
+        intentarGuardarConDobleEnter(esEdicion);
+      }
+      return;
+    }
+
+    moverFoco(idCantidad);
+    return;
+  }
+
+  if (campo === 'cantidad') {
+    event.preventDefault();
+    agregarIngrediente(esEdicion);
+    moverFoco(idBusqueda);
+    return;
+  }
+
+  if (campo === 'proveedor') {
+    event.preventDefault();
+    agregarIngrediente(esEdicion);
+    moverFoco(idBusqueda);
   }
 }
 
@@ -2204,19 +2337,27 @@ async function mostrarIngredientes(idReceta) {
     }
     const receta = await respuesta.json();
 
-    let html = `<h3 style="margin-bottom:12px;color:#1a1a1a;font-size:16px">${receta.nombre}</h3><ul style="list-style:none;padding:0" id="listaIngredientesModal">`;
+    let html = `<h3 class="tituloIngredientesRecetaModal">${receta.nombre}</h3><ul id="listaIngredientesModal" class="listaIngredientesRecetaModal">`;
     if (!receta.ingredientes || receta.ingredientes.length === 0) {
-      html += '<li style="padding:10px;color:#999">Sin ingredientes agregados</li>';
+      html += '<li class="itemIngredienteRecetaVacio">Sin ingredientes agregados</li>';
     } else {
       receta.ingredientes.forEach(ing => {
         const pendiente = ing.pendiente === true || ing.pendiente === 1;
-        html += `<li style="padding:8px;background:#f5f5f5;margin-bottom:6px;border-radius:6px;border-left:4px solid ${pendiente ? '#d32f2f' : '#4a9b5e'};display:flex;justify-content:space-between;align-items:center;gap:8px${pendiente ? ';color:#d32f2f;font-weight:bold' : ''}">
-          <span style="flex:1;font-size:13px">${ing.nombre}${ing.proveedor ? ` <small style='color:#666'>(Proveedor: ${ing.proveedor})</small>` : ''}</span>
-          <input type="number" id="cantidad_${ing.id}" value="${parseFloat(ing.cantidad).toFixed(2)}" step="0.01" style="width:70px;padding:4px;border:1px solid #ddd;border-radius:4px;text-align:center;font-size:12px">
-          <span style="min-width:35px;font-size:12px">${getAbrev(ing.unidad)}</span>
-          <div style="display:flex;gap:4px">
-            <button onclick="window.recetas.guardarCantidadIngrediente(${idReceta}, ${ing.id})" class="botonPequeno" style="background:#4a9b5e;padding:4px 10px">💾</button>
-            <button onclick="window.recetas.eliminarIngredienteDeReceta(${idReceta}, ${ing.id}, '${String(ing.nombre || '').replace(/'/g, "\\'")}')" class="botonPequeno botonDanger" style="padding:4px 10px">×</button>
+        const nombreIngredienteSeguro = escaparParaInlineJs(ing?.nombre);
+        html += `<li class="itemIngredienteRecetaModal ${pendiente ? 'itemIngredienteRecetaPendiente' : ''}">
+          <div class="itemIngredienteRecetaInfo itemIngredienteRecetaLineaPrincipal">
+            <span class="itemIngredienteRecetaNombre"><strong>${ing.nombre}</strong>: ${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${ing.proveedor ? ` (${ing.proveedor})` : ''}</span>
+          </div>
+          <div class="itemIngredienteRecetaFilaEdicion">
+            <div class="itemIngredienteRecetaControles">
+              <span class="itemIngredienteRecetaEditarTexto">Editar:</span>
+              <input type="number" id="cantidad_${ing.id}" value="${parseFloat(ing.cantidad).toFixed(2)}" step="0.01" class="inputCantidadIngredienteRecetaModal">
+              <span class="unidadIngredienteRecetaModal">${getAbrev(ing.unidad)}</span>
+            </div>
+            <div class="itemIngredienteRecetaAcciones">
+              <button onclick="window.recetas.guardarCantidadIngrediente(${idReceta}, ${ing.id})" class="botonPequeno botonGuardarIngredienteReceta" title="Guardar cantidad">💾</button>
+              <button onclick="window.recetas.eliminarIngredienteDeReceta(${idReceta}, ${ing.id}, '${nombreIngredienteSeguro}')" class="botonPequeno botonDanger" title="Eliminar ingrediente">×</button>
+            </div>
           </div>
         </li>`;
       });

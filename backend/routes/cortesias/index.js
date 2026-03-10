@@ -16,22 +16,54 @@ function dbRun(db, sql, params = []) {
 }
 
 export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
-  app.post("/cortesia/:id", (req, res) => {
-    const { nombre_receta, cantidad, numero_pedido, motivo, para_quien } = req.body;
+  app.post("/cortesia/:id", async (req, res) => {
+    const { nombre_receta, cantidad, numero_pedido, motivo, para_quien } = req.body || {};
     const fechaNow = new Date().toISOString();
+    const idProduccion = Number(req.params.id || 0);
+    const cantidadSolicitada = Number(cantidad || 0);
 
-    bdVentas.run(
-      "INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien) VALUES (?,?,?,?,?,?)",
-      [nombre_receta, cantidad, fechaNow, numero_pedido || "", motivo || "", para_quien || ""],
-      (err) => {
-        if (err) return res.status(500).json({ error: "Error cortesias" });
-        bdProduccion.run("DELETE FROM produccion WHERE id=?", [req.params.id], () => {
-          transmitir({ tipo: "produccion_actualizado" });
-          transmitir({ tipo: "cortesias_actualizado" });
-          res.json({ ok: true });
-        });
+    if (!idProduccion || !Number.isFinite(cantidadSolicitada) || cantidadSolicitada <= 0) {
+      return res.status(400).json({ error: "Cantidad de cortesía inválida" });
+    }
+
+    try {
+      const lote = await dbGet(bdProduccion, "SELECT * FROM produccion WHERE id=?", [idProduccion]);
+      if (!lote) return res.status(404).json({ error: "Lote de producción no encontrado" });
+
+      const cantidadLote = Number(lote?.cantidad || 0);
+      if (cantidadLote <= 0) return res.status(400).json({ error: "El lote ya no tiene piezas disponibles" });
+      if (cantidadSolicitada > cantidadLote) {
+        return res.status(400).json({ error: "La cantidad de cortesía supera las piezas del lote" });
       }
-    );
+
+      const nombreReceta = String(nombre_receta || lote?.nombre_receta || '').trim();
+      if (!nombreReceta) return res.status(400).json({ error: "Nombre de receta inválido" });
+
+      await dbRun(
+        bdVentas,
+        "INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien) VALUES (?,?,?,?,?,?)",
+        [nombreReceta, cantidadSolicitada, fechaNow, numero_pedido || "", motivo || "", para_quien || ""]
+      );
+
+      const restante = cantidadLote - cantidadSolicitada;
+      if (restante <= 1e-9) {
+        await dbRun(bdProduccion, "DELETE FROM produccion WHERE id=?", [idProduccion]);
+      } else {
+        const costoLote = Number(lote?.costo_produccion || 0);
+        const costoRestante = cantidadLote > 0 ? (costoLote * (restante / cantidadLote)) : 0;
+        await dbRun(
+          bdProduccion,
+          "UPDATE produccion SET cantidad=?, costo_produccion=? WHERE id=?",
+          [restante, Math.max(0, costoRestante), idProduccion]
+        );
+      }
+
+      transmitir({ tipo: "produccion_actualizado" });
+      transmitir({ tipo: "cortesias_actualizado" });
+      res.json({ ok: true });
+    } catch {
+      return res.status(500).json({ error: "Error cortesias" });
+    }
   });
 
   app.get("/cortesias", (req, res) => {

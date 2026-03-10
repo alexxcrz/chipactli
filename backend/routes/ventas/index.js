@@ -1,7 +1,23 @@
 import { transmitir } from "../../utils/index.js";
 
+function dbGet(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+}
+
+function dbRun(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) return reject(err);
+      resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
+    });
+  });
+}
+
 export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, bdRecetas) {
-  const PREFIJO_VENTA = 'VECHI';
+  const PREFIJO_VENTA = 'CHV';
+  const LONGITUD_CONSECUTIVO_VENTA = 7;
 
   const generarNumeroVenta = (callback) => {
     bdVentas.get(
@@ -13,76 +29,121 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
       [`${PREFIJO_VENTA}%`],
       (err, row) => {
         if (err) {
-          callback(`${PREFIJO_VENTA}000001`);
+          callback(`${PREFIJO_VENTA}${String(1).padStart(LONGITUD_CONSECUTIVO_VENTA, '0')}`);
           return;
         }
         const actual = String(row?.numero_pedido || '').trim();
-        const match = actual.match(/^VECHI(\d+)$/);
+        const match = actual.match(/^CHV(\d+)$/);
         const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
-        callback(`${PREFIJO_VENTA}${String(consecutivo).padStart(6, '0')}`);
+        callback(`${PREFIJO_VENTA}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_VENTA, '0')}`);
       }
     );
   };
 
-  app.post("/ventas", (req, res) => {
-    const { nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta, id_produccion } = req.body;
-    const ganancia = (precio_venta * cantidad) - costo_produccion;
-    const fechaNow = new Date().toISOString();
+  app.post("/ventas", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const idProduccion = Number(body.id_produccion || 0);
+      const nombreRecetaBody = String(body.nombre_receta || '').trim();
+      const cantidadBody = Number(body.cantidad || 0);
+      const fechaNow = new Date().toISOString();
 
-    generarNumeroVenta((numeroVenta) => {
-      bdVentas.run(
+      let nombreReceta = nombreRecetaBody;
+      let cantidad = cantidadBody;
+      let fechaProduccion = String(body.fecha_produccion || '').trim() || fechaNow;
+      let costoProduccion = Number(body.costo_produccion || 0);
+      let precioVenta = Number(body.precio_venta || 0);
+
+      if (idProduccion > 0) {
+        const lote = await dbGet(bdProduccion, "SELECT * FROM produccion WHERE id=?", [idProduccion]);
+        if (!lote) return res.status(404).json({ error: "Lote de producción no encontrado" });
+
+        const cantidadLote = Number(lote?.cantidad || 0);
+        if (cantidadLote <= 0) return res.status(400).json({ error: "El lote ya no tiene piezas disponibles" });
+
+        const cantidadSolicitada = Number.isFinite(cantidadBody) && cantidadBody > 0 ? cantidadBody : cantidadLote;
+        if (cantidadSolicitada > cantidadLote) {
+          return res.status(400).json({ error: "La cantidad a vender supera las piezas del lote" });
+        }
+
+        nombreReceta = String(lote?.nombre_receta || nombreRecetaBody).trim();
+        cantidad = cantidadSolicitada;
+        fechaProduccion = String(lote?.fecha_produccion || fechaProduccion || fechaNow).trim();
+        precioVenta = Number(body.precio_venta || lote?.precio_venta || 0);
+
+        const costoLote = Number(lote?.costo_produccion || 0);
+        costoProduccion = cantidadLote > 0
+          ? (costoLote * (cantidad / cantidadLote))
+          : Number(body.costo_produccion || 0);
+
+        const restante = cantidadLote - cantidad;
+        if (restante <= 1e-9) {
+          await dbRun(bdProduccion, "DELETE FROM produccion WHERE id=?", [idProduccion]);
+        } else {
+          const costoRestante = costoLote - costoProduccion;
+          await dbRun(
+            bdProduccion,
+            "UPDATE produccion SET cantidad=?, costo_produccion=? WHERE id=?",
+            [restante, Math.max(0, costoRestante), idProduccion]
+          );
+        }
+        transmitir({ tipo: "produccion_actualizado" });
+      }
+
+      if (!nombreReceta || cantidad <= 0) {
+        return res.status(400).json({ error: "Datos de venta incompletos" });
+      }
+
+      const numeroPedidoBody = String(body.numero_pedido || '').trim();
+      const numeroPedido = await new Promise((resolve) => {
+        if (numeroPedidoBody) return resolve(numeroPedidoBody);
+        generarNumeroVenta((num) => resolve(num));
+      });
+
+      const ganancia = (precioVenta * cantidad) - costoProduccion;
+
+      await dbRun(
+        bdVentas,
         `INSERT INTO ventas (nombre_receta, cantidad, fecha_produccion, fecha_venta, costo_produccion, precio_venta, ganancia, numero_pedido)
          VALUES (?,?,?,?,?,?,?,?)`,
-        [nombre_receta, cantidad, fecha_produccion, fechaNow, costo_produccion, precio_venta, ganancia, numeroVenta],
-        (err) => {
-        if (err) return res.status(500).json({ error: "Error venta" });
+        [nombreReceta, cantidad, fechaProduccion, fechaNow, costoProduccion, precioVenta, ganancia, numeroPedido]
+      );
 
-        const finalizar = () => {
-          bdInventario.run(
-            "INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)",
-            [fechaNow, costo_produccion],
-            () => {
-              bdInventario.get(
-                "SELECT COALESCE(SUM(costo_total),0) as inversion_total FROM inventario",
-                (errInv, inv) => {
-                  bdInventario.get(
-                    "SELECT COALESCE(SUM(costo_recuperado),0) as inversion_recuperada FROM inversion_recuperada",
-                    (errRec, rec) => {
-                      const inversionTotal = inv ? inv.inversion_total : 0;
-                      const inversionRecuperada = rec ? rec.inversion_recuperada : 0;
-                      if (inversionRecuperada >= inversionTotal && ganancia > 0) {
-                        bdInventario.run(
-                          "INSERT INTO recuperado_utensilios (fecha_recuperado, monto_recuperado) VALUES (?,?)",
-                          [fechaNow, ganancia],
-                          () => {
-                            transmitir({ tipo: "utensilios_actualizado" });
-                            transmitir({ tipo: "ventas_actualizado" });
-                            res.json({ ok: true });
-                          }
-                        );
-                      } else {
-                        transmitir({ tipo: "ventas_actualizado" });
-                        res.json({ ok: true });
-                      }
-                    }
-                  );
-                }
-              );
+      await dbRun(
+        bdInventario,
+        "INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)",
+        [fechaNow, costoProduccion]
+      );
+
+      bdInventario.get(
+        "SELECT COALESCE(SUM(costo_total),0) as inversion_total FROM inventario",
+        (errInv, inv) => {
+          bdInventario.get(
+            "SELECT COALESCE(SUM(costo_recuperado),0) as inversion_recuperada FROM inversion_recuperada",
+            (errRec, rec) => {
+              const inversionTotal = inv ? inv.inversion_total : 0;
+              const inversionRecuperada = rec ? rec.inversion_recuperada : 0;
+              if (inversionRecuperada >= inversionTotal && ganancia > 0) {
+                bdInventario.run(
+                  "INSERT INTO recuperado_utensilios (fecha_recuperado, monto_recuperado) VALUES (?,?)",
+                  [fechaNow, ganancia],
+                  () => {
+                    transmitir({ tipo: "utensilios_actualizado" });
+                    transmitir({ tipo: "ventas_actualizado" });
+                    res.json({ ok: true });
+                  }
+                );
+              } else {
+                transmitir({ tipo: "ventas_actualizado" });
+                res.json({ ok: true });
+              }
             }
           );
-        };
-
-        if (id_produccion) {
-          bdProduccion.run("DELETE FROM produccion WHERE id=?", [id_produccion], () => {
-            transmitir({ tipo: "produccion_actualizado" });
-            finalizar();
-          });
-        } else {
-          finalizar();
-        }
         }
       );
-    });
+    } catch {
+      return res.status(500).json({ error: "Error venta" });
+    }
   });
 
   app.get("/ventas", (req, res) => {

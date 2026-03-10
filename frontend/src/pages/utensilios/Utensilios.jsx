@@ -5,6 +5,13 @@ import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modale
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
+function escaparParaInlineJs(valor) {
+  return String(valor || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r?\n/g, ' ');
+}
+
 export default function Utensilios() {
   useEffect(() => {
     window.utensilios = {
@@ -140,6 +147,7 @@ async function cargarUtensilios() {
 
     let proveedorActual = null;
     utensiliosOrdenados.forEach(utensilio => {
+      const nombreUtensilioSeguro = escaparParaInlineJs(utensilio?.nombre);
       const proveedorGrupo = String(utensilio?.proveedor || '').trim() || 'Sin proveedor';
       if (proveedorGrupo !== proveedorActual) {
         proveedorActual = proveedorGrupo;
@@ -160,7 +168,7 @@ async function cargarUtensilios() {
         <td>$${Number(utensilio.costo_por_unidad || 0).toFixed(2)}</td>
         <td>
           <button onclick="window.utensilios.editarUtensilio(${utensilio.id})" class="botonPequeno">✏️</button>
-          <button onclick="window.utensilios.mostrarHistorialUtensilio(${utensilio.id}, '${utensilio.nombre.replace(/'/g, "\\'")}')" class="botonPequeno">📜</button>
+          <button onclick="window.utensilios.mostrarHistorialUtensilio(${utensilio.id}, '${nombreUtensilioSeguro}')" class="botonPequeno">📜</button>
           <button onclick="window.utensilios.eliminarUtensilio(${utensilio.id})" class="botonPequeno botonDanger">🗑️</button>
         </td>
       `;
@@ -368,16 +376,17 @@ async function mostrarHistorialAgregadoUtensilios() {
     let html = '';
     historialPorFecha.forEach(dia => {
       const fechaFormato = new Date(dia.fecha).toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const fechaClave = encodeURIComponent(String(dia?.fecha || ''));
       html += `
         <div style="border:2px solid #ddd;border-radius:8px;margin-bottom:15px;overflow:hidden">
-          <div onclick="window.utensilios.toggleHistorialUtensilioFecha('${dia.fecha}')" style="background:#f5f5f5;padding:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none">
+          <div onclick="window.utensilios.toggleHistorialUtensilioFecha('${fechaClave}')" style="background:#f5f5f5;padding:15px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none">
             <div style="flex:1">
               <h4 style="margin:0;color:#333;font-size:16px;text-transform:capitalize">${fechaFormato}</h4>
               <p style="margin:5px 0 0 0;font-size:12px;color:#666">${dia.total_utensilios} utensilio(s) agregado(s) · Total: $${Number(dia.total_costo || 0).toFixed(2)}</p>
             </div>
-            <button id="boton-ut-${dia.fecha}" style="background:none;border:none;font-size:18px;cursor:pointer;padding:0 10px">▶</button>
+            <button id="boton-ut-${fechaClave}" style="background:none;border:none;font-size:18px;cursor:pointer;padding:0 10px">▶</button>
           </div>
-          <div id="detalles-ut-${dia.fecha}" style="display:none;padding:12px;background:#fff">
+          <div id="detalles-ut-${fechaClave}" style="display:none;padding:12px;background:#fff">
             ${(dia.utensilios || []).map(utensilio => `
               <div style="display:grid;grid-template-columns:120px 1fr 120px 120px;gap:8px;padding:6px 0;border-bottom:1px solid #eee">
                 <span>${utensilio.hora}</span>

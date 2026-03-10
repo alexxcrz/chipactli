@@ -813,7 +813,7 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 #formularioReceta .recetaFilaInsumo,
 #modalEditarReceta .recetaFilaInsumo {
   display: grid;
-  grid-template-columns: minmax(320px, 2.4fr) minmax(110px, 0.8fr) minmax(140px, 1fr) minmax(180px, 1.1fr) auto;
+  grid-template-columns: minmax(280px, 2.1fr) minmax(96px, 0.75fr) minmax(126px, 0.9fr) minmax(160px, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
@@ -829,6 +829,22 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 #formularioReceta .recetaBusquedaInsumoWrap,
 #modalEditarReceta .recetaBusquedaInsumoWrap {
   position: relative;
+  min-width: 0;
+}
+
+#formularioReceta .recetaFilaInsumo input,
+#formularioReceta .recetaFilaInsumo select,
+#modalEditarReceta .recetaFilaInsumo input,
+#modalEditarReceta .recetaFilaInsumo select {
+  min-width: 0;
+}
+
+#formularioReceta .recetaFilaInsumo .boton,
+#modalEditarReceta .recetaFilaInsumo .boton {
+  margin-right: 0;
+  min-width: 72px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 #insumoSeleccionado,

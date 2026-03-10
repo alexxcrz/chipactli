@@ -63,7 +63,7 @@ const oc1Create = await jpost("/recetas/ordenes-compra", {
   }]
 });
 
-if (!String(oc1Create?.numero_orden || "").startsWith("ORCHI")) {
+if (!String(oc1Create?.numero_orden || "").startsWith("CHIOC")) {
   throw new Error(`Folio OC inválido: ${oc1Create?.numero_orden}`);
 }
 

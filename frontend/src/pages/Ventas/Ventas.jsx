@@ -356,25 +356,26 @@ export default function Ventas() {
 
   return (
     <div>
-      <div className="tarjeta" style={{ padding: '12px' }}>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      <div className="tarjeta ventasCabeceraCompacta">
+        <div className="ventasCabeceraTabs">
           <button id="btnTabPrincipalVentas" className={tabPrincipal === 'ventas' ? 'boton activo' : 'boton'} onClick={() => cambiarPestanaPrincipal('ventas')}>Ventas</button>
           <button id="btnTabPrincipalCortesias" className={tabPrincipal === 'cortesias' ? 'boton activo' : 'boton'} onClick={() => cambiarPestanaPrincipal('cortesias')}>Cortesías</button>
           <button id="btnTabPrincipalDevoluciones" className={tabPrincipal === 'devoluciones' ? 'boton activo' : 'boton'} onClick={() => cambiarPestanaPrincipal('devoluciones')}>Devoluciones</button>
           <button id="btnTabPrincipalEstadisticas" className={tabPrincipal === 'estadisticas' ? 'boton activo' : 'boton'} onClick={() => cambiarPestanaPrincipal('estadisticas')}>📊 Estadísticas</button>
         </div>
-      </div>
 
-      {tabPrincipal === 'ventas' && (
-        <div className="tarjeta">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+        {tabPrincipal === 'ventas' && (
+          <div className="ventasCabeceraBusquedaCompacta">
             <h2>Ventas</h2>
+            <input
+              type="text"
+              className="cajaBusqueda ventasBusquedaCompacta"
+              placeholder="🔍 Buscar venta..."
+              onChange={e => filtrarVentas(e.target.value)}
+            />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
-            <input type="text" className="cajaBusqueda" placeholder="🔍 Buscar venta..." onChange={e => filtrarVentas(e.target.value)} style={{ width: '240px' }} />
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {tabPrincipal === 'estadisticas' && (
         <div id="panelPrincipalEstadisticas" className="tarjeta">

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendDir = path.join(__dirname, '../..');
-const DEFAULT_DB_DIR = backendDir;
+const DEFAULT_DB_DIR = path.join(backendDir, 'data');
 const DEFAULT_BACKUP_DIR = path.join(DEFAULT_DB_DIR, 'backups');
 const databases = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
 

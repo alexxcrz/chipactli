@@ -1,7 +1,9 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import sqlite3 from "sqlite3";
 
-const baseDir = process.argv[2] || process.cwd();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const baseDir = process.argv[2] || process.env.DB_DIR || path.resolve(__dirname, "..", "data");
 const dbNames = ["inventario", "recetas", "produccion", "ventas", "admin"];
 
 const run = (db, sql) =>

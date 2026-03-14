@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE_URL = String(process.env.TARGET_URL || "https://chipactli.onrender.com").replace(/\/$/, "");
 const DB_DIR = process.env.LOCAL_DB_DIR
   ? path.resolve(process.env.LOCAL_DB_DIR)
-  : path.resolve(__dirname, "..");
+  : path.resolve(__dirname, "..", "data");
 
 const DB_FILES = {
   inventario: "inventario.db",

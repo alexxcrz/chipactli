@@ -11,3 +11,10 @@ inventario.db
 recetas.db
 produccion.db
 ventas.db
+admin.db
+database.db
+*.db-wal
+*.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm

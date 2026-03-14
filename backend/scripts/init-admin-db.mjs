@@ -1,8 +1,15 @@
 import sqlite3 from 'sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { serializarPermisos } from '../utils/permisos/index.js';
 
-const inventarioDb = new sqlite3.Database('inventario.db');
-const adminDb = new sqlite3.Database('admin.db');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dbDir = process.env.DB_DIR
+  ? path.resolve(process.env.DB_DIR)
+  : path.resolve(__dirname, '..', 'data');
+
+const inventarioDb = new sqlite3.Database(path.join(dbDir, 'inventario.db'));
+const adminDb = new sqlite3.Database(path.join(dbDir, 'admin.db'));
 
 const createUsuariosSql = `CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

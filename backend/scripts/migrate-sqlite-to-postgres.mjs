@@ -151,7 +151,7 @@ async function migrateOneDb({ pg, sqliteFilePath, dbName, schemaPrefix }) {
 async function run() {
   const sqliteDir = process.env.SQLITE_DB_DIR
     ? path.resolve(process.env.SQLITE_DB_DIR)
-    : (process.env.DB_DIR ? path.resolve(process.env.DB_DIR) : path.resolve(__dirname, ".."));
+    : (process.env.DB_DIR ? path.resolve(process.env.DB_DIR) : path.resolve(__dirname, "..", "data"));
 
   const schemaPrefix = String(process.env.PG_SCHEMA_PREFIX || "chipactli").trim().toLowerCase();
   const databaseUrl = String(process.env.DATABASE_URL || "").trim();

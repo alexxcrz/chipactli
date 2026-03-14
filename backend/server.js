@@ -107,14 +107,51 @@ const ejecutandoEnRender = Boolean(
 
 const rutaBaseDiscoRender = '/opt/render/data';
 const discoRenderDisponible = existsSync(rutaBaseDiscoRender);
+const dbDirLocalPorDefecto = path.join(__dirname, 'data');
 
 const dbDir = process.env.DB_DIR
   ? path.resolve(process.env.DB_DIR)
-  : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : __dirname);
+  : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : dbDirLocalPorDefecto);
 const uploadsDir = path.join(dbDir, 'uploads');
 const uploadsTiendaDir = path.join(uploadsDir, 'tienda');
 const backupDir = path.join(dbDir, 'backups');
 const DB_FILES = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
+
+async function migrarDbLegacyDesdeRaizLocal() {
+  if (path.resolve(dbDir) === path.resolve(__dirname)) return;
+
+  for (const nombreDb of DB_FILES) {
+    const origenPrincipal = path.join(__dirname, nombreDb);
+    const destinoPrincipal = path.join(dbDir, nombreDb);
+
+    try {
+      const existeDestino = await fs.stat(destinoPrincipal).then(() => true).catch(() => false);
+      if (!existeDestino) {
+        const existeOrigen = await fs.stat(origenPrincipal).then((s) => s.size > 0).catch(() => false);
+        if (existeOrigen) {
+          await fs.copyFile(origenPrincipal, destinoPrincipal);
+          console.warn(`[DB] Migrada base legacy a carpeta data: ${nombreDb}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[DB] No se pudo migrar ${nombreDb} desde raíz local:`, error?.message || error);
+    }
+
+    for (const sufijo of ['-wal', '-shm']) {
+      const origenTemp = path.join(__dirname, `${nombreDb}${sufijo}`);
+      const destinoTemp = path.join(dbDir, `${nombreDb}${sufijo}`);
+      try {
+        const existeTempOrigen = await fs.stat(origenTemp).then(() => true).catch(() => false);
+        const existeTempDestino = await fs.stat(destinoTemp).then(() => true).catch(() => false);
+        if (existeTempOrigen && !existeTempDestino) {
+          await fs.copyFile(origenTemp, destinoTemp);
+        }
+      } catch {
+        // Ignorar: son temporales y SQLite los regenera cuando aplica.
+      }
+    }
+  }
+}
 
 async function buscarBackupMasReciente(nombreDb) {
   try {
@@ -194,6 +231,7 @@ configurarBackup({
 
 // Endurecer almacenamiento y recuperar DBs faltantes desde backups locales.
 await reforzarPersistenciaDb();
+await migrarDbLegacyDesdeRaizLocal();
 await fs.mkdir(uploadsTiendaDir, { recursive: true });
 
 app.use('/uploads', express.static(uploadsDir));

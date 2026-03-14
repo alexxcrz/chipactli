@@ -787,9 +787,149 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 /* ===== RECETA MODALS POLISH ===== */
 #modalReceta .contenidoModal,
 #modalEditarReceta .contenidoModal {
-  width: min(860px, 94vw);
-  max-width: 860px;
-  max-height: 86vh;
+  width: min(760px, 90vw);
+  max-width: 760px;
+  max-height: 82vh;
+}
+
+#modalCategoria .contenidoModal,
+#modalIngredientes .contenidoModal,
+#modalFichaTiendaReceta .contenidoModal,
+#modalProduccionRapida .contenidoModal,
+#modalProduccionPaquete .contenidoModal,
+#modalEscalarReceta .contenidoModal,
+#modalEscaladoCategoria .contenidoModal,
+#modalArchivarRecetas .contenidoModal,
+#modalPaqueteReceta .contenidoModal,
+#modalDetallePaqueteReceta .contenidoModal,
+#modalAjustesProduccion .contenidoModal {
+  width: min(600px, 88vw);
+  max-width: 600px;
+  max-height: 80vh;
+  border-radius: 22px;
+}
+
+#modalCategoria .encabezadoModal,
+#modalReceta .encabezadoModal,
+#modalEditarReceta .encabezadoModal,
+#modalIngredientes .encabezadoModal,
+#modalFichaTiendaReceta .encabezadoModal,
+#modalProduccionRapida .encabezadoModal,
+#modalProduccionPaquete .encabezadoModal,
+#modalEscalarReceta .encabezadoModal,
+#modalEscaladoCategoria .encabezadoModal,
+#modalArchivarRecetas .encabezadoModal,
+#modalPaqueteReceta .encabezadoModal,
+#modalDetallePaqueteReceta .encabezadoModal,
+#modalAjustesProduccion .encabezadoModal {
+  padding: 14px;
+  border-radius: 22px 22px 0 0;
+}
+
+#modalCategoria .encabezadoModal h3,
+#modalReceta .encabezadoModal h3,
+#modalEditarReceta .encabezadoModal h3,
+#modalIngredientes .encabezadoModal h3,
+#modalFichaTiendaReceta .encabezadoModal h3,
+#modalProduccionRapida .encabezadoModal h3,
+#modalProduccionPaquete .encabezadoModal h3,
+#modalEscalarReceta .encabezadoModal h3,
+#modalEscaladoCategoria .encabezadoModal h3,
+#modalArchivarRecetas .encabezadoModal h3,
+#modalPaqueteReceta .encabezadoModal h3,
+#modalDetallePaqueteReceta .encabezadoModal h3,
+#modalAjustesProduccion .encabezadoModal h3 {
+  font-size: 15px;
+}
+
+#modalCategoria .cerrarModal,
+#modalReceta .cerrarModal,
+#modalEditarReceta .cerrarModal,
+#modalIngredientes .cerrarModal,
+#modalFichaTiendaReceta .cerrarModal,
+#modalProduccionRapida .cerrarModal,
+#modalProduccionPaquete .cerrarModal,
+#modalEscalarReceta .cerrarModal,
+#modalEscaladoCategoria .cerrarModal,
+#modalArchivarRecetas .cerrarModal,
+#modalPaqueteReceta .cerrarModal,
+#modalDetallePaqueteReceta .cerrarModal,
+#modalAjustesProduccion .cerrarModal {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+
+#modalCategoria .cajaFormulario,
+#modalReceta .cajaFormulario,
+#modalEditarReceta .cajaFormulario,
+#modalIngredientes .cajaFormulario,
+#modalFichaTiendaReceta .cajaFormulario,
+#modalProduccionRapida .cajaFormulario,
+#modalProduccionPaquete .cajaFormulario,
+#modalEscalarReceta .cajaFormulario,
+#modalEscaladoCategoria .cajaFormulario,
+#modalArchivarRecetas .cajaFormulario,
+#modalPaqueteReceta .cajaFormulario,
+#modalDetallePaqueteReceta .cajaFormulario,
+#modalAjustesProduccion .cajaFormulario {
+  margin: 14px;
+  max-height: calc(82vh - 104px);
+}
+
+#modalCategoria .cajaFormulario input,
+#modalCategoria .cajaFormulario select,
+#modalCategoria .cajaFormulario textarea,
+#modalReceta .cajaFormulario input,
+#modalReceta .cajaFormulario select,
+#modalReceta .cajaFormulario textarea,
+#modalEditarReceta .cajaFormulario input,
+#modalEditarReceta .cajaFormulario select,
+#modalEditarReceta .cajaFormulario textarea,
+#modalIngredientes .cajaFormulario input,
+#modalIngredientes .cajaFormulario select,
+#modalIngredientes .cajaFormulario textarea,
+#modalFichaTiendaReceta .cajaFormulario input,
+#modalFichaTiendaReceta .cajaFormulario select,
+#modalFichaTiendaReceta .cajaFormulario textarea,
+#modalProduccionRapida .cajaFormulario input,
+#modalProduccionRapida .cajaFormulario select,
+#modalProduccionRapida .cajaFormulario textarea,
+#modalProduccionPaquete .cajaFormulario input,
+#modalProduccionPaquete .cajaFormulario select,
+#modalProduccionPaquete .cajaFormulario textarea,
+#modalEscalarReceta .cajaFormulario input,
+#modalEscalarReceta .cajaFormulario select,
+#modalEscalarReceta .cajaFormulario textarea,
+#modalEscaladoCategoria .cajaFormulario input,
+#modalEscaladoCategoria .cajaFormulario select,
+#modalEscaladoCategoria .cajaFormulario textarea,
+#modalArchivarRecetas .cajaFormulario input,
+#modalArchivarRecetas .cajaFormulario select,
+#modalArchivarRecetas .cajaFormulario textarea,
+#modalPaqueteReceta .cajaFormulario input,
+#modalPaqueteReceta .cajaFormulario select,
+#modalPaqueteReceta .cajaFormulario textarea,
+#modalDetallePaqueteReceta .cajaFormulario input,
+#modalDetallePaqueteReceta .cajaFormulario select,
+#modalDetallePaqueteReceta .cajaFormulario textarea,
+#modalAjustesProduccion .cajaFormulario input,
+#modalAjustesProduccion .cajaFormulario select,
+#modalAjustesProduccion .cajaFormulario textarea,
+#modalCategoria .cajaFormulario .boton,
+#modalReceta .cajaFormulario .boton,
+#modalEditarReceta .cajaFormulario .boton,
+#modalIngredientes .cajaFormulario .boton,
+#modalFichaTiendaReceta .cajaFormulario .boton,
+#modalProduccionRapida .cajaFormulario .boton,
+#modalProduccionPaquete .cajaFormulario .boton,
+#modalEscalarReceta .cajaFormulario .boton,
+#modalEscaladoCategoria .cajaFormulario .boton,
+#modalArchivarRecetas .cajaFormulario .boton,
+#modalPaqueteReceta .cajaFormulario .boton,
+#modalDetallePaqueteReceta .cajaFormulario .boton,
+#modalAjustesProduccion .cajaFormulario .boton {
+  font-size: 12px;
 }
 
 #formularioReceta,
@@ -797,6 +937,15 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+#modalEditarReceta .cajaFormulario {
+  overflow-x: hidden;
+}
+
+#modalEditarReceta table {
+  width: 100%;
+  min-width: 0;
 }
 
 #formularioReceta > input,
@@ -812,16 +961,23 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 
 #formularioReceta .recetaFilaInsumo,
 #modalEditarReceta .recetaFilaInsumo {
-  display: grid;
-  grid-template-columns: minmax(280px, 2.1fr) minmax(96px, 0.75fr) minmax(126px, 0.9fr) minmax(160px, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
 }
 
 #formularioReceta .recetaFilaDatosPrincipales,
 #modalEditarReceta .recetaFilaDatosPrincipales {
   display: grid;
-  grid-template-columns: minmax(260px, 2.2fr) minmax(170px, 1.2fr) minmax(130px, 0.8fr);
+  grid-template-columns: minmax(320px, 2.8fr) minmax(150px, 1fr) minmax(110px, 0.8fr);
+  gap: 8px;
+  align-items: center;
+}
+
+#formularioReceta .recetaFilaInsumoControles,
+#modalEditarReceta .recetaFilaInsumoControles {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.5fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) auto;
   gap: 8px;
   align-items: center;
 }
@@ -835,16 +991,22 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 #formularioReceta .recetaFilaInsumo input,
 #formularioReceta .recetaFilaInsumo select,
 #modalEditarReceta .recetaFilaInsumo input,
-#modalEditarReceta .recetaFilaInsumo select {
+#modalEditarReceta .recetaFilaInsumo select,
+#formularioReceta .recetaFilaInsumoControles input,
+#formularioReceta .recetaFilaInsumoControles select,
+#modalEditarReceta .recetaFilaInsumoControles input,
+#modalEditarReceta .recetaFilaInsumoControles select {
   min-width: 0;
 }
 
 #formularioReceta .recetaFilaInsumo .boton,
-#modalEditarReceta .recetaFilaInsumo .boton {
+#modalEditarReceta .recetaFilaInsumo .boton,
+#formularioReceta .recetaFilaInsumoControles .boton,
+#modalEditarReceta .recetaFilaInsumoControles .boton {
   margin-right: 0;
-  min-width: 72px;
-  padding-left: 10px;
-  padding-right: 10px;
+  min-width: 64px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 #insumoSeleccionado,
@@ -867,6 +1029,7 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   left: 0;
   right: 0;
   z-index: 20;
+  display: none;
 }
 
 #tablaIngredientesTemporales td,
@@ -1123,15 +1286,17 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   #modalEditarReceta .recetaFilaInsumo {
     grid-template-columns: 1fr 1fr;
   }
+  #formularioReceta .recetaFilaInsumoControles,
+  #modalEditarReceta .recetaFilaInsumoControles {
+    grid-template-columns: 1fr 1fr;
+  }
   #modalEditarReceta .recetaFilaDatosPrincipales {
     grid-template-columns: 1fr;
   }
   #formularioReceta .recetaBusquedaInsumoWrap,
   #modalEditarReceta .recetaBusquedaInsumoWrap,
-  #formularioReceta .recetaFilaInsumo .boton,
-  #modalEditarReceta .recetaFilaInsumo .boton,
-  #formularioReceta .recetaFilaInsumo input[type='text']:last-of-type,
-  #modalEditarReceta .recetaFilaInsumo input[type='text']:last-of-type {
+  #formularioReceta .recetaFilaInsumoControles .boton,
+  #modalEditarReceta .recetaFilaInsumoControles .boton {
     grid-column: 1 / -1;
   }
   .grupoFormulario input, .grupoFormulario select { font-size:16px; padding:13px; border-radius:16px; }

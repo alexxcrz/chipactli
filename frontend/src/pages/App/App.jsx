@@ -79,14 +79,14 @@ const MAPEO_PESTANA_PERMISO = {
 };
 
 const TITULOS_PAGINA = {
-  inventario: 'Chipacti - inventario',
-  recetas: 'Chipacti - recetas',
-  produccion: 'Chipacti - produccion',
-  ventas: 'Chipacti - ventas',
-  tienda: 'Chipacti - tienda',
-  trastienda: 'Chipacti - tienda',
-  utensilios: 'Chipacti - utensilios',
-  'admin-usuarios': 'Chipacti - admin usuarios'
+  inventario: 'Chipactli - inventario',
+  recetas: 'Chipactli - recetas',
+  produccion: 'Chipactli - produccion',
+  ventas: 'Chipactli - ventas',
+  tienda: 'Chipactli - tienda',
+  trastienda: 'Chipactli - tienda',
+  utensilios: 'Chipactli - utensilios',
+  'admin-usuarios': 'Chipactli - admin usuarios'
 };
 
 function normalizarPermisos(permisos, rol) {
@@ -141,7 +141,7 @@ function obtenerUsuarioGuardado() {
 }
 
 export default function App() {
-  const [page, setPage] = useState('inventario');
+  const [page, setPage] = useState('tienda');
   const [showAccesoSistema, setShowAccesoSistema] = useState(false);
   const [toquesLogoAcceso, setToquesLogoAcceso] = useState(0);
   const [trastiendaDesbloqueada, setTrastiendaDesbloqueada] = useState(false);
@@ -224,9 +224,11 @@ export default function App() {
   };
 
   const getPageFromHash = () => {
-    const h = window.location.hash || '#/inventario';
+    const h = window.location.hash || '#/tienda';
+    if (h.startsWith('#/trastienda')) return 'trastienda';
+    if (h.startsWith('#/tienda')) return 'tienda';
     const entry = Object.entries(hashMap).find(([key, hash]) => hash === h);
-    return entry ? entry[0] : 'inventario';
+    return entry ? entry[0] : 'tienda';
   };
 
   // synchronise page state with URL hash
@@ -242,15 +244,28 @@ export default function App() {
   }, []);
 
   React.useEffect(() => {
-    const onHashChange = () => setPage(getPageFromHash());
+    const onHashChange = () => {
+      if (!isAuthenticated) {
+        setPage('tienda');
+        if (window.location.hash !== '#/tienda') {
+          window.location.hash = '#/tienda';
+        }
+        return;
+      }
+      setPage(getPageFromHash());
+    };
     window.addEventListener('hashchange', onHashChange);
-    setPage(getPageFromHash());
+    onHashChange();
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [isAuthenticated]);
 
   React.useEffect(() => {
-    document.title = TITULOS_PAGINA[page] || 'Chipacti';
-  }, [page]);
+    if (!isAuthenticated) {
+      document.title = 'Chipactli';
+      return;
+    }
+    document.title = TITULOS_PAGINA[page] || 'Chipactli';
+  }, [page, isAuthenticated]);
 
   React.useEffect(() => {
     asegurarAtributosFormulario(document);
@@ -701,6 +716,31 @@ export default function App() {
       return numero.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
     };
 
+    const textoEntidad = (...opciones) => {
+      for (const opcion of opciones) {
+        const txt = String(opcion || '').trim();
+        if (txt) return txt;
+      }
+      return '';
+    };
+
+    const claveEventoUnica = (tipo, evento) => {
+      const idRef = textoEntidad(
+        evento?.id,
+        evento?.id_orden,
+        evento?.id_receta,
+        evento?.id_insumo,
+        evento?.numero_orden,
+        evento?.folio,
+        evento?.nombre_receta,
+        evento?.receta,
+        evento?.nombre_insumo,
+        evento?.insumo,
+        Date.now()
+      );
+      return `${String(tipo || 'evento').trim()}:${idRef}:${Date.now()}`;
+    };
+
     conectarWebSocket((evento) => {
       const tipo = String(evento?.tipo || '');
       if (!tipo) return;
@@ -722,7 +762,18 @@ export default function App() {
           total ? `Total: ${total}` : null,
           `Pago: ${metodo}`
         ].filter(Boolean);
-        agregarAlerta(`tienda:nueva:${evento?.id_orden || Date.now()}`, partes.join(' · '), 'advertencia');
+        const hashPedidos = folio
+          ? `#/trastienda/pedidos?folio=${encodeURIComponent(folio)}`
+          : (evento?.id_orden ? `#/trastienda/pedidos?id_orden=${encodeURIComponent(String(evento.id_orden))}` : '#/trastienda/pedidos');
+        agregarAlerta(
+          `tienda:nueva:${evento?.id_orden || Date.now()}`,
+          partes.join(' · '),
+          'advertencia',
+          {
+            destino: { page: 'trastienda', section: 'pedidos', hash: hashPedidos },
+            meta: { id_orden: evento?.id_orden || null, folio: folio || '' }
+          }
+        );
         return;
       }
 
@@ -741,46 +792,105 @@ export default function App() {
       if (tipo === 'tienda_orden_actualizada') {
         const folio = String(evento?.folio || '').trim();
         const refOrden = folio || (evento?.id_orden ? `#${evento.id_orden}` : '');
+        const hashPedidos = folio
+          ? `#/trastienda/pedidos?folio=${encodeURIComponent(folio)}`
+          : (evento?.id_orden ? `#/trastienda/pedidos?id_orden=${encodeURIComponent(String(evento.id_orden))}` : '#/trastienda/pedidos');
         agregarAlerta(
-          `tienda:estado:${evento?.id_orden || Date.now()}`,
+          claveEventoUnica('tienda:estado', evento),
           `Orden ${refOrden} marcada como ${estadoLegible(evento?.estado)}`.trim(),
-          'exito'
+          'exito',
+          {
+            destino: { page: 'trastienda', section: 'pedidos', hash: hashPedidos },
+            meta: { id_orden: evento?.id_orden || null, folio: folio || '' }
+          }
+        );
+        return;
+      }
+
+      if (tipo === 'produccion_descuento') {
+        const receta = textoEntidad(evento?.receta, evento?.nombre_receta, evento?.receta_nombre);
+        const paquete = textoEntidad(evento?.paquete, evento?.nombre_paquete);
+        const cantidad = Number(evento?.cantidad || evento?.cantidad_paquetes || 0);
+        const titulo = receta
+          ? `Producción aplicada en receta ${receta}`
+          : (paquete ? `Producción aplicada en paquete ${paquete}` : 'Producción aplicada');
+        const detalleCantidad = cantidad > 0
+          ? (evento?.cantidad_paquetes ? ` · Paquetes: ${cantidad}` : ` · Piezas: ${cantidad}`)
+          : '';
+        agregarAlerta(
+          claveEventoUnica('produccion:descuento', evento),
+          `${titulo}${detalleCantidad}`,
+          'advertencia'
         );
         return;
       }
 
       if (tipo === 'inventario_actualizado') {
-        agregarAlerta('sistema:inventario', 'Inventario actualizado', 'advertencia');
+        const insumo = textoEntidad(evento?.nombre_insumo, evento?.insumo, evento?.nombre, evento?.codigo);
+        const accion = textoEntidad(evento?.accion, evento?.operacion, 'actualizado');
+        const mensaje = insumo
+          ? `Inventario: se ${accion} el insumo ${insumo}`
+          : 'Inventario actualizado';
+        agregarAlerta(claveEventoUnica('sistema:inventario', evento), mensaje, 'advertencia');
         return;
       }
 
       if (tipo === 'ventas_actualizado') {
-        agregarAlerta('sistema:ventas', 'Ventas actualizadas', '');
+        const receta = textoEntidad(evento?.nombre_receta, evento?.receta, evento?.receta_nombre);
+        const cantidad = Number(evento?.cantidad || 0);
+        const mensaje = receta
+          ? `Ventas: se registró movimiento en ${receta}${cantidad > 0 ? ` · Cantidad: ${cantidad}` : ''}`
+          : 'Ventas actualizadas';
+        agregarAlerta(
+          claveEventoUnica('sistema:ventas', evento),
+          mensaje,
+          '',
+          { destino: { page: 'trastienda', section: 'pedidos', hash: '#/trastienda/pedidos' } }
+        );
         return;
       }
 
       if (tipo === 'produccion_actualizado') {
-        agregarAlerta('sistema:produccion', 'Producción actualizada', '');
+        const receta = textoEntidad(evento?.nombre_receta, evento?.receta, evento?.receta_nombre);
+        const cantidad = Number(evento?.cantidad || 0);
+        const mensaje = receta
+          ? `Producción: se actualizó ${receta}${cantidad > 0 ? ` · Cantidad: ${cantidad}` : ''}`
+          : 'Producción actualizada';
+        agregarAlerta(claveEventoUnica('sistema:produccion', evento), mensaje, '');
         return;
       }
 
       if (tipo === 'cortesias_actualizado') {
-        agregarAlerta('sistema:cortesias', 'Cortesías actualizadas', '');
+        const receta = textoEntidad(evento?.nombre_receta, evento?.receta, evento?.receta_nombre);
+        const cantidad = Number(evento?.cantidad || 0);
+        const mensaje = receta
+          ? `Cortesías: se actualizó ${receta}${cantidad > 0 ? ` · Cantidad: ${cantidad}` : ''}`
+          : 'Cortesías actualizadas';
+        agregarAlerta(claveEventoUnica('sistema:cortesias', evento), mensaje, '');
         return;
       }
 
       if (tipo === 'recetas_actualizado') {
-        agregarAlerta('sistema:recetas', 'Recetas actualizadas', '');
+        const receta = textoEntidad(evento?.nombre_receta, evento?.receta, evento?.receta_nombre, evento?.nombre);
+        const accion = textoEntidad(evento?.accion, evento?.operacion, 'actualizada');
+        const mensaje = receta
+          ? `Recetas: se ${accion} ${receta}`
+          : 'Recetas actualizadas';
+        agregarAlerta(claveEventoUnica('sistema:recetas', evento), mensaje, '');
         return;
       }
 
       if (tipo === 'categorias_actualizado') {
-        agregarAlerta('sistema:categorias', 'Categorías actualizadas', '');
+        const categoria = textoEntidad(evento?.nombre_categoria, evento?.categoria, evento?.nombre);
+        const mensaje = categoria ? `Categorías: se actualizó ${categoria}` : 'Categorías actualizadas';
+        agregarAlerta(claveEventoUnica('sistema:categorias', evento), mensaje, '');
         return;
       }
 
       if (tipo === 'utensilios_actualizado') {
-        agregarAlerta('sistema:utensilios', 'Utensilios actualizados', '');
+        const utensilio = textoEntidad(evento?.nombre_utensilio, evento?.utensilio, evento?.nombre);
+        const mensaje = utensilio ? `Utensilios: se actualizó ${utensilio}` : 'Utensilios actualizados';
+        agregarAlerta(claveEventoUnica('sistema:utensilios', evento), mensaje, '');
       }
     });
 

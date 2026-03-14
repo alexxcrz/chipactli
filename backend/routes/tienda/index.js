@@ -1,11 +1,356 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { convertirCantidad } from "../../utils/index.js";
+import nodemailer from "nodemailer";
+import { convertirCantidadDetallada } from "../../utils/index.js";
 import { transmitir } from "../../utils/index.js";
 
 const TIENDA_JWT_SECRET = process.env.TIENDA_JWT_SECRET || process.env.JWT_SECRET || "chipactli_tienda_jwt_secret";
 const PREFIJO_FOLIO_TIENDA = 'CHV';
 const LONGITUD_CONSECUTIVO_TIENDA = 7;
+
+let mailTransporter = null;
+
+function obtenerConfigCorreo() {
+  const mailEnabled = String(process.env.MAIL_ENABLED || '1').trim() !== '0';
+  const host = String(process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const port = Number(process.env.SMTP_PORT || 465);
+  const secure = String(process.env.SMTP_SECURE || (port === 465 ? '1' : '0')).trim() !== '0';
+  const user = String(process.env.SMTP_USER || '').trim();
+  const pass = String(process.env.SMTP_PASS || '').trim();
+  const from = String(process.env.SMTP_FROM || user || '').trim();
+
+  return {
+    MAIL_ENABLED: mailEnabled,
+    SMTP_HOST: host,
+    SMTP_PORT: port,
+    SMTP_SECURE: secure,
+    SMTP_USER: user,
+    SMTP_PASS: pass,
+    SMTP_FROM: from
+  };
+}
+
+function correoConfigurado() {
+  const cfg = obtenerConfigCorreo();
+  return Boolean(cfg.MAIL_ENABLED && cfg.SMTP_USER && cfg.SMTP_PASS && cfg.SMTP_FROM);
+}
+
+function obtenerMailTransporter() {
+  const cfg = obtenerConfigCorreo();
+  if (mailTransporter) return mailTransporter;
+  mailTransporter = nodemailer.createTransport({
+    host: cfg.SMTP_HOST,
+    port: cfg.SMTP_PORT,
+    secure: cfg.SMTP_SECURE,
+    auth: {
+      user: cfg.SMTP_USER,
+      pass: cfg.SMTP_PASS
+    }
+  });
+  return mailTransporter;
+}
+
+function formatearMonedaMXN(valor) {
+  const numero = Number(valor) || 0;
+  return numero.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+}
+
+function escaparHtml(valor = '') {
+  return String(valor || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function layoutCorreoChipactli({ titulo = '', saludo = '', intro = '', bloquesHtml = '', cierre = '' }) {
+  const logoConfig = String(process.env.MAIL_LOGO_URL || '').trim();
+  const basePublica = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/+$/, '');
+  const logoUrl = logoConfig || (basePublica ? `${basePublica}/images/logo.png` : '');
+  const anio = new Date().getFullYear();
+  return `
+    <div style="margin:0;padding:0;background:#f5f7f2;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7f2;padding:18px 8px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #e7eadf;border-radius:14px;overflow:hidden;">
+              <tr>
+                <td style="padding:18px 22px;background:linear-gradient(135deg,#24593f,#3d7a56);color:#ffffff;font-family:Arial,sans-serif;">
+                  ${logoUrl ? `<div style="margin:0 0 10px 0;"><img src="${escaparHtml(logoUrl)}" alt="CHIPACTLI" style="display:block;width:72px;height:72px;object-fit:cover;border-radius:999px;border:2px solid rgba(255,255,255,0.55);background:#ffffff;" /></div>` : ''}
+                  <div style="font-size:12px;letter-spacing:1.1px;opacity:.9;text-transform:uppercase;">CHIPACTLI</div>
+                  <div style="font-size:22px;font-weight:800;line-height:1.2;margin-top:4px;">${escaparHtml(titulo)}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:22px;font-family:Arial,sans-serif;color:#1f2937;line-height:1.58;">
+                  <p style="margin:0 0 10px 0;">${escaparHtml(saludo)}</p>
+                  <p style="margin:0 0 14px 0;">${escaparHtml(intro)}</p>
+                  ${bloquesHtml || ''}
+                  <p style="margin:16px 0 0 0;">${escaparHtml(cierre || 'Gracias por comprar en CHIPACTLI.')}</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:14px 22px;background:#f3f6ef;border-top:1px solid #e7eadf;color:#5b6675;font-family:Arial,sans-serif;font-size:12px;">
+                  Este es un correo automatico de CHIPACTLI. ${anio}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+}
+
+function renderTemplate(textoPlantilla = '', variables = {}) {
+  const base = String(textoPlantilla || '');
+  return base.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key) => {
+    const valor = variables?.[key];
+    return valor === undefined || valor === null ? '' : String(valor);
+  });
+}
+
+function textoPlanoAHtmlLineas(texto = '') {
+  return escaparHtml(String(texto || '')).replace(/\r?\n/g, '<br/>');
+}
+
+function obtenerPlantillasCorreoDesdeConfig(config = {}) {
+  return {
+    bienvenida_asunto: String(config?.correo_bienvenida_asunto || CONFIG_DEFAULT.correo_bienvenida_asunto),
+    bienvenida_cuerpo: String(config?.correo_bienvenida_cuerpo || CONFIG_DEFAULT.correo_bienvenida_cuerpo),
+    confirmacion_asunto: String(config?.correo_confirmacion_asunto || CONFIG_DEFAULT.correo_confirmacion_asunto),
+    confirmacion_cuerpo: String(config?.correo_confirmacion_cuerpo || CONFIG_DEFAULT.correo_confirmacion_cuerpo),
+    estado_asunto: String(config?.correo_estado_asunto || CONFIG_DEFAULT.correo_estado_asunto),
+    estado_cuerpo: String(config?.correo_estado_cuerpo || CONFIG_DEFAULT.correo_estado_cuerpo),
+    diagnostico_asunto: String(config?.correo_diagnostico_asunto || CONFIG_DEFAULT.correo_diagnostico_asunto),
+    diagnostico_cuerpo: String(config?.correo_diagnostico_cuerpo || CONFIG_DEFAULT.correo_diagnostico_cuerpo),
+    campana_asunto: String(config?.correo_campana_asunto || CONFIG_DEFAULT.correo_campana_asunto),
+    campana_cuerpo: String(config?.correo_campana_cuerpo || CONFIG_DEFAULT.correo_campana_cuerpo)
+  };
+}
+
+function construirCorreoBienvenida({ nombreCliente, emailCliente, urlTienda, plantillas = {} }) {
+  const nombre = String(nombreCliente || 'cliente').trim() || 'cliente';
+  const correo = String(emailCliente || '').trim();
+  const url = String(urlTienda || '').trim() || 'https://chipactli.onrender.com/';
+
+  const vars = {
+    nombre_cliente: nombre,
+    email_cliente: correo,
+    url_tienda: url
+  };
+
+  const subject = renderTemplate(plantillas?.bienvenida_asunto || CONFIG_DEFAULT.correo_bienvenida_asunto, vars).trim() || 'Bienvenido a CHIPACTLI';
+  const text = renderTemplate(plantillas?.bienvenida_cuerpo || CONFIG_DEFAULT.correo_bienvenida_cuerpo, vars).trim();
+
+  const bloquesHtml = `
+    <div style="background:#f3f7f2;border:1px solid #dce8dc;border-radius:10px;padding:12px 14px;margin:0 0 12px 0;">
+      <div><strong>Cuenta creada con éxito</strong></div>
+      <div>Ya puedes iniciar sesión y comenzar a comprar en nuestra tienda.</div>
+      <div style="margin-top:8px;"><a href="${escaparHtml(url)}" target="_blank" rel="noreferrer" style="display:inline-block;background:#24593f;color:#ffffff;text-decoration:none;padding:8px 12px;border-radius:8px;">Ir a la tienda</a></div>
+    </div>
+  `;
+
+  const html = layoutCorreoChipactli({
+    titulo: 'Bienvenido a CHIPACTLI',
+    saludo: `Hola ${nombre},`,
+    intro: 'Gracias por registrarte con nosotros.',
+    bloquesHtml: `${bloquesHtml}<div style="margin-top:12px;padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(text)}</div>`,
+    cierre: 'Nos dará mucho gusto atenderte.'
+  });
+
+  return { subject, text, html };
+}
+
+function construirCorreoConfirmacionPedido({ cliente, folio, total, metodoPago, puntoEntrega, direccionEntrega, items, plantillas = {} }) {
+  const nombreCliente = String(cliente || 'cliente').trim();
+  const folioTxt = String(folio || '').trim();
+  const resumenItemsTexto = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const nombre = String(item?.nombre_receta || 'Producto');
+      const varianteTxt = String(item?.variante || '').trim();
+      const cantidadTxt = Number(item?.cantidad || 0);
+      const subtotalTxt = formatearMonedaMXN(item?.subtotal || 0);
+      return `- ${nombre}${varianteTxt ? ` (${varianteTxt})` : ''} x${cantidadTxt} · ${subtotalTxt}`;
+    })
+    .join('\n');
+
+  const vars = {
+    nombre_cliente: nombreCliente,
+    folio: folioTxt || 'Generado',
+    total: formatearMonedaMXN(total),
+    metodo_pago: String(metodoPago || 'No especificado'),
+    punto_entrega: String(puntoEntrega || '').trim() || 'No especificado',
+    direccion_entrega: direccionEntrega ? `Direccion/horario: ${String(direccionEntrega || '').trim()}` : '',
+    detalle_items: resumenItemsTexto || '- Sin productos'
+  };
+
+  const asunto = renderTemplate(plantillas?.confirmacion_asunto || CONFIG_DEFAULT.correo_confirmacion_asunto, vars).trim() || 'Confirmacion de pedido';
+  const texto = renderTemplate(plantillas?.confirmacion_cuerpo || CONFIG_DEFAULT.correo_confirmacion_cuerpo, vars).trim();
+
+  const resumenItemsHtml = (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const nombre = escaparHtml(item?.nombre_receta || 'Producto');
+      const varianteTxt = String(item?.variante || '').trim();
+      const cantidadTxt = Number(item?.cantidad || 0);
+      const subtotalTxt = escaparHtml(formatearMonedaMXN(item?.subtotal || 0));
+      return `<li style="margin:0 0 6px 0;">${nombre}${varianteTxt ? ` (${escaparHtml(varianteTxt)})` : ''} x${cantidadTxt} - ${subtotalTxt}</li>`;
+    })
+    .join('');
+
+  const bloquesHtml = `
+    <div style="background:#f3f7f2;border:1px solid #dce8dc;border-radius:10px;padding:12px 14px;margin:0 0 12px 0;">
+      <div><strong>Pedido:</strong> ${escaparHtml(folioTxt || 'Generado')}</div>
+      <div><strong>Total:</strong> ${escaparHtml(formatearMonedaMXN(total))}</div>
+      <div><strong>Metodo de pago:</strong> ${escaparHtml(String(metodoPago || 'No especificado'))}</div>
+      <div><strong>Punto de entrega:</strong> ${escaparHtml(String(puntoEntrega || '').trim() || 'No especificado')}</div>
+      ${direccionEntrega ? `<div><strong>Direccion/horario:</strong> ${escaparHtml(String(direccionEntrega || '').trim())}</div>` : ''}
+    </div>
+    <div style="margin:0 0 4px 0;"><strong>Detalle del pedido</strong></div>
+    <ul style="padding-left:18px;margin:6px 0 0 0;">${resumenItemsHtml || '<li>Sin productos</li>'}</ul>
+  `;
+
+  const html = layoutCorreoChipactli({
+    titulo: 'Pedido confirmado',
+    saludo: `Hola ${nombreCliente},`,
+    intro: folioTxt ? `Recibimos tu pedido ${folioTxt}.` : 'Recibimos tu pedido correctamente.',
+    bloquesHtml: `${bloquesHtml}<div style="margin-top:12px;padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(texto)}</div>`,
+    cierre: 'Gracias por tu compra en CHIPACTLI.'
+  });
+
+  return { subject: asunto, text: texto, html };
+}
+
+function construirCorreoEstadoPedido({ nombreCliente, folio, estado, mensajeEstado, total, metodoPago, puntoEntrega, paqueteria, numeroGuia, plantillas = {} }) {
+  const folioTxt = String(folio || '').trim();
+  const nombre = String(nombreCliente || 'cliente').trim();
+  const tituloEstado = tituloEstadoPedidoCliente(estado);
+
+  const lineasExtra = [];
+  if (paqueteria) lineasExtra.push(`Paqueteria: ${paqueteria}`);
+  if (numeroGuia) lineasExtra.push(`Numero de guia: ${numeroGuia}`);
+
+  const vars = {
+    nombre_cliente: nombre,
+    folio: folioTxt || 'Generado',
+    estado_titulo: tituloEstado,
+    mensaje_estado: String(mensajeEstado || '').trim() || mensajeEstadoPedidoCliente(estado),
+    total: formatearMonedaMXN(total || 0),
+    metodo_pago: String(metodoPago || 'No especificado'),
+    punto_entrega: String(puntoEntrega || 'No especificado'),
+    paqueteria_linea: paqueteria ? `Paqueteria: ${paqueteria}` : '',
+    guia_linea: numeroGuia ? `Numero de guia: ${numeroGuia}` : ''
+  };
+
+  const asunto = renderTemplate(plantillas?.estado_asunto || CONFIG_DEFAULT.correo_estado_asunto, vars).trim() || 'Actualizacion de pedido';
+  const text = renderTemplate(plantillas?.estado_cuerpo || CONFIG_DEFAULT.correo_estado_cuerpo, vars).trim();
+
+  const bloquesHtml = `
+    <div style="background:#f3f7f2;border:1px solid #dce8dc;border-radius:10px;padding:12px 14px;margin:0 0 12px 0;">
+      <div><strong>Pedido:</strong> ${escaparHtml(folioTxt || 'Generado')}</div>
+      <div><strong>Estado actual:</strong> ${escaparHtml(tituloEstado)}</div>
+      <div>${escaparHtml(String(mensajeEstado || '').trim() || mensajeEstadoPedidoCliente(estado))}</div>
+    </div>
+    <div style="background:#f8faf7;border:1px solid #e4ebdf;border-radius:10px;padding:10px 14px;margin:0 0 12px 0;">
+      <div><strong>Total:</strong> ${escaparHtml(formatearMonedaMXN(total || 0))}</div>
+      <div><strong>Metodo de pago:</strong> ${escaparHtml(String(metodoPago || 'No especificado'))}</div>
+      <div><strong>Punto de entrega:</strong> ${escaparHtml(String(puntoEntrega || 'No especificado'))}</div>
+      ${paqueteria ? `<div><strong>Paqueteria:</strong> ${escaparHtml(paqueteria)}</div>` : ''}
+      ${numeroGuia ? `<div><strong>Numero de guia:</strong> ${escaparHtml(numeroGuia)}</div>` : ''}
+    </div>
+  `;
+
+  const html = layoutCorreoChipactli({
+    titulo: tituloEstado,
+    saludo: `Hola ${nombre},`,
+    intro: folioTxt ? `Tu pedido ${folioTxt} cambio de estado.` : 'Tu pedido cambio de estado.',
+    bloquesHtml: `${bloquesHtml}<div style="margin-top:12px;padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(text)}</div>`,
+    cierre: 'Gracias por comprar en CHIPACTLI.'
+  });
+
+  return { subject: asunto, text, html };
+}
+
+function construirCorreoDiagnostico({ nombre = 'Administrador', etiqueta = '', plantillas = {} }) {
+  const cfg = obtenerConfigCorreo();
+  const fecha = new Date().toLocaleString('es-MX');
+  const tag = String(etiqueta || '').trim();
+  const vars = {
+    nombre_admin: String(nombre || 'Administrador').trim(),
+    fecha,
+    smtp_host: `${cfg.SMTP_HOST}:${cfg.SMTP_PORT}`,
+    smtp_user: cfg.SMTP_USER || 'no configurado',
+    etiqueta_sufijo: tag ? ` - ${tag}` : ''
+  };
+  const subject = renderTemplate(plantillas?.diagnostico_asunto || CONFIG_DEFAULT.correo_diagnostico_asunto, vars).trim() || 'Diagnostico correo CHIPACTLI';
+  const text = renderTemplate(plantillas?.diagnostico_cuerpo || CONFIG_DEFAULT.correo_diagnostico_cuerpo, vars).trim();
+
+  const bloquesHtml = `
+    <div style="background:#f3f7f2;border:1px solid #dce8dc;border-radius:10px;padding:12px 14px;">
+      <div><strong>Fecha:</strong> ${escaparHtml(fecha)}</div>
+      <div><strong>SMTP host:</strong> ${escaparHtml(`${cfg.SMTP_HOST}:${cfg.SMTP_PORT}`)}</div>
+      <div><strong>Usuario SMTP:</strong> ${escaparHtml(cfg.SMTP_USER || 'no configurado')}</div>
+      ${tag ? `<div><strong>Etiqueta:</strong> ${escaparHtml(tag)}</div>` : ''}
+    </div>
+  `;
+  const html = layoutCorreoChipactli({
+    titulo: 'Diagnostico de correo',
+    saludo: `Hola ${String(nombre || 'Administrador').trim()},`,
+    intro: 'Este es un correo de diagnostico del modulo de pedidos de CHIPACTLI.',
+    bloquesHtml: `${bloquesHtml}<div style="margin-top:12px;padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(text)}</div>`,
+    cierre: 'Si recibiste este correo, el envio SMTP esta funcionando.'
+  });
+
+  return { subject, text, html };
+}
+
+function construirCorreoCampana({ nombreCliente, emailCliente, tituloCampana, contenidoCampana, imagenCampanaUrl, urlTienda, plantillas = {} }) {
+  const imagenUrl = String(imagenCampanaUrl || '').trim();
+  const vars = {
+    nombre_cliente: String(nombreCliente || 'cliente').trim() || 'cliente',
+    email_cliente: String(emailCliente || '').trim(),
+    titulo_campana: String(tituloCampana || 'Novedades').trim() || 'Novedades',
+    contenido_campana: String(contenidoCampana || '').trim(),
+    imagen_campana_url: imagenUrl,
+    url_tienda: String(urlTienda || '').trim() || 'https://chipactli.onrender.com/'
+  };
+
+  const subject = renderTemplate(plantillas?.campana_asunto || CONFIG_DEFAULT.correo_campana_asunto, vars).trim() || 'Novedades CHIPACTLI';
+  const text = renderTemplate(plantillas?.campana_cuerpo || CONFIG_DEFAULT.correo_campana_cuerpo, vars).trim();
+
+  const html = layoutCorreoChipactli({
+    titulo: String(vars.titulo_campana || 'Novedades CHIPACTLI'),
+    saludo: `Hola ${vars.nombre_cliente},`,
+    intro: 'Tenemos noticias para ti.',
+    bloquesHtml: `${imagenUrl ? `<div style="margin:0 0 12px 0;"><img src="${escaparHtml(imagenUrl)}" alt="Promocion CHIPACTLI" style="display:block;max-width:100%;height:auto;border-radius:12px;border:1px solid #dce8dc;" /></div>` : ''}<div style="padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(text)}</div>`,
+    cierre: 'Gracias por seguir a CHIPACTLI.'
+  });
+
+  return { subject, text, html };
+}
+
+async function enviarCorreoCliente({ to, subject, text, html }) {
+  const cfg = obtenerConfigCorreo();
+  const correoDestino = String(to || '').trim();
+  if (!correoDestino) return { ok: false, skipped: true, motivo: 'sin_destino' };
+  if (!correoConfigurado()) return { ok: false, skipped: true, motivo: 'correo_no_configurado' };
+
+  try {
+    const transporter = obtenerMailTransporter();
+    await transporter.sendMail({
+      from: cfg.SMTP_FROM,
+      to: correoDestino,
+      subject: String(subject || '').trim() || 'Actualización de pedido',
+      text: String(text || '').trim(),
+      html: String(html || '').trim() || undefined
+    });
+    return { ok: true };
+  } catch (error) {
+    console.error('[mail] Error enviando correo:', error?.message || error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
 
 function dbGet(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -138,6 +483,10 @@ function claveRecetaNombre(valor = "") {
     .replace(/\s+/g, " ");
 }
 
+function claveRecetaBase(valor = "") {
+  return claveRecetaNombre(nombreBaseProducto(valor));
+}
+
 function mensajeEstadoPedidoCliente(estado = '') {
   const clave = String(estado || '').trim().toLowerCase();
   if (clave === 'confirmado') return 'Tu pedido fue confirmado por nuestro equipo.';
@@ -225,6 +574,16 @@ const CONFIG_DEFAULT = {
   footer_pagos_remover_fondo_png: '1',
   menu_tabs_personalizadas: '[]',
   menu_tabs_base_eliminadas: '[]',
+  correo_bienvenida_asunto: 'Bienvenido a CHIPACTLI, {{nombre_cliente}}',
+  correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra tienda.\n\nIr a la tienda: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
+  correo_confirmacion_asunto: 'Confirmacion de pedido {{folio}}',
+  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
+  correo_estado_asunto: 'Actualizacion de pedido {{folio}}: {{estado_titulo}}',
+  correo_estado_cuerpo: 'Hola {{nombre_cliente}},\n\nTu pedido {{folio}} cambio de estado.\nEstado actual: {{estado_titulo}}\n{{mensaje_estado}}\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{paqueteria_linea}}\n{{guia_linea}}\n\nGracias por comprar en CHIPACTLI.',
+  correo_diagnostico_asunto: 'Diagnostico correo CHIPACTLI{{etiqueta_sufijo}}',
+  correo_diagnostico_cuerpo: 'Hola {{nombre_admin}},\n\nEste es un correo de diagnostico del modulo de pedidos de CHIPACTLI.\nFecha: {{fecha}}\nSMTP host: {{smtp_host}}\nUsuario SMTP: {{smtp_user}}\n\nSi recibiste este correo, el envio SMTP esta funcionando.',
+  correo_campana_asunto: 'Novedades CHIPACTLI: {{titulo_campana}}',
+  correo_campana_cuerpo: 'Hola {{nombre_cliente}},\n\n{{contenido_campana}}\n\nVisita nuestra tienda: {{url_tienda}}\n\nGracias por seguir a CHIPACTLI.',
   servicio_domicilio_habilitado: '0'
 };
 
@@ -277,8 +636,7 @@ async function obtenerAjustesProduccion(bdRecetas) {
 function calcularPrecioSugerido(costoBase, ajustes) {
   const costo = Number(costoBase) || 0;
   if (costo <= 0) return 0;
-  const costoProduccion = costo * (Number(ajustes?.factorCostoProduccion) || 1.15);
-  const precioBruto = costoProduccion * (Number(ajustes?.factorPrecioVenta) || 2.5);
+  const precioBruto = costo * (Number(ajustes?.factorPrecioVenta) || 2.5);
   const redondeo = Number(ajustes?.redondeoPrecio) || 5;
   if (redondeo <= 0) return precioBruto;
   return Math.ceil(precioBruto / redondeo) * redondeo;
@@ -529,8 +887,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     const costoUnidad = Number(infoInsumo?.costo_por_unidad) || 0;
     if (cantidad <= 0 || !unidadReceta || !unidadInsumo || costoUnidad <= 0) continue;
 
-    const cantidadConvertida = convertirCantidad(cantidad, unidadReceta, unidadInsumo);
-    if (!Number.isFinite(cantidadConvertida) || cantidadConvertida <= 0) continue;
+    const conversion = convertirCantidadDetallada(cantidad, unidadReceta, unidadInsumo);
+    const cantidadConvertida = Number(conversion?.valor);
+    if (!conversion?.compatible || !Number.isFinite(cantidadConvertida) || cantidadConvertida <= 0) continue;
 
     const costoIngrediente = cantidadConvertida * costoUnidad;
     mapaPrecioSugeridoReceta.set(idReceta, (mapaPrecioSugeridoReceta.get(idReceta) || 0) + costoIngrediente);
@@ -601,6 +960,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
   );
 
   const mapaCatalogo = new Map();
+  const mapaCatalogoBase = new Map();
   for (const row of (catalogoRows || [])) {
     const clave = claveRecetaNombre(row?.receta_nombre);
     if (!clave) continue;
@@ -609,6 +969,14 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     const fechaPrevia = String(previo?.actualizado_en || '');
     if (!previo || fechaActual >= fechaPrevia) {
       mapaCatalogo.set(clave, row);
+    }
+
+    const claveBase = claveRecetaBase(row?.receta_nombre);
+    if (!claveBase) continue;
+    const previoBase = mapaCatalogoBase.get(claveBase);
+    const fechaPreviaBase = String(previoBase?.actualizado_en || '');
+    if (!previoBase || fechaActual >= fechaPreviaBase) {
+      mapaCatalogoBase.set(claveBase, row);
     }
   }
 
@@ -621,12 +989,14 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
 
     const prod = mapaProduccion.get(nombreReceta) || null;
     const prodBase = mapaProduccionBase.get(nombreBaseProducto(nombreReceta, receta?.gramaje)) || null;
-    const catalogo = mapaCatalogo.get(claveRecetaNombre(nombreReceta)) || null;
+    const catalogo = mapaCatalogo.get(claveRecetaNombre(nombreReceta))
+      || mapaCatalogoBase.get(claveRecetaBase(nombreReceta))
+      || null;
     // By default, a recipe variant is hidden until explicitly enabled in tienda_catalogo.
     const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : false;
     if (!visibleCatalogo && !incluirOcultos) continue;
 
-    const stock = Number(prod?.stock) || 0;
+    const stock = Number(prod?.stock) || Number(prodBase?.stock) || 0;
     const ingredientesRecetaLista = mapaIngredientesReceta.get(Number(receta?.id)) || [];
     const mapaCantidadIngredientes = new Map();
     ingredientesRecetaLista.forEach((ing) => {
@@ -660,12 +1030,13 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       stock,
       disponible: stock > 0,
       activo: stock > 0,
+      tienda_precio_publico: Number(receta?.tienda_precio_publico) || 0,
       costo_estimado: Number(mapaPrecioSugeridoReceta.get(Number(receta?.id)) || 0),
       precio_venta: (
-        Number(prod?.precio_venta)
+        Number(receta?.tienda_precio_publico)
+        || Number(prod?.precio_venta)
         || Number(prodBase?.precio_venta)
         || Number(calcularPrecioSugerido(Number(mapaPrecioSugeridoReceta.get(Number(receta?.id)) || 0), ajustesProduccion))
-        || Number(receta?.tienda_precio_publico)
         || 0
       ),
       gramaje: Number(receta?.gramaje) || 0,
@@ -708,7 +1079,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
     if (!base) continue;
 
     if (!grupos.has(base)) {
-      const catalogoBase = mapaCatalogo.get(claveRecetaNombre(base)) || null;
+      const catalogoBase = mapaCatalogo.get(claveRecetaNombre(base))
+        || mapaCatalogoBase.get(claveRecetaBase(base))
+        || null;
       grupos.set(base, {
         receta_id: item.receta_id,
         categoria_id: item.categoria_id,
@@ -720,6 +1093,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
         disponible: false,
         activo: false,
         precio_venta: 0,
+        tienda_precio_publico: 0,
         gramaje: 0,
         descripcion: '',
         modo_uso: '',
@@ -759,6 +1133,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       nombre: etiquetaGramaje(item.gramaje, item.nombre_receta),
       receta_nombre: item.nombre_receta,
       gramaje: Number(item.gramaje) || 0,
+      tienda_precio_publico: Number(item?.tienda_precio_publico) || 0,
       precio_venta: Number(item.precio_venta) || 0,
       stock: Number(item.stock) || 0,
       disponible: (Number(item.stock) || 0) > 0,
@@ -787,6 +1162,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
         const detalle = salidaFlat.find((it) => String(it?.nombre_receta || '').trim() === nombreVar);
         return sum + (Number(detalle?.costo_estimado) || 0);
       }, 0),
+      tienda_precio_publico: Number(varianteActiva?.tienda_precio_publico) || 0,
       precio_venta: Number(varianteActiva?.precio_venta) || 0,
       gramaje: Number(varianteActiva?.gramaje) || 0,
       visible_publico: incluirOcultos ? Boolean(grupo.visible_publico) : (variantes.length > 0)
@@ -883,11 +1259,11 @@ async function crearPreferenciaMercadoPago({ orden, items }) {
   };
 }
 
-async function registrarRecuperacionVenta(bdInventario, { fechaVenta, costoProduccion, ganancia }) {
+async function registrarRecuperacionVenta(bdInventario, { fechaVenta, importeCobrado, ganancia }) {
   await dbRun(
     bdInventario,
     "INSERT INTO inversion_recuperada (fecha_venta, costo_recuperado) VALUES (?,?)",
-    [fechaVenta, Number(costoProduccion) || 0]
+    [fechaVenta, Number(importeCobrado) || 0]
   );
 
   const inv = await dbGet(
@@ -911,7 +1287,7 @@ async function registrarRecuperacionVenta(bdInventario, { fechaVenta, costoProdu
   }
 }
 
-async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventario, { nombreReceta, cantidadSolicitada, numeroPedido }) {
+async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventario, { nombreReceta, cantidadSolicitada, numeroPedido, precioVentaPreferente }) {
   let restante = Number(cantidadSolicitada) || 0;
   if (restante <= 0) return { cantidadVendida: 0, cantidadPendiente: 0 };
 
@@ -939,7 +1315,9 @@ async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventa
     const costoTotalLote = Number(lote?.costo_produccion) || 0;
     const costoUnitario = loteCantidad > 0 ? (costoTotalLote / loteCantidad) : 0;
     const costoVenta = costoUnitario * aVender;
-    const precioVenta = Number(lote?.precio_venta) || 0;
+    const precioVenta = Number(precioVentaPreferente) > 0
+      ? Number(precioVentaPreferente)
+      : (Number(lote?.precio_venta) || 0);
     const ganancia = (precioVenta * aVender) - costoVenta;
 
     await dbRun(
@@ -949,7 +1327,11 @@ async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventa
       [nombreReceta, aVender, lote?.fecha_produccion || fechaVenta, fechaVenta, costoVenta, precioVenta, ganancia, numeroPedido || ""]
     );
 
-    await registrarRecuperacionVenta(bdInventario, { fechaVenta, costoProduccion: costoVenta, ganancia });
+    await registrarRecuperacionVenta(bdInventario, {
+      fechaVenta,
+      importeCobrado: (Number(precioVenta) || 0) * (Number(aVender) || 0),
+      ganancia
+    });
 
     const restanteLote = loteCantidad - aVender;
     if (restanteLote <= 0) {
@@ -1196,11 +1578,31 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const clientes = await dbAll(
         bdVentas,
-        "SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida, creado_en, actualizado_en FROM tienda_clientes ORDER BY id DESC"
+        "SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida, recibe_promociones, creado_en, actualizado_en FROM tienda_clientes ORDER BY id DESC"
       );
       res.json(clientes || []);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar clientes" });
+    }
+  });
+
+  app.delete('/tienda/admin/clientes/:id', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Cliente inválido' });
+
+      const existe = await dbGet(bdVentas, 'SELECT id FROM tienda_clientes WHERE id = ? LIMIT 1', [id]);
+      if (!existe) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+      await dbRun(bdVentas, 'DELETE FROM tienda_notificaciones_cliente WHERE id_cliente = ?', [id]);
+      await dbRun(bdVentas, 'DELETE FROM tienda_clientes_direcciones WHERE id_cliente = ?', [id]);
+      await dbRun(bdVentas, 'DELETE FROM tienda_atencion_clientes WHERE id_cliente = ?', [id]);
+      await dbRun(bdVentas, 'DELETE FROM tienda_resenas WHERE id_cliente = ?', [id]);
+      await dbRun(bdVentas, 'DELETE FROM tienda_clientes WHERE id = ?', [id]);
+
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo eliminar el cliente' });
     }
   });
 
@@ -1217,6 +1619,231 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       res.json(ordenes || []);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar órdenes" });
+    }
+  });
+
+  app.post('/tienda/admin/mail/diagnostico', authInterno, async (req, res) => {
+    try {
+      const cfg = obtenerConfigCorreo();
+      const configTienda = await obtenerConfigTienda(bdVentas);
+      const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+      const to = String(req.body?.to || cfg.SMTP_USER || '').trim();
+      const nombre = String(req.body?.nombre || req.user?.nombre || 'Administrador').trim();
+      const etiqueta = String(req.body?.etiqueta || '').trim();
+      if (!to) return res.status(400).json({ error: 'Correo destino requerido' });
+
+      const correo = construirCorreoDiagnostico({ nombre, etiqueta, plantillas });
+      const resultado = await enviarCorreoCliente({
+        to,
+        subject: correo.subject,
+        text: correo.text,
+        html: correo.html
+      });
+
+      if (resultado?.ok) {
+        return res.json({ ok: true, to, configurado: correoConfigurado() });
+      }
+      if (resultado?.skipped) {
+        return res.status(400).json({
+          ok: false,
+          error: 'No se pudo enviar correo de diagnostico',
+          motivo: resultado?.motivo || 'desconocido',
+          configurado: correoConfigurado()
+        });
+      }
+
+      return res.status(500).json({
+        ok: false,
+        error: 'Fallo al enviar correo de diagnostico',
+        detalle: resultado?.error || 'error_desconocido'
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo ejecutar diagnostico de correo' });
+    }
+  });
+
+  app.post('/tienda/admin/mail/preview', authInterno, async (req, res) => {
+    try {
+      const configTienda = await obtenerConfigTienda(bdVentas);
+      const plantillasBase = obtenerPlantillasCorreoDesdeConfig(configTienda);
+      const tipoPreview = String(req.body?.tipo || 'campana').trim().toLowerCase();
+
+      const tituloCampana = String(req.body?.titulo || '').trim() || 'Novedades CHIPACTLI';
+      const contenidoCampana = String(req.body?.contenido || '').trim();
+      const imagenCampanaUrl = String(req.body?.imagen_url || '').trim();
+      const asuntoManual = String(req.body?.asunto || '').trim();
+      const cuerpoManual = String(req.body?.cuerpo || '').trim();
+
+      const basePublica = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://chipactli.onrender.com/').trim().replace(/\/+$/, '');
+      const urlTienda = basePublica || 'https://chipactli.onrender.com/';
+
+      let correo = null;
+      if (tipoPreview === 'bienvenida') {
+        correo = construirCorreoBienvenida({
+          nombreCliente: 'Cliente CHIPACTLI',
+          emailCliente: 'cliente@chipactli.mx',
+          urlTienda,
+          plantillas: {
+            ...plantillasBase,
+            bienvenida_asunto: String(req.body?.asunto || '').trim() || plantillasBase.bienvenida_asunto,
+            bienvenida_cuerpo: String(req.body?.cuerpo || '').trim() || plantillasBase.bienvenida_cuerpo
+          }
+        });
+      } else if (tipoPreview === 'confirmacion') {
+        correo = construirCorreoConfirmacionPedido({
+          cliente: 'Cliente CHIPACTLI',
+          folio: 'CHV0000123',
+          total: 589,
+          metodoPago: 'Transferencia',
+          puntoEntrega: 'Sucursal Centro',
+          direccionEntrega: 'Recoger hoy de 13:00 a 14:00',
+          items: [
+            { nombre_receta: 'Jabon de Cempasuchil', variante: '120 g', cantidad: 2, subtotal: 298 },
+            { nombre_receta: 'Shampoo Herbal', variante: '250 ml', cantidad: 1, subtotal: 291 }
+          ],
+          plantillas: {
+            ...plantillasBase,
+            confirmacion_asunto: String(req.body?.asunto || '').trim() || plantillasBase.confirmacion_asunto,
+            confirmacion_cuerpo: String(req.body?.cuerpo || '').trim() || plantillasBase.confirmacion_cuerpo
+          }
+        });
+      } else if (tipoPreview === 'estado') {
+        correo = construirCorreoEstadoPedido({
+          nombreCliente: 'Cliente CHIPACTLI',
+          folio: 'CHV0000123',
+          estado: 'enviado',
+          mensajeEstado: 'Tu pedido ya va en camino.',
+          total: 589,
+          metodoPago: 'Transferencia',
+          puntoEntrega: 'Domicilio',
+          paqueteria: 'DHL',
+          numeroGuia: 'DH123456789MX',
+          plantillas: {
+            ...plantillasBase,
+            estado_asunto: String(req.body?.asunto || '').trim() || plantillasBase.estado_asunto,
+            estado_cuerpo: String(req.body?.cuerpo || '').trim() || plantillasBase.estado_cuerpo
+          }
+        });
+      } else if (tipoPreview === 'diagnostico') {
+        correo = construirCorreoDiagnostico({
+          nombre: String(req.user?.nombre || 'Administracion CHIPACTLI').trim(),
+          etiqueta: 'Vista previa',
+          plantillas: {
+            ...plantillasBase,
+            diagnostico_asunto: String(req.body?.asunto || '').trim() || plantillasBase.diagnostico_asunto,
+            diagnostico_cuerpo: String(req.body?.cuerpo || '').trim() || plantillasBase.diagnostico_cuerpo
+          }
+        });
+      } else {
+        correo = construirCorreoCampana({
+          nombreCliente: 'Cliente CHIPACTLI',
+          emailCliente: 'cliente@chipactli.mx',
+          tituloCampana,
+          contenidoCampana,
+          imagenCampanaUrl,
+          urlTienda,
+          plantillas: {
+            ...plantillasBase,
+            campana_asunto: asuntoManual || plantillasBase.campana_asunto,
+            campana_cuerpo: cuerpoManual || plantillasBase.campana_cuerpo
+          }
+        });
+      }
+
+      return res.json({
+        ok: true,
+        tipo: tipoPreview,
+        subject: correo.subject,
+        text: correo.text,
+        html: correo.html
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo generar la vista previa del correo' });
+    }
+  });
+
+  app.post('/tienda/admin/mail/masivo', authInterno, async (req, res) => {
+    try {
+      const configTienda = await obtenerConfigTienda(bdVentas);
+      const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+
+      const tituloCampana = String(req.body?.titulo || '').trim() || 'Novedades CHIPACTLI';
+      const contenidoCampana = String(req.body?.contenido || '').trim();
+      const imagenCampanaUrl = String(req.body?.imagen_url || '').trim();
+      const asuntoManual = String(req.body?.asunto || '').trim();
+      const cuerpoManual = String(req.body?.cuerpo || '').trim();
+      const maxDestinatarios = Math.max(1, Math.min(5000, Number(req.body?.max_destinatarios || 1000) || 1000));
+
+      if (!contenidoCampana && !cuerpoManual) {
+        return res.status(400).json({ error: 'Debes capturar contenido para la campana' });
+      }
+
+      const basePublica = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://chipactli.onrender.com/').trim().replace(/\/+$/, '');
+      const urlTienda = basePublica || 'https://chipactli.onrender.com/';
+
+      const clientes = await dbAll(
+        bdVentas,
+        `SELECT id, nombre, email
+         FROM tienda_clientes
+         WHERE TRIM(COALESCE(email, '')) <> ''
+           AND COALESCE(recibe_promociones, 0) = 1
+         ORDER BY id DESC
+         LIMIT ?`,
+        [maxDestinatarios]
+      );
+
+      if (!Array.isArray(clientes) || !clientes.length) {
+        return res.status(400).json({ error: 'No hay clientes con correo para enviar campana' });
+      }
+
+      let enviados = 0;
+      let fallidos = 0;
+      const errores = [];
+
+      for (const cliente of clientes) {
+        const to = String(cliente?.email || '').trim();
+        if (!to) continue;
+
+        const correo = construirCorreoCampana({
+          nombreCliente: String(cliente?.nombre || 'cliente').trim(),
+          emailCliente: to,
+          tituloCampana,
+          contenidoCampana: contenidoCampana || cuerpoManual,
+          imagenCampanaUrl,
+          urlTienda,
+          plantillas: {
+            ...plantillas,
+            campana_asunto: asuntoManual || plantillas.campana_asunto,
+            campana_cuerpo: cuerpoManual || plantillas.campana_cuerpo
+          }
+        });
+
+        const resultado = await enviarCorreoCliente({
+          to,
+          subject: correo.subject,
+          text: correo.text,
+          html: correo.html
+        });
+
+        if (resultado?.ok) {
+          enviados += 1;
+        } else {
+          fallidos += 1;
+          if (errores.length < 20) {
+            errores.push({ email: to, error: resultado?.error || resultado?.motivo || 'fallo_envio' });
+          }
+        }
+      }
+
+      return res.json({
+        ok: true,
+        enviados,
+        fallidos,
+        total: enviados + fallidos,
+        errores
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo enviar correo masivo' });
     }
   });
 
@@ -1254,7 +1881,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       if (!resultado.changes) return res.status(404).json({ error: "Orden no encontrada" });
       const ordenActualizada = await dbGet(
         bdVentas,
-        `SELECT id, id_cliente, folio
+        `SELECT id, id_cliente, folio, nombre_cliente, email_cliente, total, metodo_pago, nombre_punto_entrega
          FROM tienda_ordenes
          WHERE id = ?`,
         [id]
@@ -1287,6 +1914,30 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
             mensajeFinal
           ]
         );
+      }
+
+      const correoCliente = String(ordenActualizada?.email_cliente || '').trim();
+      if (correoCliente) {
+        const configTienda = await obtenerConfigTienda(bdVentas);
+        const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+        const correo = construirCorreoEstadoPedido({
+          nombreCliente: String(ordenActualizada?.nombre_cliente || 'cliente').trim(),
+          folio: String(ordenActualizada?.folio || '').trim(),
+          estado,
+          mensajeEstado: mensajeEstadoPedidoCliente(estado),
+          total: Number(ordenActualizada?.total || 0),
+          metodoPago: String(ordenActualizada?.metodo_pago || 'No especificado'),
+          puntoEntrega: String(ordenActualizada?.nombre_punto_entrega || 'No especificado'),
+          paqueteria,
+          numeroGuia,
+          plantillas
+        });
+        await enviarCorreoCliente({
+          to: correoCliente,
+          subject: correo.subject,
+          text: correo.text,
+          html: correo.html
+        });
       }
 
       transmitir({ tipo: 'ventas_actualizado' });
@@ -1480,6 +2131,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
       const telefono = String(req.body?.telefono || "").trim();
+      const recibePromociones = boolToInt(req.body?.recibe_promociones);
 
       if (!nombre || !email || !password) {
         return res.status(400).json({ exito: false, mensaje: "Nombre, email y contraseña son obligatorios" });
@@ -1493,12 +2145,33 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const hash = await bcrypt.hash(password, 10);
       const creado = await dbRun(
         bdVentas,
-        `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, creado_en, actualizado_en)
-         VALUES (?, '', '', ?, ?, ?, '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [nombre, email, hash, telefono]
+        `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones, creado_en, actualizado_en)
+         VALUES (?, '', '', ?, ?, ?, '', '', '', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [nombre, email, hash, telefono, recibePromociones]
       );
 
-      const cliente = { id: creado.lastID, nombre, email };
+      try {
+        const configTienda = await obtenerConfigTienda(bdVentas);
+        const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+        const basePublica = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://chipactli.onrender.com/').trim().replace(/\/+$/, '');
+        const urlTienda = basePublica || 'https://chipactli.onrender.com/';
+        const correoBienvenida = construirCorreoBienvenida({
+          nombreCliente: nombre,
+          emailCliente: email,
+          urlTienda,
+          plantillas
+        });
+        await enviarCorreoCliente({
+          to: email,
+          subject: correoBienvenida.subject,
+          text: correoBienvenida.text,
+          html: correoBienvenida.html
+        });
+      } catch {
+        // El registro no debe fallar si el correo de bienvenida no se envía.
+      }
+
+      const cliente = { id: creado.lastID, nombre, email, recibe_promociones: recibePromociones };
       const token = crearTokenCliente(cliente);
       return res.json({ exito: true, token, cliente });
     } catch (error) {
@@ -1537,7 +2210,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           telefono: cliente.telefono || "",
           fecha_nacimiento: cliente.fecha_nacimiento || "",
           direccion_default: cliente.direccion_default || "",
-          forma_pago_preferida: cliente.forma_pago_preferida || ""
+          forma_pago_preferida: cliente.forma_pago_preferida || "",
+          recibe_promociones: Number(cliente?.recibe_promociones) === 1
         }
       });
     } catch {
@@ -1549,10 +2223,11 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const cliente = await dbGet(
         bdVentas,
-        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
+        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones FROM tienda_clientes WHERE id = ?",
         [req.cliente.id]
       );
       if (!cliente) return res.status(404).json({ exito: false, mensaje: "Cliente no encontrado" });
+      cliente.recibe_promociones = Number(cliente?.recibe_promociones) === 1;
       return res.json({ exito: true, cliente });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "No se pudo cargar el perfil" });
@@ -1569,6 +2244,9 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const fechaNacimiento = String(req.body?.fecha_nacimiento || "").trim();
       const direccionDefault = String(req.body?.direccion_default || "").trim();
       const formaPago = String(req.body?.forma_pago_preferida || "").trim();
+      const recibePromociones = tieneClave(req.body || {}, 'recibe_promociones')
+        ? boolToInt(req.body?.recibe_promociones)
+        : null;
 
       if (email) {
         const existeCorreo = await dbGet(
@@ -1592,16 +2270,20 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
              fecha_nacimiento = ?,
              direccion_default = ?,
              forma_pago_preferida = ?,
+             recibe_promociones = COALESCE(?, recibe_promociones),
              actualizado_en = CURRENT_TIMESTAMP
          WHERE id = ?`,
-        [nombre, apellidoPaterno, apellidoMaterno, email, telefono, fechaNacimiento, direccionDefault, formaPago, req.cliente.id]
+        [nombre, apellidoPaterno, apellidoMaterno, email, telefono, fechaNacimiento, direccionDefault, formaPago, recibePromociones, req.cliente.id]
       );
 
       const cliente = await dbGet(
         bdVentas,
-        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida FROM tienda_clientes WHERE id = ?",
+        "SELECT id, nombre, apellido_paterno, apellido_materno, email, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones FROM tienda_clientes WHERE id = ?",
         [req.cliente.id]
       );
+      if (cliente) {
+        cliente.recibe_promociones = Number(cliente?.recibe_promociones) === 1;
+      }
       return res.json({ exito: true, cliente });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "No se pudo actualizar el perfil" });
@@ -2177,7 +2859,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           {
             nombreReceta: item.nombre_receta,
             cantidadSolicitada,
-            numeroPedido: folio
+            numeroPedido: folio,
+            precioVentaPreferente: Number(item?.precio_unitario || 0)
           }
         );
 
@@ -2224,6 +2907,28 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
          VALUES (?, ?, 'pedido_nuevo', 'Pedido realizado', ?, 0, CURRENT_TIMESTAMP)`,
         [Number(cliente.id) || 0, insertOrden.lastID, mensajePedidoNuevo]
       );
+
+      const correoCliente = String(cliente?.email || '').trim();
+      if (correoCliente) {
+        const configTienda = await obtenerConfigTienda(bdVentas);
+        const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+        const correo = construirCorreoConfirmacionPedido({
+          cliente: String(cliente?.nombre || 'cliente').trim(),
+          folio,
+          total,
+          metodoPago,
+          puntoEntrega: String(puntoEntrega?.nombre || '').trim(),
+          direccionEntrega,
+          items: itemsFinales,
+          plantillas
+        });
+        await enviarCorreoCliente({
+          to: correoCliente,
+          subject: correo.subject,
+          text: correo.text,
+          html: correo.html
+        });
+      }
 
       if (cantidadAutoVendida > 0) {
         transmitir({ tipo: 'produccion_actualizado' });

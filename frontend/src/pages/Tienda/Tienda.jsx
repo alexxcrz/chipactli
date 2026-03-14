@@ -22,6 +22,12 @@ const API_TIENDA = import.meta.env.DEV
 const CLAVE_TOKEN_CLIENTE = 'tienda_cliente_token';
 const CLAVE_CARRITO_TIENDA = 'tienda_carrito_v2';
 const CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT = 'tienda_notif_pedidos_ultimo_prompt';
+const CLAVE_TIENDA_VISTA_ACTIVA = 'chipactli:tienda:vistaActiva';
+const CLAVE_TIENDA_SECCION_ACTIVA = 'chipactli:tienda:seccionActiva';
+const CLAVE_TIENDA_CATEGORIA_ACTIVA = 'chipactli:tienda:categoriaActiva';
+const CLAVE_TRASTIENDA_VISTA_ADMIN = 'chipactli:trastienda:adminVista';
+const CLAVE_TRASTIENDA_CONFIG_TAB = 'chipactli:trastienda:configAdminTab';
+const CLAVE_TRASTIENDA_DESCUENTOS_TAB = 'chipactli:trastienda:descuentoTabInterna';
 const EXPIRACION_CARRITO_INVITADO_MS = 24 * 60 * 60 * 1000;
 const SECCIONES_INFO_LINKS = [
   { idx: 2, titulo: 'Nosotros' },
@@ -98,6 +104,19 @@ const CONFIG_DEFAULT = {
   info_link_5_url: '#',
   info_link_5_texto: 'Conoce cómo recopilamos, usamos y protegemos tus datos personales en CHIPACTLI.',
   info_link_5_activo: '1',
+  correo_bienvenida_asunto: 'Bienvenido a CHIPACTLI, {{nombre_cliente}}',
+  correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra tienda.\n\nIr a la tienda: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
+  correo_confirmacion_asunto: 'Confirmacion de pedido {{folio}}',
+  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
+  correo_estado_asunto: 'Actualizacion de pedido {{folio}}: {{estado_titulo}}',
+  correo_estado_cuerpo: 'Hola {{nombre_cliente}},\n\nTu pedido {{folio}} cambio de estado.\nEstado actual: {{estado_titulo}}\n{{mensaje_estado}}\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{paqueteria_linea}}\n{{guia_linea}}\n\nGracias por comprar en CHIPACTLI.',
+  correo_diagnostico_asunto: 'Diagnostico correo CHIPACTLI{{etiqueta_sufijo}}',
+  correo_diagnostico_cuerpo: 'Hola {{nombre_admin}},\n\nEste es un correo de diagnostico del modulo de pedidos de CHIPACTLI.\nFecha: {{fecha}}\nSMTP host: {{smtp_host}}\nUsuario SMTP: {{smtp_user}}\n\nSi recibiste este correo, el envio SMTP esta funcionando.',
+  correo_campana_asunto: 'Novedades CHIPACTLI: {{titulo_campana}}',
+  correo_campana_cuerpo: 'Hola {{nombre_cliente}},\n\n{{contenido_campana}}\n\nVisita nuestra tienda: {{url_tienda}}\n\nGracias por seguir a CHIPACTLI.',
+  correo_campana_titulo: 'Novedades CHIPACTLI',
+  correo_campana_contenido: '',
+  correo_campana_imagen_url: '',
   servicio_domicilio_habilitado: '0',
   atencion_asuntos: 'Consulta de pedido\nCambio de dirección\nIncidencia con producto\nSugerencia\nOtro'
 };
@@ -156,6 +175,27 @@ const PAQUETERIA_TRACKING_URLS = {
   ampm: 'https://ampm.com.mx/',
   correos_demexico: 'https://www.correosdemexico.gob.mx/SSLServicios/SeguimientoEnvio/Seguimiento.aspx'
 };
+
+function leerValorPersistido(clave, valorPorDefecto) {
+  try {
+    const valor = String(localStorage.getItem(clave) || '').trim();
+    return valor || valorPorDefecto;
+  } catch {
+    return valorPorDefecto;
+  }
+}
+
+function leerValorPersistidoPermitido(clave, permitidos, valorPorDefecto) {
+  const valor = leerValorPersistido(clave, valorPorDefecto);
+  return permitidos.includes(valor) ? valor : valorPorDefecto;
+}
+
+function guardarValorPersistido(clave, valor) {
+  try {
+    localStorage.setItem(clave, String(valor || ''));
+  } catch {
+  }
+}
 
 function etiquetaEstadoPedido(estado) {
   const clave = String(estado || '').trim().toLowerCase();
@@ -404,7 +444,9 @@ async function fetchJson(path, options = {}) {
   const respuesta = await fetch(apiUrl(path), options);
   const data = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
-    throw new Error(data?.mensaje || data?.error || `Error HTTP ${respuesta.status}`);
+    const base = data?.mensaje || data?.error || `Error HTTP ${respuesta.status}`;
+    const detalle = String(data?.detalle || data?.motivo || '').trim();
+    throw new Error(detalle ? `${base}: ${detalle}` : base);
   }
   return data;
 }
@@ -545,9 +587,11 @@ export default function Tienda({
 }) {
   const esVistaTrastienda = modo === 'trastienda';
   const [productos, setProductos] = useState([]);
-  const [vistaActiva, setVistaActiva] = useState(esVistaTrastienda ? 'trastienda' : 'tienda');
-  const [seccionActiva, setSeccionActiva] = useState('todos');
-  const [categoriaActiva, setCategoriaActiva] = useState('todas');
+  const [vistaActiva, setVistaActiva] = useState(() => (esVistaTrastienda
+    ? 'trastienda'
+    : leerValorPersistidoPermitido(CLAVE_TIENDA_VISTA_ACTIVA, ['tienda', 'detalle', 'info'], 'tienda')));
+  const [seccionActiva, setSeccionActiva] = useState(() => leerValorPersistido(CLAVE_TIENDA_SECCION_ACTIVA, 'todos'));
+  const [categoriaActiva, setCategoriaActiva] = useState(() => leerValorPersistido(CLAVE_TIENDA_CATEGORIA_ACTIVA, 'todas'));
   const [filtro, setFiltro] = useState('');
   const [cargando, setCargando] = useState(true);
   const [seleccionado, setSeleccionado] = useState(null);
@@ -564,7 +608,7 @@ export default function Tienda({
   const [mostrarModalAuthCliente, setMostrarModalAuthCliente] = useState(false);
   const [mostrarModalPerfilCliente, setMostrarModalPerfilCliente] = useState(false);
   const [pasoRegistro, setPasoRegistro] = useState(1);
-  const [credenciales, setCredenciales] = useState({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '' });
+  const [credenciales, setCredenciales] = useState({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
   const [clienteToken, setClienteToken] = useState(() => localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '');
   const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
   const [cliente, setCliente] = useState(null);
@@ -576,7 +620,8 @@ export default function Tienda({
     telefono: '',
     fecha_nacimiento: '',
     direccion_default: '',
-    forma_pago_preferida: ''
+    forma_pago_preferida: '',
+    recibe_promociones: false
   });
   const [perfilModalTab, setPerfilModalTab] = useState('datos');
   const [perfilPedidosTab, setPerfilPedidosTab] = useState('activos');
@@ -594,9 +639,10 @@ export default function Tienda({
   const [adminClientes, setAdminClientes] = useState([]);
   const [adminOrdenes, setAdminOrdenes] = useState([]);
   const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
-  const [adminVista, setAdminVista] = useState('pedidos');
+  const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'config'], 'pedidos'));
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
   const [busquedaAdmin, setBusquedaAdmin] = useState('');
+  const [ordenObjetivoAdmin, setOrdenObjetivoAdmin] = useState({ id: '', folio: '' });
   const [infoSeleccionada, setInfoSeleccionada] = useState(null);
   const [configTienda, setConfigTienda] = useState(CONFIG_DEFAULT);
   const [configTiendaAdmin, setConfigTiendaAdmin] = useState(CONFIG_DEFAULT);
@@ -610,12 +656,12 @@ export default function Tienda({
   const [soloPendientesClasificacion, setSoloPendientesClasificacion] = useState(false);
   const [filtroNombreClasificacion, setFiltroNombreClasificacion] = useState('');
   const [filtroCategoriaClasificacion, setFiltroCategoriaClasificacion] = useState('todas');
-  const [configAdminTab, setConfigAdminTab] = useState('general');
+  const [configAdminTab, setConfigAdminTab] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_CONFIG_TAB, ['general', 'correos', 'nav', 'redes', 'links'], 'general'));
   const [infoLinkAdminTab, setInfoLinkAdminTab] = useState(2);
   const [mostrarBotonArribaTienda, setMostrarBotonArribaTienda] = useState(false);
   const [descuentosAdmin, setDescuentosAdmin] = useState([]);
   const [guardandoDescuentoClave, setGuardandoDescuentoClave] = useState('');
-  const [descuentoTabInterna, setDescuentoTabInterna] = useState('general');
+  const [descuentoTabInterna, setDescuentoTabInterna] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_DESCUENTOS_TAB, ['general', 'categorias'], 'general'));
   const [descuentoCategoriaActiva, setDescuentoCategoriaActiva] = useState('');
   const [filtroDescuentoProducto, setFiltroDescuentoProducto] = useState('');
   const [filtroExclusionGlobal, setFiltroExclusionGlobal] = useState('');
@@ -636,8 +682,20 @@ export default function Tienda({
   const [notificacionesTabPerfil, setNotificacionesTabPerfil] = useState('sin_leer');
   const [editorProducto, setEditorProducto] = useState(null);
   const [subiendoLogoPagoId, setSubiendoLogoPagoId] = useState('');
+  const [dragLogoPagoId, setDragLogoPagoId] = useState('');
+  const [subiendoImagenCampana, setSubiendoImagenCampana] = useState(false);
+  const [arrastrandoImagenCampana, setArrastrandoImagenCampana] = useState(false);
+  const [correoDiagnosticoDestino, setCorreoDiagnosticoDestino] = useState('chipactli.ventas@gmail.com');
+  const [enviandoCorreoDiagnostico, setEnviandoCorreoDiagnostico] = useState(false);
+  const [enviandoCorreoMasivo, setEnviandoCorreoMasivo] = useState(false);
+  const [mostrandoPreviewCorreo, setMostrandoPreviewCorreo] = useState(false);
+  const [cargandoPreviewCorreo, setCargandoPreviewCorreo] = useState(false);
+  const [previewCorreoHtml, setPreviewCorreoHtml] = useState('');
+  const [previewCorreoAsunto, setPreviewCorreoAsunto] = useState('');
+  const [previewTipoCorreo, setPreviewTipoCorreo] = useState('campana');
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
+  const inputImagenCampanaArchivoRef = useRef(null);
   const metodoPagoUploadTargetRef = useRef('');
   const contenedorScrollRef = useRef(null);
   const detalleTouchStartRef = useRef({ x: 0, y: 0 });
@@ -838,6 +896,108 @@ export default function Tienda({
     inputLogoPagoArchivoRef.current?.click();
   }
 
+  function abrirSelectorImagenCampana() {
+    inputImagenCampanaArchivoRef.current?.click();
+  }
+
+  async function optimizarImagenArchivoCliente(archivo, opciones = {}) {
+    const tipo = String(archivo?.type || '').toLowerCase();
+    if (!archivo) return archivo;
+    if (!tipo.startsWith('image/')) return archivo;
+    if (tipo.includes('svg')) return archivo;
+
+    const maxLado = Number(opciones?.maxLado || 1600);
+    const calidadInicial = Number(opciones?.calidad || 0.85);
+    const pesoObjetivoKB = Number(opciones?.pesoObjetivoKB || 700);
+
+    try {
+      const url = URL.createObjectURL(archivo);
+      const imagen = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+      });
+
+      const anchoOriginal = Number(imagen?.width || 0);
+      const altoOriginal = Number(imagen?.height || 0);
+      if (anchoOriginal <= 0 || altoOriginal <= 0) {
+        URL.revokeObjectURL(url);
+        return archivo;
+      }
+
+      const escala = Math.min(1, maxLado / Math.max(anchoOriginal, altoOriginal));
+      const ancho = Math.max(1, Math.round(anchoOriginal * escala));
+      const alto = Math.max(1, Math.round(altoOriginal * escala));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = ancho;
+      canvas.height = alto;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        return archivo;
+      }
+
+      ctx.drawImage(imagen, 0, 0, ancho, alto);
+      URL.revokeObjectURL(url);
+
+      let calidad = Math.max(0.5, Math.min(0.95, calidadInicial));
+      let blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', calidad));
+      if (!blob) return archivo;
+
+      while (blob.size > (pesoObjetivoKB * 1024) && calidad > 0.55) {
+        calidad -= 0.07;
+        const nuevo = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', calidad));
+        if (!nuevo) break;
+        blob = nuevo;
+      }
+
+      if (!blob || blob.size >= archivo.size) return archivo;
+
+      const nombreBase = String(archivo?.name || 'imagen')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '') || 'imagen';
+      return new File([blob], `${nombreBase}.webp`, { type: 'image/webp' });
+    } catch {
+      return archivo;
+    }
+  }
+
+  function validarArchivoImagen(archivo) {
+    if (!archivo) return 'No se encontró el archivo de imagen.';
+    const tipo = String(archivo?.type || '').toLowerCase();
+    if (tipo.startsWith('image/')) return '';
+    const nombre = String(archivo?.name || '').toLowerCase();
+    if (nombre.endsWith('.svg')) return '';
+    return 'Solo se permiten imágenes (PNG, JPG, WEBP, SVG, etc.).';
+  }
+
+  async function subirImagenTiendaArchivo(archivo) {
+    const errorArchivo = validarArchivoImagen(archivo);
+    if (errorArchivo) throw new Error(errorArchivo);
+
+    const archivoOptimizado = await optimizarImagenArchivoCliente(archivo);
+    const formData = new FormData();
+    formData.append('imagen', archivoOptimizado || archivo);
+    const data = await fetchAdmin('/api/uploads/tienda-imagen', {
+      method: 'POST',
+      body: formData
+    });
+    const url = String(data?.url || '').trim();
+    if (!url) throw new Error('No se recibió la URL de la imagen subida.');
+    return url;
+  }
+
+  async function subirLogoMetodoDesdeArchivo(idMetodo, archivo) {
+    const id = String(idMetodo || '').trim();
+    if (!id) throw new Error('Método de pago inválido para subir logo.');
+    const url = await subirImagenTiendaArchivo(archivo);
+    editarMetodoPagoAdmin(id, { logo_url: url });
+  }
+
   async function subirLogoPagoDesdeComputadora(event) {
     const archivo = event?.target?.files?.[0] || null;
     const idMetodo = String(metodoPagoUploadTargetRef.current || '').trim();
@@ -850,18 +1010,7 @@ export default function Tienda({
 
     try {
       setSubiendoLogoPagoId(idMetodo);
-      const formData = new FormData();
-      formData.append('imagen', archivo);
-
-      const data = await fetchAdmin('/api/uploads/tienda-imagen', {
-        method: 'POST',
-        body: formData
-      });
-
-      const url = String(data?.url || '').trim();
-      if (!url) throw new Error('No se recibió la URL del logo subido.');
-
-      editarMetodoPagoAdmin(idMetodo, { logo_url: url });
+      await subirLogoMetodoDesdeArchivo(idMetodo, archivo);
       mostrarNotificacion('Logo agregado correctamente.', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo subir el logo.', 'error');
@@ -869,6 +1018,66 @@ export default function Tienda({
       setSubiendoLogoPagoId('');
       metodoPagoUploadTargetRef.current = '';
       if (event?.target) event.target.value = '';
+    }
+  }
+
+  async function manejarDropLogoPago(event, idMetodo) {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = String(idMetodo || '').trim();
+    setDragLogoPagoId('');
+
+    const archivo = event?.dataTransfer?.files?.[0] || null;
+    if (!archivo || !id) return;
+
+    try {
+      setSubiendoLogoPagoId(id);
+      await subirLogoMetodoDesdeArchivo(id, archivo);
+      mostrarNotificacion('Logo agregado correctamente.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo subir el logo.', 'error');
+    } finally {
+      setSubiendoLogoPagoId('');
+    }
+  }
+
+  async function subirImagenCampanaDesdeArchivo(archivo) {
+    const url = await subirImagenTiendaArchivo(archivo);
+    setConfigTiendaAdmin((prev) => ({ ...prev, correo_campana_imagen_url: url }));
+  }
+
+  async function subirImagenCampanaDesdeComputadora(event) {
+    const archivo = event?.target?.files?.[0] || null;
+    if (!archivo) return;
+
+    try {
+      setSubiendoImagenCampana(true);
+      await subirImagenCampanaDesdeArchivo(archivo);
+      mostrarNotificacion('Imagen de campaña cargada correctamente.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo subir la imagen de campaña.', 'error');
+    } finally {
+      setSubiendoImagenCampana(false);
+      if (event?.target) event.target.value = '';
+    }
+  }
+
+  async function manejarDropImagenCampana(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setArrastrandoImagenCampana(false);
+
+    const archivo = event?.dataTransfer?.files?.[0] || null;
+    if (!archivo) return;
+
+    try {
+      setSubiendoImagenCampana(true);
+      await subirImagenCampanaDesdeArchivo(archivo);
+      mostrarNotificacion('Imagen de campaña cargada correctamente.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo subir la imagen de campaña.', 'error');
+    } finally {
+      setSubiendoImagenCampana(false);
     }
   }
 
@@ -1011,6 +1220,117 @@ export default function Tienda({
     if (!esVistaTrastienda) return;
     setVistaActiva('trastienda');
   }, [esVistaTrastienda]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TIENDA_VISTA_ACTIVA, vistaActiva);
+  }, [esVistaTrastienda, vistaActiva]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TIENDA_SECCION_ACTIVA, seccionActiva);
+  }, [esVistaTrastienda, seccionActiva]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TIENDA_CATEGORIA_ACTIVA, categoriaActiva);
+  }, [esVistaTrastienda, categoriaActiva]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TRASTIENDA_VISTA_ADMIN, adminVista);
+  }, [esVistaTrastienda, adminVista]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TRASTIENDA_CONFIG_TAB, configAdminTab);
+  }, [esVistaTrastienda, configAdminTab]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda) return;
+    guardarValorPersistido(CLAVE_TRASTIENDA_DESCUENTOS_TAB, descuentoTabInterna);
+  }, [esVistaTrastienda, descuentoTabInterna]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda) return;
+    const aplicarObjetivoPedido = ({ folio = '', idOrden = '' } = {}) => {
+      const folioLimpio = String(folio || '').trim();
+      const idLimpio = String(idOrden || '').trim();
+      const termino = folioLimpio || idLimpio;
+      setAdminVista('pedidos');
+      setFiltroEstadoOrdenAdmin('todos');
+      if (termino) {
+        setBusquedaAdmin(termino);
+      }
+      setOrdenObjetivoAdmin({ id: idLimpio, folio: folioLimpio });
+    };
+
+    const aplicarFiltroPedidosDesdeHash = () => {
+      const hashRaw = String(window.location.hash || '').trim();
+      const hashActual = hashRaw.toLowerCase();
+      if (!hashActual.startsWith('#/trastienda/pedidos')) return;
+
+      const idxQuery = hashRaw.indexOf('?');
+      if (idxQuery < 0) {
+        aplicarObjetivoPedido({});
+        return;
+      }
+      const params = new URLSearchParams(hashRaw.slice(idxQuery + 1));
+      aplicarObjetivoPedido({
+        folio: String(params.get('folio') || '').trim(),
+        idOrden: String(params.get('id_orden') || '').trim()
+      });
+    };
+
+    const onAlertaClick = (event) => {
+      const destinoPage = String(event?.detail?.destino?.page || '').trim().toLowerCase();
+      const destinoSection = String(event?.detail?.destino?.section || '').trim().toLowerCase();
+      if (destinoPage !== 'trastienda' || destinoSection !== 'pedidos') return;
+      aplicarObjetivoPedido({
+        folio: String(event?.detail?.meta?.folio || '').trim(),
+        idOrden: String(event?.detail?.meta?.id_orden || '').trim()
+      });
+    };
+
+    aplicarFiltroPedidosDesdeHash();
+    window.addEventListener('hashchange', aplicarFiltroPedidosDesdeHash);
+    window.addEventListener('chipactli:alerta-click', onAlertaClick);
+
+    return () => {
+      window.removeEventListener('hashchange', aplicarFiltroPedidosDesdeHash);
+      window.removeEventListener('chipactli:alerta-click', onAlertaClick);
+    };
+  }, [esVistaTrastienda]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda) return;
+    if (adminVista !== 'pedidos') return;
+
+    const objetivoId = Number(ordenObjetivoAdmin?.id || 0);
+    const objetivoFolio = String(ordenObjetivoAdmin?.folio || '').trim().toLowerCase();
+    if (!objetivoId && !objetivoFolio) return;
+
+    const ordenObjetivo = (adminOrdenes || []).find((orden) => {
+      const idOrden = Number(orden?.id || 0);
+      const folioOrden = String(orden?.folio || '').trim().toLowerCase();
+      if (objetivoId && idOrden === objetivoId) return true;
+      if (objetivoFolio && folioOrden === objetivoFolio) return true;
+      return false;
+    });
+    if (!ordenObjetivo?.id) return;
+
+    const run = () => {
+      const el = document.getElementById(`admin-orden-${Number(ordenObjetivo.id)}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => {
+        setOrdenObjetivoAdmin({ id: String(ordenObjetivo.id), folio: String(ordenObjetivo.folio || '').trim() });
+      }, 250);
+    };
+
+    const raf = window.requestAnimationFrame(run);
+    return () => window.cancelAnimationFrame(raf);
+  }, [esVistaTrastienda, adminVista, adminOrdenes, ordenObjetivoAdmin]);
 
   useEffect(() => {
     cargarProductos();
@@ -1665,7 +1985,8 @@ export default function Tienda({
         telefono: data?.cliente?.telefono || '',
         fecha_nacimiento: data?.cliente?.fecha_nacimiento || '',
         direccion_default: data?.cliente?.direccion_default || '',
-        forma_pago_preferida: data?.cliente?.forma_pago_preferida || ''
+        forma_pago_preferida: data?.cliente?.forma_pago_preferida || '',
+        recibe_promociones: Boolean(data?.cliente?.recibe_promociones)
       });
       setCheckout((prev) => ({
         ...prev,
@@ -2095,6 +2416,109 @@ export default function Tienda({
     }
   }
 
+  async function enviarDiagnosticoCorreoAdmin() {
+    const destino = String(correoDiagnosticoDestino || '').trim();
+    if (!destino || !destino.includes('@')) {
+      mostrarNotificacion('Ingresa un correo válido para diagnóstico', 'error');
+      return;
+    }
+
+    setEnviandoCorreoDiagnostico(true);
+    try {
+      const data = await fetchAdmin('/tienda/admin/mail/diagnostico', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: destino,
+          nombre: 'Administracion CHIPACTLI',
+          etiqueta: 'Prueba desde Trastienda'
+        })
+      });
+      mostrarNotificacion(`Correo de diagnóstico enviado a ${String(data?.to || destino)}`, 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo enviar el correo de diagnóstico', 'error');
+    } finally {
+      setEnviandoCorreoDiagnostico(false);
+    }
+  }
+
+  async function enviarCorreoMasivoAdmin() {
+    const titulo = String(configTiendaAdmin?.correo_campana_titulo || '').trim() || 'Novedades CHIPACTLI';
+    const contenido = String(configTiendaAdmin?.correo_campana_contenido || '').trim();
+    const imagenUrl = String(configTiendaAdmin?.correo_campana_imagen_url || '').trim();
+
+    if (!contenido) {
+      mostrarNotificacion('Debes escribir el contenido de la campaña', 'error');
+      return;
+    }
+
+    const confirmar = window.confirm('Se enviará correo masivo solo a clientes suscritos a promociones. ¿Continuar?');
+    if (!confirmar) return;
+
+    setEnviandoCorreoMasivo(true);
+    try {
+      const data = await fetchAdmin('/tienda/admin/mail/masivo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo,
+          contenido,
+          imagen_url: imagenUrl,
+          asunto: String(configTiendaAdmin?.correo_campana_asunto || '').trim(),
+          cuerpo: String(configTiendaAdmin?.correo_campana_cuerpo || '').trim(),
+          max_destinatarios: 1000
+        })
+      });
+      const enviados = Number(data?.enviados || 0);
+      const fallidos = Number(data?.fallidos || 0);
+      mostrarNotificacion(`Campana enviada. Exito: ${enviados} · Fallidos: ${fallidos}`, fallidos > 0 ? 'advertencia' : 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo enviar correo masivo', 'error');
+    } finally {
+      setEnviandoCorreoMasivo(false);
+    }
+  }
+
+  async function abrirVistaPreviaCorreoAdmin(tipoForzado = '') {
+    const tipo = String(tipoForzado || previewTipoCorreo || 'campana').trim().toLowerCase();
+    if (tipo !== previewTipoCorreo) setPreviewTipoCorreo(tipo);
+    setMostrandoPreviewCorreo(true);
+    setCargandoPreviewCorreo(true);
+    setPreviewCorreoHtml('');
+    setPreviewCorreoAsunto('');
+
+    try {
+      const asuntoPreview = tipo === 'bienvenida'
+        ? String(configTiendaAdmin?.correo_bienvenida_asunto || '').trim()
+        : String(configTiendaAdmin?.correo_campana_asunto || '').trim();
+      const cuerpoPreview = tipo === 'bienvenida'
+        ? String(configTiendaAdmin?.correo_bienvenida_cuerpo || '').trim()
+        : String(configTiendaAdmin?.correo_campana_cuerpo || '').trim();
+
+      const data = await fetchAdmin('/tienda/admin/mail/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tipo,
+          titulo: String(configTiendaAdmin?.correo_campana_titulo || '').trim(),
+          contenido: String(configTiendaAdmin?.correo_campana_contenido || '').trim(),
+          imagen_url: String(configTiendaAdmin?.correo_campana_imagen_url || '').trim(),
+          asunto: asuntoPreview,
+          cuerpo: cuerpoPreview
+        })
+      });
+
+      setPreviewCorreoAsunto(String(data?.subject || '').trim());
+      setPreviewCorreoHtml(String(data?.html || '').trim());
+    } catch (error) {
+      setPreviewCorreoAsunto('');
+      setPreviewCorreoHtml('');
+      mostrarNotificacion(error?.message || 'No se pudo generar la vista previa del correo', 'error');
+    } finally {
+      setCargandoPreviewCorreo(false);
+    }
+  }
+
   async function cargarDescuentosAdmin() {
     if (!tokenInterno) return;
     try {
@@ -2206,6 +2630,20 @@ export default function Tienda({
       setAdminClientes(Array.isArray(data) ? data : []);
     } catch {
       setAdminClientes([]);
+    }
+  }
+
+  async function eliminarClienteAdmin(idCliente) {
+    const id = Number(idCliente || 0);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const ok = window.confirm('¿Seguro que deseas eliminar este cliente? Esta acción no se puede deshacer.');
+    if (!ok) return;
+    try {
+      await fetchAdmin(`/tienda/admin/clientes/${id}`, { method: 'DELETE' });
+      await cargarAdminClientes();
+      mostrarNotificacion('Cliente eliminado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo eliminar el cliente', 'error');
     }
   }
 
@@ -2727,7 +3165,8 @@ export default function Tienda({
             nombre: credenciales.nombre,
             email: credenciales.email,
             password: credenciales.password,
-            telefono: credenciales.telefono
+            telefono: credenciales.telefono,
+            recibe_promociones: Boolean(credenciales.recibe_promociones)
           };
 
       const data = await fetchJson(endpoint, {
@@ -2741,7 +3180,7 @@ export default function Tienda({
 
       localStorage.setItem(CLAVE_TOKEN_CLIENTE, token);
       setClienteToken(token);
-      setCredenciales({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '' });
+      setCredenciales({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
       setPasoRegistro(1);
       setMostrarModalAuthCliente(false);
       mostrarNotificacion(modoAuth === 'login' ? 'Sesión iniciada' : 'Cuenta creada', 'exito');
@@ -2770,7 +3209,8 @@ export default function Tienda({
         telefono: data?.cliente?.telefono || perfil.telefono || '',
         fecha_nacimiento: data?.cliente?.fecha_nacimiento || perfil.fecha_nacimiento || '',
         direccion_default: data?.cliente?.direccion_default || perfil.direccion_default || '',
-        forma_pago_preferida: data?.cliente?.forma_pago_preferida || perfil.forma_pago_preferida || ''
+        forma_pago_preferida: data?.cliente?.forma_pago_preferida || perfil.forma_pago_preferida || '',
+        recibe_promociones: Boolean(data?.cliente?.recibe_promociones)
       });
       setCheckout((prev) => ({
         ...prev,
@@ -3018,12 +3458,8 @@ export default function Tienda({
               const variantes = normalizarVariantes(producto?.variantes);
               const varianteActiva = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
               const disponible = varianteActiva ? Boolean(varianteActiva?.disponible) : ((Number(producto?.stock) || 0) > 0);
-              const precioActual = varianteActiva ? precioVariante(producto, varianteActiva) : (Number(producto?.precio_venta) || 0);
-              const precioOriginal = varianteActiva
-                ? (Number(varianteActiva?.precio_original) || Number(varianteActiva?.precio_venta) || 0)
-                : (Number(producto?.precio_original) || Number(producto?.precio_venta) || 0);
-              const descuentoPct = Number(producto?.descuento_porcentaje) || 0;
-              const tieneDescuento = Boolean(producto?.descuento_activo) && descuentoPct > 0 && precioOriginal > precioActual;
+              const precioFicha = Number(producto?.tienda_precio_publico) || 0;
+              const tienePrecioConfigurado = precioFicha > 0;
               const categoriaProducto = String(producto?.categoria_nombre || '').trim() || 'Sin categoría';
               const totalResenas = Number(producto?.resenas_total) || 0;
               const promedioResenas = Number(producto?.resenas_promedio) || 0;
@@ -3061,41 +3497,20 @@ export default function Tienda({
                   {String(producto.descripcion || '').trim() && (
                     <p className="tiendaDescripcion">{producto.descripcion}</p>
                   )}
-                  <div className="tiendaMeta">
-                    <span>
-                      {tieneDescuento && (
-                        <span style={{ fontSize: '11px', color: '#777', textDecoration: 'line-through', marginRight: '6px' }}>
-                          {precio(precioOriginal)}
-                        </span>
-                      )}
-                      {precioActual > 0 ? precio(precioActual) : 'Próximamente'}
-                      {tieneDescuento && (
-                        <span style={{ marginLeft: '6px', fontSize: '10px', color: '#4a7c59', fontWeight: 700 }}>
-                          -{descuentoPct.toFixed(0)}%
-                        </span>
-                      )}
-                    </span>
-                    <span>
-                      {tokenInterno
-                        ? (disponible ? `Stock: ${producto.stock}` : 'Sin stock')
-                        : (disponible ? 'Disponible' : 'Sobre pedido')}
-                    </span>
-                  </div>
-                  {Boolean(tokenInterno) && (
-                    <>
-                      <div className={disponible ? 'tiendaEstadoActivo' : 'tiendaEstadoInactivo'}>
-                        {disponible ? 'Activo para venta' : 'Pendiente de producción'}
-                      </div>
-                    </>
-                  )}
-                  <div className="tiendaAccionesCard">
-                    <button className="boton" onClick={() => abrirDetalle(producto)}>Ver detalle</button>
-                    <button
-                      className="boton botonExito"
-                      onClick={() => agregarAlCarrito(producto, varianteActiva?.nombre || '')}
-                    >
-                      {disponible ? 'Agregar' : 'Agregar (sobre pedido)'}
-                    </button>
+                  <div className="tiendaCardFooter">
+                    <div className="tiendaMeta">
+                      <span className="tiendaMetaSolo">{tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}</span>
+                    </div>
+                    <div className="tiendaAccionesCard">
+                      <button className="boton" onClick={() => abrirDetalle(producto)}>Ver detalle</button>
+                      <button
+                        className="boton botonExito"
+                        onClick={() => agregarAlCarrito(producto, varianteActiva?.nombre || '')}
+                        disabled={!tienePrecioConfigurado}
+                      >
+                        Agregar
+                      </button>
+                    </div>
                   </div>
                 </article>
               );
@@ -3331,6 +3746,7 @@ export default function Tienda({
               <strong>Configuración tienda y atención</strong>
               <div className="tiendaAdminTabs tiendaAdminTabsConfigInternas">
                 <button type="button" className={configAdminTab === 'general' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('general')}>General</button>
+                <button type="button" className={configAdminTab === 'correos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('correos')}>Correos</button>
                 <button type="button" className={configAdminTab === 'nav' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('nav')}>Navegación</button>
                 <button type="button" className={configAdminTab === 'redes' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('redes')}>Redes</button>
                 <button type="button" className={configAdminTab === 'links' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('links')}>Links info</button>
@@ -3338,12 +3754,12 @@ export default function Tienda({
 
               {configAdminTab === 'general' && (
                 <>
+                  <input
+                    placeholder="Texto promoción superior"
+                    value={configTiendaAdmin.promo_texto || ''}
+                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, promo_texto: e.target.value }))}
+                  />
                   <div className="tiendaAdminCampos5">
-                    <input
-                      placeholder="Texto promoción superior"
-                      value={configTiendaAdmin.promo_texto || ''}
-                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, promo_texto: e.target.value }))}
-                    />
                     <input
                       placeholder="Título marca footer"
                       value={configTiendaAdmin.footer_marca_titulo || ''}
@@ -3359,72 +3775,97 @@ export default function Tienda({
                       value={configTiendaAdmin.whatsapp_numero || ''}
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, whatsapp_numero: e.target.value }))}
                     />
-                    <input
-                      placeholder="Texto métodos de pago footer"
-                      value={configTiendaAdmin.footer_pagos_texto || ''}
-                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_pagos_texto: e.target.value }))}
-                    />
-                    <SwitchConTexto
-                      checked={configActivo(configTiendaAdmin.footer_pagos_remover_fondo_png, true)}
-                      label="Quitar fondo blanco en PNG (logos footer)"
-                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_pagos_remover_fondo_png: e.target.checked ? '1' : '0' }))}
-                    />
-                    <span className="tiendaAdminLogosPagoHintWarn">
-                      Funciona mejor con fondos blancos lisos. Si el logo ya viene transparente (SVG/PNG), puedes desactivarlo.
-                    </span>
-                    <div className="tiendaAdminLogosPagoBox">
-                      <div className="tiendaAdminLogosPagoHead">
-                        <strong>Gestor de logos de pago</strong>
-                        <input
-                          ref={inputLogoPagoArchivoRef}
-                          type="file"
-                          accept="image/*,.svg"
-                          className="tiendaInputOculto"
-                          onChange={subirLogoPagoDesdeComputadora}
-                        />
-                        <button
-                          type="button"
-                          className="botonPequeno"
-                          onClick={agregarMetodoPagoAdmin}
+                  </div>
+                  <SwitchConTexto
+                    checked={configActivo(configTiendaAdmin.footer_pagos_remover_fondo_png, true)}
+                    label="Quitar fondo blanco en PNG (logos footer)"
+                    onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, footer_pagos_remover_fondo_png: e.target.checked ? '1' : '0' }))}
+                  />
+                  <span className="tiendaAdminLogosPagoHintWarn">
+                    Funciona mejor con fondos blancos lisos. Si el logo ya viene transparente (SVG/PNG), puedes desactivarlo.
+                  </span>
+                  <div className="tiendaAdminLogosPagoBox">
+                    <div className="tiendaAdminLogosPagoHead">
+                      <strong>Gestor de logos de pago</strong>
+                      <input
+                        ref={inputLogoPagoArchivoRef}
+                        type="file"
+                        accept="image/*,.svg"
+                        className="tiendaInputOculto"
+                        onChange={subirLogoPagoDesdeComputadora}
+                      />
+                      <button
+                        type="button"
+                        className="botonPequeno"
+                        onClick={agregarMetodoPagoAdmin}
+                      >
+                        + Agregar método
+                      </button>
+                    </div>
+                    <div className="tiendaAdminLogosPagoLista">
+                      {metodosPagoAdmin.map((metodo) => (
+                        <div
+                          key={`cfg-metodo-pago-${metodo.id}`}
+                          className={dragLogoPagoId === metodo.id ? 'tiendaAdminMetodoPagoFila tiendaAdminDropActiva' : 'tiendaAdminMetodoPagoFila'}
+                          onDragEnter={(e) => {
+                            e.preventDefault();
+                            setDragLogoPagoId(metodo.id);
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            if (dragLogoPagoId !== metodo.id) setDragLogoPagoId(metodo.id);
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault();
+                            setDragLogoPagoId((actual) => (actual === metodo.id ? '' : actual));
+                          }}
+                          onDrop={(e) => manejarDropLogoPago(e, metodo.id)}
                         >
-                          + Agregar método
-                        </button>
-                      </div>
-                      <div className="tiendaAdminLogosPagoLista">
-                        {metodosPagoAdmin.map((metodo) => (
-                          <div key={`cfg-metodo-pago-${metodo.id}`} className="tiendaAdminMetodoPagoFila">
-                            <label className="tiendaAdminMetodoPagoSwitch" title="Mostrar u ocultar en footer">
-                              <input
-                                type="checkbox"
-                                checked={String(metodo?.activo ?? '1') !== '0'}
-                                onChange={(e) => editarMetodoPagoAdmin(metodo.id, { activo: e.target.checked ? '1' : '0' })}
+                          <label className="tiendaAdminMetodoPagoSwitch" title="Mostrar u ocultar en footer">
+                            <input
+                              type="checkbox"
+                              checked={String(metodo?.activo ?? '1') !== '0'}
+                              onChange={(e) => editarMetodoPagoAdmin(metodo.id, { activo: e.target.checked ? '1' : '0' })}
+                            />
+                            <span>{String(metodo?.activo ?? '1') !== '0' ? 'Mostrar' : 'Oculto'}</span>
+                          </label>
+                          <input
+                            value={metodo.label}
+                            onChange={(e) => editarMetodoPagoAdmin(metodo.id, { label: e.target.value })}
+                            placeholder="Nombre del método"
+                          />
+                          <button
+                            type="button"
+                            className="botonPequeno"
+                            onClick={() => abrirSelectorLogoMetodoPago(metodo.id)}
+                            disabled={subiendoLogoPagoId === metodo.id}
+                          >
+                            {subiendoLogoPagoId === metodo.id ? 'Subiendo...' : 'Subir imagen'}
+                          </button>
+                          {String(metodo?.logo_url || '').trim() ? (
+                            <div className="tiendaAdminImagenMiniWrap">
+                              <img
+                                src={String(metodo.logo_url || '').trim()}
+                                alt={`Logo ${String(metodo?.label || 'método de pago')}`}
+                                className="tiendaAdminImagenMini"
                               />
-                              <span>{String(metodo?.activo ?? '1') !== '0' ? 'Mostrar' : 'Oculto'}</span>
-                            </label>
-                            <input
-                              value={metodo.label}
-                              onChange={(e) => editarMetodoPagoAdmin(metodo.id, { label: e.target.value })}
-                              placeholder="Nombre del método"
-                            />
-                            <button
-                              type="button"
-                              className="botonPequeno"
-                              onClick={() => abrirSelectorLogoMetodoPago(metodo.id)}
-                              disabled={subiendoLogoPagoId === metodo.id}
-                            >
-                              {subiendoLogoPagoId === metodo.id ? 'Subiendo...' : 'Subir imagen'}
-                            </button>
-                            <input
-                              value={metodo.logo_url}
-                              onChange={(e) => editarMetodoPagoAdmin(metodo.id, { logo_url: e.target.value })}
-                              placeholder="/uploads/tienda/logo.png o https://..."
-                            />
-                          </div>
-                        ))}
-                        {!metodosPagoAdmin.length && (
-                          <span className="tiendaAdminLogosPagoHint">No hay logos agregados.</span>
-                        )}
-                      </div>
+                              <button
+                                type="button"
+                                className="botonPequeno botonDanger"
+                                onClick={() => editarMetodoPagoAdmin(metodo.id, { logo_url: '' })}
+                              >
+                                Quitar imagen
+                              </button>
+                              <span className="tiendaAdminSubtexto">También puedes arrastrar y soltar otra imagen aquí.</span>
+                            </div>
+                          ) : (
+                            <span className="tiendaAdminSubtexto">Sin imagen cargada. Arrastra una imagen aquí o usa el botón de subir.</span>
+                          )}
+                        </div>
+                      ))}
+                      {!metodosPagoAdmin.length && (
+                        <span className="tiendaAdminLogosPagoHint">No hay logos agregados.</span>
+                      )}
                     </div>
                   </div>
                   <textarea
@@ -3476,7 +3917,193 @@ export default function Tienda({
                       <span><strong>Domingo:</strong> {configTiendaAdmin.atencion_horario_domingo || '-'}</span>
                     </div>
                   </div>
+
+                  <div className="tiendaAdminHorariosBox">
+                    <strong>Diagnóstico de correo</strong>
+                    <div className="tiendaAdminSubtexto" style={{ marginTop: '6px' }}>
+                      Envía una prueba SMTP para validar que Gmail está configurado correctamente.
+                    </div>
+                    <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                      <label htmlFor="cfgCorreoDiagnostico">Correo destino</label>
+                      <input
+                        id="cfgCorreoDiagnostico"
+                        type="email"
+                        placeholder="correo@dominio.com"
+                        value={correoDiagnosticoDestino}
+                        onChange={(e) => setCorreoDiagnosticoDestino(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="boton"
+                        onClick={enviarDiagnosticoCorreoAdmin}
+                        disabled={enviandoCorreoDiagnostico}
+                      >
+                        {enviandoCorreoDiagnostico ? 'Enviando prueba...' : 'Enviar correo de diagnóstico'}
+                      </button>
+                    </div>
+                  </div>
                 </>
+              )}
+
+              {configAdminTab === 'correos' && (
+                <div className="tiendaAdminLinksWrap tiendaAdminCorreosGrid">
+                  <div className="tiendaAdminHorariosBox">
+                    <strong>Plantilla: Bienvenida de registro</strong>
+                    <input
+                      placeholder="Asunto"
+                      value={configTiendaAdmin.correo_bienvenida_asunto || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_bienvenida_asunto: e.target.value }))}
+                    />
+                    <textarea
+                      rows={10}
+                      className="tiendaAdminCorreoTextarea"
+                      placeholder="Cuerpo"
+                      value={configTiendaAdmin.correo_bienvenida_cuerpo || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_bienvenida_cuerpo: e.target.value }))}
+                    />
+                    <div className="tiendaAdminSubtexto">Variables sugeridas: {'{{nombre_cliente}}'}, {'{{email_cliente}}'}, {'{{url_tienda}}'}</div>
+                  </div>
+
+                  <div className="tiendaAdminHorariosBox">
+                    <strong>Plantilla: Confirmación de pedido</strong>
+                    <input
+                      placeholder="Asunto"
+                      value={configTiendaAdmin.correo_confirmacion_asunto || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_confirmacion_asunto: e.target.value }))}
+                    />
+                    <textarea
+                      rows={12}
+                      className="tiendaAdminCorreoTextarea"
+                      placeholder="Cuerpo"
+                      value={configTiendaAdmin.correo_confirmacion_cuerpo || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_confirmacion_cuerpo: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="tiendaAdminHorariosBox">
+                    <strong>Plantilla: Actualización de estado</strong>
+                    <input
+                      placeholder="Asunto"
+                      value={configTiendaAdmin.correo_estado_asunto || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_estado_asunto: e.target.value }))}
+                    />
+                    <textarea
+                      rows={12}
+                      className="tiendaAdminCorreoTextarea"
+                      placeholder="Cuerpo"
+                      value={configTiendaAdmin.correo_estado_cuerpo || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_estado_cuerpo: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="tiendaAdminHorariosBox">
+                    <strong>Plantilla: Diagnóstico</strong>
+                    <input
+                      placeholder="Asunto"
+                      value={configTiendaAdmin.correo_diagnostico_asunto || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_diagnostico_asunto: e.target.value }))}
+                    />
+                    <textarea
+                      rows={10}
+                      className="tiendaAdminCorreoTextarea"
+                      placeholder="Cuerpo"
+                      value={configTiendaAdmin.correo_diagnostico_cuerpo || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_diagnostico_cuerpo: e.target.value }))}
+                    />
+                    <div className="tiendaAdminSubtexto">Variables sugeridas: {'{{nombre_admin}}'}, {'{{fecha}}'}, {'{{smtp_host}}'}, {'{{smtp_user}}'}, {'{{etiqueta_sufijo}}'}</div>
+                  </div>
+
+                  <div className="tiendaAdminHorariosBox tiendaAdminHorariosBoxCampana">
+                    <strong>Plantilla: Campaña masiva</strong>
+                    <input
+                      ref={inputImagenCampanaArchivoRef}
+                      type="file"
+                      accept="image/*,.svg"
+                      className="tiendaInputOculto"
+                      onChange={subirImagenCampanaDesdeComputadora}
+                    />
+                    <div className="tiendaAdminCampanaGrid">
+                      <div className="tiendaAdminCampanaColumna">
+                        <input
+                          placeholder="Título de campaña (se usa al enviar)"
+                          value={configTiendaAdmin.correo_campana_titulo || ''}
+                          onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_campana_titulo: e.target.value }))}
+                        />
+                        <textarea
+                          rows={8}
+                          className="tiendaAdminCorreoTextarea"
+                          placeholder="Contenido de campaña (se usa al enviar)"
+                          value={configTiendaAdmin.correo_campana_contenido || ''}
+                          onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_campana_contenido: e.target.value }))}
+                        />
+                        <div
+                          className={arrastrandoImagenCampana ? 'tiendaAdminImagenCampanaDropZone tiendaAdminDropActiva' : 'tiendaAdminImagenCampanaDropZone'}
+                          onDragEnter={(e) => {
+                            e.preventDefault();
+                            setArrastrandoImagenCampana(true);
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            if (!arrastrandoImagenCampana) setArrastrandoImagenCampana(true);
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault();
+                            setArrastrandoImagenCampana(false);
+                          }}
+                          onDrop={manejarDropImagenCampana}
+                        >
+                          <div className="tiendaAdminSubtexto">Arrastra y suelta aquí tu imagen promocional o usa el botón.</div>
+                        </div>
+                        <div className="tiendaAdminImagenCampanaAcciones">
+                          <button
+                            type="button"
+                            className="boton"
+                            onClick={abrirSelectorImagenCampana}
+                            disabled={subiendoImagenCampana}
+                          >
+                            {subiendoImagenCampana ? 'Subiendo imagen...' : 'Subir imagen promocional'}
+                          </button>
+                          {String(configTiendaAdmin?.correo_campana_imagen_url || '').trim() && (
+                            <button
+                              type="button"
+                              className="boton botonDanger"
+                              onClick={() => setConfigTiendaAdmin((p) => ({ ...p, correo_campana_imagen_url: '' }))}
+                            >
+                              Quitar imagen
+                            </button>
+                          )}
+                        </div>
+                        {String(configTiendaAdmin?.correo_campana_imagen_url || '').trim() ? (
+                          <div className="tiendaAdminImagenCampanaPreviewWrap">
+                            <img
+                              src={String(configTiendaAdmin.correo_campana_imagen_url || '').trim()}
+                              alt="Vista previa campaña"
+                              className="tiendaAdminImagenCampanaPreview"
+                            />
+                          </div>
+                        ) : (
+                          <div className="tiendaAdminSubtexto">Sin imagen promocional cargada</div>
+                        )}
+                      </div>
+
+                      <div className="tiendaAdminCampanaColumna">
+                        <input
+                          placeholder="Asunto"
+                          value={configTiendaAdmin.correo_campana_asunto || ''}
+                          onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_campana_asunto: e.target.value }))}
+                        />
+                        <textarea
+                          rows={12}
+                          className="tiendaAdminCorreoTextarea"
+                          placeholder="Cuerpo"
+                          value={configTiendaAdmin.correo_campana_cuerpo || ''}
+                          onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_campana_cuerpo: e.target.value }))}
+                        />
+                        <div className="tiendaAdminSubtexto">Variables sugeridas: {'{{nombre_cliente}}'}, {'{{titulo_campana}}'}, {'{{contenido_campana}}'}, {'{{url_tienda}}'}, {'{{imagen_campana_url}}'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
 
               {configAdminTab === 'nav' && (
@@ -3643,16 +4270,39 @@ export default function Tienda({
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, [`info_link_${infoLinkAdminTab}_label`]: e.target.value }))}
                     />
                     <textarea
+                      className="tiendaAdminLinkTextarea"
                       placeholder={'Contenido que verá el cliente en esta sección'}
                       value={configTiendaAdmin[`info_link_${infoLinkAdminTab}_texto`] || ''}
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, [`info_link_${infoLinkAdminTab}_texto`]: e.target.value }))}
-                      rows={5}
+                      rows={12}
                     />
                   </div>
                 </div>
               )}
 
-              <button className="boton botonExito" type="button" onClick={guardarConfigTiendaAdmin}>Guardar configuración</button>
+              {configAdminTab === 'correos' ? (
+                <div className="tiendaAdminAccionesCorreoFila">
+                  <button
+                    className="boton"
+                    type="button"
+                    onClick={abrirVistaPreviaCorreoAdmin}
+                    disabled={cargandoPreviewCorreo}
+                  >
+                    {cargandoPreviewCorreo ? 'Generando vista previa...' : 'Vista previa del correo'}
+                  </button>
+                  <button
+                    className="boton botonExito"
+                    type="button"
+                    onClick={enviarCorreoMasivoAdmin}
+                    disabled={enviandoCorreoMasivo}
+                  >
+                    {enviandoCorreoMasivo ? 'Enviando campaña...' : 'Enviar correo masivo'}
+                  </button>
+                  <button className="boton botonExito" type="button" onClick={guardarConfigTiendaAdmin}>Guardar configuración</button>
+                </div>
+              ) : (
+                <button className="boton botonExito" type="button" onClick={guardarConfigTiendaAdmin}>Guardar configuración</button>
+              )}
             </div>
             )}
 
@@ -3989,20 +4639,24 @@ export default function Tienda({
               <div className="tiendaAdminForm">
                 <strong>Clientes registrados</strong>
                 <div className="tiendaAdminListado tiendaAdminListadoAmplio">
-                  {clientesAdminFiltrados.map((c) => (
-                    <div key={c.id} className="tiendaAdminFila tiendaAdminClienteCard">
-                      <div>
-                        <strong>{c.nombre || 'Sin nombre'}</strong>
-                        <div className="tiendaAdminSubtexto">{c.email || 'Sin correo'}</div>
+                  <div className="clientesGrid">
+                    {clientesAdminFiltrados.map((c) => (
+                      <div key={c.id} className="tiendaAdminFila tiendaAdminClienteCard">
+                        <div>
+                          <strong>{c.nombre || 'Sin nombre'}</strong>
+                          <div className="tiendaAdminSubtexto">{c.email || 'Sin correo'}</div>
+                        </div>
+                        <div className="tiendaAdminClienteMeta">
+                          <span>Tel: {c.telefono || '-'}</span>
+                          <span>Promociones: {Number(c.recibe_promociones) === 1 ? 'Suscrito' : 'No suscrito'}</span>
+                          <span>Pago preferido: {c.forma_pago_preferida || '-'}</span>
+                          <span>Dirección: {c.direccion_default || '-'}</span>
+                          <span>Alta: {String(c.creado_en || '').replace('T', ' ').slice(0, 16) || '-'}</span>
+                        </div>
+                        <button className="boton botonEliminar" style={{ marginTop: '8px' }} onClick={() => eliminarClienteAdmin(c.id)}>Eliminar</button>
                       </div>
-                      <div className="tiendaAdminClienteMeta">
-                        <span>Tel: {c.telefono || '-'}</span>
-                        <span>Pago preferido: {c.forma_pago_preferida || '-'}</span>
-                        <span>Dirección: {c.direccion_default || '-'}</span>
-                        <span>Alta: {String(c.creado_en || '').replace('T', ' ').slice(0, 16) || '-'}</span>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                   {!clientesAdminFiltrados.length && <div className="tiendaVacio">No hay clientes con ese filtro</div>}
                 </div>
               </div>
@@ -4054,7 +4708,17 @@ export default function Tienda({
                       const linkRastreo = construirLinkRastreo(draft.paqueteria, draft.numero_guia);
 
                       return (
-                        <div key={o.id} className="tiendaAdminFila tiendaAdminOrdenCard">
+                        <div
+                          id={`admin-orden-${Number(o.id || 0)}`}
+                          key={o.id}
+                          className="tiendaAdminFila tiendaAdminOrdenCard"
+                          style={
+                            (Number(ordenObjetivoAdmin?.id || 0) === Number(o.id || 0)
+                              || (String(ordenObjetivoAdmin?.folio || '').trim() && String(o?.folio || '').trim() === String(ordenObjetivoAdmin?.folio || '').trim()))
+                              ? { border: '2px solid #2e7d32', boxShadow: '0 0 0 3px rgba(46, 125, 50, 0.12)' }
+                              : undefined
+                          }
+                        >
                           <div className="tiendaAdminOrdenInfo">
                             <strong>{o.folio}</strong>
                             <div className="tiendaAdminSubtexto">{o.nombre_cliente} · {o.email_cliente || 'Sin correo'} · {o.telefono_cliente || 'Sin teléfono'}</div>
@@ -4207,13 +4871,9 @@ export default function Tienda({
                 ? detalleActivo.ingredientes
                 : ingredientesActivos)
               : ingredientesActivos;
-            const variantesConPrecio = variantes.map((v) => ({
-              ...v,
-              precio_publico: Number(v?.precio_venta) > 0 ? Number(v.precio_venta) : precioVariante(seleccionado, v),
-              precio_lista: Number(v?.precio_lista ?? v?.precio_regular ?? v?.precio_anterior ?? 0) || 0
-            }));
-            const precioActivo = precioVariante(seleccionado, varianteActiva);
-            const precioListaActivo = Number(varianteActiva?.precio_lista ?? varianteActiva?.precio_regular ?? varianteActiva?.precio_anterior ?? 0) || 0;
+            const variantesDisponibles = variantes;
+            const precioFichaDetalle = Number(seleccionado?.tienda_precio_publico) || 0;
+            const tienePrecioDetalle = precioFichaDetalle > 0;
             const stockActivo = varianteActiva ? (Number(varianteActiva.stock) || 0) : (Number(seleccionado?.stock) || 0);
             const disponibleActivo = stockActivo > 0;
 
@@ -4284,11 +4944,11 @@ export default function Tienda({
                     </div>
                   </div>
                   <div className="tiendaDetalleColInfo">
-                    {!!variantesConPrecio.length && (
+                    {!!variantesDisponibles.length && (
                       <div className="tiendaDetallePresentaciones">
                         <div className="tiendaDetallePresentacionesTitulo">Presentación</div>
                         <div className="tiendaDetallePresentacionesGrid">
-                          {variantesConPrecio.map((v) => (
+                          {variantesDisponibles.map((v) => (
                             <button
                               key={`pres-${seleccionado.nombre_receta}-${v.nombre}`}
                               type="button"
@@ -4296,10 +4956,6 @@ export default function Tienda({
                               onClick={() => seleccionarVarianteDetalle(v.nombre)}
                             >
                               <span className="tiendaPresentacionNombre">{v.nombre}</span>
-                              <span className="tiendaPresentacionPrecio">{precio(v.precio_publico)}</span>
-                              {v.precio_lista > v.precio_publico && (
-                                <span className="tiendaPresentacionPrecioAnterior">{precio(v.precio_lista)}</span>
-                              )}
                               <span className={v.disponible ? 'tiendaPresentacionEstado' : 'tiendaPresentacionEstado agotado'}>
                                 {v.disponible ? 'Disponible' : 'Sin stock'}
                               </span>
@@ -4309,8 +4965,7 @@ export default function Tienda({
                       </div>
                     )}
                     <div className="tiendaDetalleResumen">
-                      <p><strong>Precio:</strong> {precio(precioActivo)}</p>
-                      {precioListaActivo > precioActivo && <p><strong>Antes:</strong> <span className="tiendaPrecioAnteriorResumen">{precio(precioListaActivo)}</span></p>}
+                      <p><strong>{tienePrecioDetalle ? precio(precioFichaDetalle) : 'Próximamente'}</strong></p>
                       {tokenInterno && <p><strong>Stock:</strong> {stockActivo}</p>}
                     </div>
                     <div className="tiendaDetalleTabs">
@@ -4408,8 +5063,9 @@ export default function Tienda({
                         <button
                           className="boton botonExito"
                           onClick={() => agregarAlCarrito(seleccionado, varianteActiva?.nombre || '')}
+                          disabled={!tienePrecioDetalle}
                         >
-                          {disponibleActivo ? 'Agregar al carrito' : 'Agregar al carrito (sobre pedido)'}
+                          Agregar al carrito
                         </button>
                       </div>
                     </div>
@@ -4520,6 +5176,12 @@ export default function Tienda({
                         placeholder="Correo"
                         value={perfil.email}
                         onChange={(e) => setPerfil((p) => ({ ...p, email: e.target.value }))}
+                      />
+                      <SwitchConTexto
+                        checked={Boolean(perfil.recibe_promociones)}
+                        onChange={(e) => setPerfil((p) => ({ ...p, recibe_promociones: e.target.checked }))}
+                        label="registrate a nuestras promociones y/o informacion"
+                        ariaLabel="Recibir promociones e información"
                       />
 
                       <label htmlFor="perfilTelefonoCliente">Teléfono</label>
@@ -4980,13 +5642,21 @@ export default function Tienda({
                     </>
                   )}
                   {pasoRegistro === 2 && (
-                    <input
-                      type="email"
-                      placeholder="Correo"
-                      value={credenciales.email}
-                      onChange={(e) => setCredenciales((p) => ({ ...p, email: e.target.value }))}
-                      required
-                    />
+                    <>
+                      <input
+                        type="email"
+                        placeholder="Correo"
+                        value={credenciales.email}
+                        onChange={(e) => setCredenciales((p) => ({ ...p, email: e.target.value }))}
+                        required
+                      />
+                      <SwitchConTexto
+                        checked={Boolean(credenciales.recibe_promociones)}
+                        onChange={(e) => setCredenciales((p) => ({ ...p, recibe_promociones: e.target.checked }))}
+                        label="registrate a nuestras promociones y/o informacion"
+                        ariaLabel="Suscribirme a promociones e información"
+                      />
+                    </>
                   )}
                   {pasoRegistro === 3 && (
                     <>
@@ -5260,6 +5930,44 @@ export default function Tienda({
                   <button className="boton botonExito" type="submit">Guardar cambios</button>
                 </div>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {mostrandoPreviewCorreo && (
+        <div className="modal tiendaModalTop" style={{ display: 'flex' }} onClick={() => setMostrandoPreviewCorreo(false)}>
+          <div className="contenidoModal tiendaAuthModal tiendaPreviewCorreoModal" onClick={(e) => e.stopPropagation()}>
+            <div className="encabezadoModal">
+              <h3>Vista previa del correo</h3>
+              <button className="cerrarModal" type="button" onClick={() => setMostrandoPreviewCorreo(false)}>&times;</button>
+            </div>
+            <div className="tiendaPreviewCorreoSelector">
+              <label htmlFor="previewTipoCorreo"><strong>Tipo:</strong></label>
+              <select
+                id="previewTipoCorreo"
+                value={previewTipoCorreo}
+                onChange={(e) => abrirVistaPreviaCorreoAdmin(e.target.value)}
+                disabled={cargandoPreviewCorreo}
+              >
+                <option value="campana">Campaña</option>
+                <option value="bienvenida">Bienvenida de registro</option>
+                <option value="confirmacion">Confirmación de pedido</option>
+                <option value="estado">Actualización de estado</option>
+                <option value="diagnostico">Diagnóstico</option>
+              </select>
+            </div>
+            {cargandoPreviewCorreo ? (
+              <div className="tiendaAdminSubtexto">Generando vista previa...</div>
+            ) : (
+              <div className="tiendaPreviewCorreoContenido">
+                <div className="tiendaAdminSubtexto"><strong>Asunto:</strong> {previewCorreoAsunto || '(sin asunto)'}</div>
+                <iframe
+                  title="Vista previa correo cliente"
+                  className="tiendaPreviewCorreoFrame"
+                  srcDoc={previewCorreoHtml || '<div style="padding:16px;font-family:Arial,sans-serif;">No se pudo generar la vista previa.</div>'}
+                />
+              </div>
             )}
           </div>
         </div>

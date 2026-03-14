@@ -22,6 +22,116 @@
   font-weight: 800;
 }
 
+.recetasAccionesEncabezado {
+  margin-left: auto;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.recetasRadialMenu {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  margin-right: 8px;
+  overflow: visible;
+}
+
+.recetasRadialTrigger {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(0deg);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid #2a2a2a;
+  background: linear-gradient(140deg, #5f8f6d 0%, #446f52 100%);
+  color: #fff;
+  font-size: 19px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+  z-index: 3;
+  transition: transform 0.5s ease, box-shadow 0.3s ease, background 0.3s ease;
+}
+
+.recetasRadialTrigger:hover {
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+}
+
+.recetasRadialTrigger.abierto {
+  transform: translate(-50%, -50%) rotate(225deg);
+  background: linear-gradient(140deg, #3f6f4d 0%, #2f5a3e 100%);
+}
+
+.recetasRadialAccion {
+  --tx: -80px;
+  --ty: -40px;
+  --tilt: -10deg;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(var(--tilt));
+  transform-origin: center;
+  border: 2px solid #2a2a2a;
+  border-radius: 999px;
+  background: #fff;
+  color: #2f5c3f;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+  padding: 4px 8px;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.12);
+  transition: transform 0.42s cubic-bezier(.2,.9,.2,1), opacity 0.2s ease, box-shadow 0.22s ease;
+  z-index: 2;
+}
+
+.recetasRadialAccion.abierto {
+  transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) rotate(var(--tilt));
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.recetasRadialAccion:hover {
+  background: #4a7c59;
+  color: #fff;
+  border-color: #4a7c59;
+  box-shadow: 0 10px 18px rgba(74, 124, 89, 0.35);
+}
+
+.recetasRadialAccionIcono {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.recetasRadialAccionTexto {
+  line-height: 1;
+}
+
+@media (max-width: 900px) {
+  .recetasRadialMenu {
+    width: 52px;
+    height: 52px;
+  }
+
+  .recetasRadialTrigger {
+    width: 48px;
+    height: 48px;
+    font-size: 17px;
+  }
+
+  .recetasRadialAccion {
+    font-size: 9px;
+    padding: 4px 7px;
+  }
+}
+
 .menuCategoriaRecetas {
   position: absolute;
   display: none;

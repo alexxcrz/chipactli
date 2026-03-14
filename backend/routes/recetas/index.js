@@ -1,4 +1,4 @@
-import { transmitir, convertirCantidad } from "../../utils/index.js";
+import { transmitir, convertirCantidadDetallada } from "../../utils/index.js";
 import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -94,6 +94,25 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
       resolve({ changes: this?.changes || 0, lastID: this?.lastID || 0 });
     });
   });
+
+  const resolverIngredienteParaReceta = async (ingrediente = {}) => {
+    const idInsumo = Number(ingrediente?.id_insumo) || 0;
+    let inventario = null;
+    if (idInsumo > 0) {
+      inventario = await dbGet(
+        "SELECT id, nombre, proveedor, unidad FROM inventario WHERE id=?",
+        [idInsumo]
+      );
+    }
+
+    return {
+      id_insumo: idInsumo,
+      nombre_insumo: textoPlano(inventario?.nombre || ingrediente?.nombre),
+      proveedor: textoPlano(inventario?.proveedor || ingrediente?.proveedor),
+      cantidad: Number(ingrediente?.cantidad) || 0,
+      unidad: textoPlano(inventario?.unidad || ingrediente?.unidad)
+    };
+  };
 
   async function actualizarListaPreciosOrden({
     tipoItem,
@@ -564,7 +583,7 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
           let pendientes = ingredientes.length;
           ingredientes.forEach(ing => {
             bdInventario.get(
-              "SELECT nombre, proveedor, pendiente FROM inventario WHERE id=?",
+              "SELECT nombre, proveedor, pendiente, unidad, costo_por_unidad FROM inventario WHERE id=?",
               [ing.id_insumo],
               (errInv, insumo) => {
                 const finalizar = () => {
@@ -580,16 +599,23 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
                 if (insumo) {
                   const nombreActual = String(insumo.nombre || '').trim() || nombreGuardado || 'Insumo';
                   const proveedorActual = String(insumo.proveedor || '').trim() || proveedorGuardado;
+                  const unidadActual = String(insumo.unidad || '').trim();
+                  const unidadGuardada = String(ing.unidad || '').trim();
                   ing.nombre = nombreActual;
                   ing.proveedor = proveedorActual;
+                  if (unidadActual) {
+                    ing.unidad = unidadActual;
+                  }
+                  ing.costo_por_unidad = Number(insumo.costo_por_unidad) || 0;
                   ing.pendiente = insumo.pendiente === 1 || insumo.pendiente === true;
                   ing.eliminado = false;
                   const nombreDesactualizado = nombreActual && nombreGuardado !== nombreActual;
                   const proveedorDesactualizado = proveedorGuardado !== proveedorActual;
-                  if (nombreDesactualizado || proveedorDesactualizado) {
+                  const unidadDesactualizada = unidadActual && unidadGuardada !== unidadActual;
+                  if (nombreDesactualizado || proveedorDesactualizado || unidadDesactualizada) {
                     bdRecetas.run(
-                      "UPDATE ingredientes_receta SET nombre_insumo=?, proveedor=? WHERE id=?",
-                      [nombreActual, proveedorActual, ing.id]
+                      "UPDATE ingredientes_receta SET nombre_insumo=?, proveedor=?, unidad=COALESCE(NULLIF(TRIM(?),''), unidad) WHERE id=?",
+                      [nombreActual, proveedorActual, unidadActual, ing.id]
                     );
                   }
                   finalizar();
@@ -657,106 +683,192 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
         const idReceta = this.lastID;
         const lista = Array.isArray(ingredientes) ? ingredientes : [];
         if (lista.length === 0) {
-          transmitir({ tipo: "recetas_actualizado" });
+          transmitir({ tipo: "recetas_actualizado", accion: "creada", nombre_receta: String(nombre || '').trim() });
           return res.json({ ok: true, id: idReceta });
         }
 
-        let pendientes = lista.length;
-        lista.forEach(ing => {
-          bdRecetas.run(
-            "INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad) VALUES (?,?,?,?,?,?)",
-            [idReceta, ing.id_insumo, ing.nombre || '', String(ing.proveedor || '').trim(), ing.cantidad, ing.unidad],
-            () => {
-              pendientes--;
-              if (pendientes === 0) {
-                transmitir({ tipo: "recetas_actualizado" });
-                res.json({ ok: true, id: idReceta });
-              }
-            }
-          );
-        });
+        Promise.all(lista.map((ing) => resolverIngredienteParaReceta(ing)))
+          .then((normalizados) => {
+            let pendientes = normalizados.length;
+            normalizados.forEach((ing) => {
+              bdRecetas.run(
+                `INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [
+                  idReceta,
+                  ing.id_insumo,
+                  ing.nombre_insumo,
+                  ing.proveedor,
+                  ing.cantidad,
+                  ing.unidad
+                ],
+                () => {
+                  pendientes--;
+                  if (pendientes === 0) {
+                    transmitir({ tipo: "recetas_actualizado", accion: "creada", nombre_receta: String(nombre || '').trim() });
+                    res.json({ ok: true, id: idReceta });
+                  }
+                }
+              );
+            });
+          })
+          .catch((errorNormalizar) => {
+            console.error("Error normalizando ingredientes al crear receta:", errorNormalizar);
+            res.status(500).json({ error: "No se pudo guardar la receta" });
+          });
       }
     );
   });
 
-  app.patch("/recetas/:id", (req, res) => {
-    const id = req.params.id;
-    const {
-      nombre,
-      id_categoria,
-      gramaje,
-      ingredientes,
-      archivada,
-      tienda_descripcion,
-      tienda_modo_uso,
-      tienda_cuidados,
-      tienda_ingredientes,
-      tienda_precio_publico,
-      tienda_image_url,
-      tienda_galeria
-    } = req.body;
+  app.patch("/recetas/:id", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ error: "ID de receta inválido" });
+      }
 
-    bdRecetas.run(
-      `UPDATE recetas
-       SET nombre=?,
-           id_categoria=?,
-           gramaje=?,
-           archivada=COALESCE(?, archivada),
-           tienda_descripcion=COALESCE(?, tienda_descripcion),
-           tienda_modo_uso=COALESCE(?, tienda_modo_uso),
-           tienda_cuidados=COALESCE(?, tienda_cuidados),
-           tienda_ingredientes=COALESCE(?, tienda_ingredientes),
-           tienda_precio_publico=COALESCE(?, tienda_precio_publico),
-             tienda_image_url=COALESCE(?, tienda_image_url),
-             tienda_galeria=COALESCE(?, tienda_galeria)
-       WHERE id=?`,
-      [
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const {
         nombre,
         id_categoria,
-        gramaje || 0,
-        Number.isFinite(Number(archivada)) ? Number(archivada) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_descripcion') ? textoPlano(tienda_descripcion) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_modo_uso') ? textoPlano(tienda_modo_uso) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_cuidados') ? textoPlano(tienda_cuidados) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_ingredientes') ? textoPlano(tienda_ingredientes) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_precio_publico') ? (Number(tienda_precio_publico) || 0) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_image_url') ? textoPlano(tienda_image_url) : null,
-        Object.prototype.hasOwnProperty.call(req.body || {}, 'tienda_galeria') ? JSON.stringify(Array.isArray(tienda_galeria) ? tienda_galeria.map((item) => textoPlano(item)).filter(Boolean) : []) : null,
-        id
-      ],
-      () => {
-        bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [id], () => {
-          const lista = Array.isArray(ingredientes) ? ingredientes : [];
-          if (lista.length === 0) {
-            transmitir({ tipo: "recetas_actualizado" });
-            return res.json({ ok: true });
-          }
+        gramaje,
+        ingredientes,
+        archivada
+      } = body;
 
-          let pendientes = lista.length;
-          lista.forEach(ing => {
-            bdRecetas.run(
-                "INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad) VALUES (?,?,?,?,?,?)",
-                [id, ing.id_insumo, ing.nombre || '', String(ing.proveedor || '').trim(), ing.cantidad, ing.unidad],
-              () => {
-                pendientes--;
-                if (pendientes === 0) {
-                  transmitir({ tipo: "recetas_actualizado" });
-                  res.json({ ok: true });
-                }
-              }
+      const rec = await dbGetRecetas("SELECT id, nombre FROM recetas WHERE id=?", [id]);
+      if (!rec) return res.status(404).json({ error: "Receta no encontrada" });
+      const nombreEventoReceta = String(
+        Object.prototype.hasOwnProperty.call(body, 'nombre')
+          ? (nombre || '')
+          : (rec?.nombre || '')
+      ).trim();
+
+      await dbRunRecetas(
+        `UPDATE recetas
+         SET nombre=COALESCE(?, nombre),
+             id_categoria=COALESCE(?, id_categoria),
+             gramaje=COALESCE(?, gramaje),
+             archivada=COALESCE(?, archivada)
+         WHERE id=?`,
+        [
+          Object.prototype.hasOwnProperty.call(body, 'nombre') ? textoPlano(nombre) : null,
+          (Object.prototype.hasOwnProperty.call(body, 'id_categoria') && Number.isFinite(Number(id_categoria))) ? Number(id_categoria) : null,
+          (Object.prototype.hasOwnProperty.call(body, 'gramaje') && Number.isFinite(Number(gramaje))) ? Number(gramaje) : null,
+          Number.isFinite(Number(archivada)) ? Number(archivada) : null,
+          id
+        ]
+      );
+
+      const actualizaIngredientes = Object.prototype.hasOwnProperty.call(body, 'ingredientes');
+      const lista = Array.isArray(ingredientes) ? ingredientes : null;
+
+      if (actualizaIngredientes) {
+        if (lista === null) {
+          transmitir({ tipo: "recetas_actualizado", accion: "actualizada", nombre_receta: nombreEventoReceta });
+          return res.json({ ok: true, ingredientes_actualizados: false });
+        }
+
+        if (lista.length === 0 && !Boolean(body?.permitir_ingredientes_vacios)) {
+          transmitir({ tipo: "recetas_actualizado", accion: "actualizada", nombre_receta: nombreEventoReceta });
+          return res.json({ ok: true, ingredientes_actualizados: false });
+        }
+
+        await dbRunRecetas("BEGIN TRANSACTION");
+        try {
+          await dbRunRecetas("DELETE FROM ingredientes_receta WHERE id_receta=?", [id]);
+          for (const ingRaw of lista) {
+            const ing = await resolverIngredienteParaReceta(ingRaw);
+            await dbRunRecetas(
+              `INSERT INTO ingredientes_receta (id_receta, id_insumo, nombre_insumo, proveedor, cantidad, unidad)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [
+                id,
+                ing.id_insumo,
+                ing.nombre_insumo,
+                ing.proveedor,
+                ing.cantidad,
+                ing.unidad
+              ]
             );
-          });
-        });
+          }
+          await dbRunRecetas("COMMIT");
+        } catch (errorTx) {
+          await dbRunRecetas("ROLLBACK").catch(() => {});
+          throw errorTx;
+        }
       }
-    );
+
+      transmitir({ tipo: "recetas_actualizado", accion: "actualizada", nombre_receta: nombreEventoReceta });
+      return res.json({ ok: true, ingredientes_actualizados: Boolean(actualizaIngredientes && lista) });
+    } catch (error) {
+      console.error("Error actualizando receta:", error);
+      return res.status(500).json({ error: "No se pudo actualizar la receta" });
+    }
+  });
+
+  app.patch("/recetas/:id/ficha-tienda", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ error: "ID de receta inválido" });
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const {
+        tienda_descripcion,
+        tienda_modo_uso,
+        tienda_cuidados,
+        tienda_ingredientes,
+        tienda_precio_publico,
+        tienda_image_url,
+        tienda_galeria
+      } = body;
+
+      const rec = await dbGetRecetas("SELECT id, nombre FROM recetas WHERE id=?", [id]);
+      if (!rec) return res.status(404).json({ error: "Receta no encontrada" });
+
+      await dbRunRecetas(
+        `UPDATE recetas
+         SET tienda_descripcion=COALESCE(?, tienda_descripcion),
+             tienda_modo_uso=COALESCE(?, tienda_modo_uso),
+             tienda_cuidados=COALESCE(?, tienda_cuidados),
+             tienda_ingredientes=COALESCE(?, tienda_ingredientes),
+             tienda_precio_publico=COALESCE(?, tienda_precio_publico),
+             tienda_image_url=COALESCE(?, tienda_image_url),
+             tienda_galeria=COALESCE(?, tienda_galeria)
+         WHERE id=?`,
+        [
+          Object.prototype.hasOwnProperty.call(body, 'tienda_descripcion') ? textoPlano(tienda_descripcion) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_modo_uso') ? textoPlano(tienda_modo_uso) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_cuidados') ? textoPlano(tienda_cuidados) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_ingredientes') ? textoPlano(tienda_ingredientes) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_precio_publico') ? (Number(tienda_precio_publico) || 0) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_image_url') ? textoPlano(tienda_image_url) : null,
+          Object.prototype.hasOwnProperty.call(body, 'tienda_galeria')
+            ? JSON.stringify(Array.isArray(tienda_galeria) ? tienda_galeria.map((item) => textoPlano(item)).filter(Boolean) : [])
+            : null,
+          id
+        ]
+      );
+
+      transmitir({ tipo: "recetas_actualizado", accion: "ficha_actualizada", nombre_receta: String(rec?.nombre || '').trim() });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error("Error guardando ficha tienda:", error);
+      return res.status(500).json({ error: "No se pudo guardar la ficha de tienda" });
+    }
   });
 
   app.delete("/recetas/:id", (req, res) => {
     const id = req.params.id;
-    bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [id], () => {
-      bdRecetas.run("DELETE FROM recetas WHERE id=?", [id], () => {
-        transmitir({ tipo: "recetas_actualizado" });
-        res.json({ ok: true });
+    bdRecetas.get("SELECT nombre FROM recetas WHERE id=?", [id], (_errRec, rec) => {
+      const nombreReceta = String(rec?.nombre || '').trim();
+      bdRecetas.run("DELETE FROM ingredientes_receta WHERE id_receta=?", [id], () => {
+        bdRecetas.run("DELETE FROM recetas WHERE id=?", [id], () => {
+          transmitir({ tipo: "recetas_actualizado", accion: "eliminada", nombre_receta: nombreReceta });
+          res.json({ ok: true });
+        });
       });
     });
   });
@@ -796,7 +908,7 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
       res.json({
         factor_costo_produccion: Number(factorCosto?.valor) || 1.15,
         factor_precio_venta: Number(factorVenta?.valor) || 2.5,
-        redondeo_precio: Number(redondeo?.valor) || 5
+        redondeo_precio: 5
       });
     } catch {
       res.status(500).json({ error: 'No se pudieron cargar los ajustes de producción' });
@@ -810,16 +922,12 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
     try {
       const factorCosto = Number(req.body?.factor_costo_produccion);
       const factorVenta = Number(req.body?.factor_precio_venta);
-      const redondeo = Number(req.body?.redondeo_precio);
 
       if (!Number.isFinite(factorCosto) || factorCosto <= 0) {
         return res.status(400).json({ error: 'factor_costo_produccion inválido' });
       }
       if (!Number.isFinite(factorVenta) || factorVenta <= 0) {
         return res.status(400).json({ error: 'factor_precio_venta inválido' });
-      }
-      if (!Number.isFinite(redondeo) || redondeo <= 0) {
-        return res.status(400).json({ error: 'redondeo_precio inválido' });
       }
 
       await dbRunRecetas(
@@ -833,12 +941,6 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
          VALUES ('factor_precio_venta', ?, CURRENT_TIMESTAMP)
          ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP`,
         [factorVenta]
-      );
-      await dbRunRecetas(
-        `INSERT INTO recetas_ajustes (clave, valor, actualizado_en)
-         VALUES ('redondeo_precio', ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor, actualizado_en=CURRENT_TIMESTAMP`,
-        [redondeo]
       );
 
       transmitir({ tipo: 'recetas_ajustes_actualizados' });
@@ -861,12 +963,21 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
 
         let piezasMaximas = null;
         let costoPorPieza = 0;
+        const incompatibilidades = [];
         let pendientes = ingredientes.length;
 
         ingredientes.forEach(ing => {
           bdInventario.get("SELECT * FROM inventario WHERE id=?", [ing.id_insumo], (errInv, insumo) => {
             if (insumo) {
-              const requerido = convertirCantidad(Number(ing.cantidad) || 0, ing.unidad, insumo.unidad);
+              const conversion = convertirCantidadDetallada(Number(ing.cantidad) || 0, ing.unidad, insumo.unidad);
+              const requerido = Number(conversion?.valor);
+              if (!conversion?.compatible) {
+                incompatibilidades.push({
+                  id_insumo: Number(ing?.id_insumo || 0),
+                  unidad_receta: String(ing?.unidad || '').trim(),
+                  unidad_inventario: String(insumo?.unidad || '').trim()
+                });
+              }
               if (requerido > 0) {
                 const disponibles = Number(insumo.cantidad_disponible) || 0;
                 const maxPorIngrediente = Math.floor(disponibles / requerido);
@@ -878,7 +989,8 @@ export function registrarRutasRecetas(app, bdRecetas, bdInventario) {
             if (pendientes === 0) {
               res.json({
                 piezas_maximas: piezasMaximas === null ? 0 : piezasMaximas,
-                costo_por_pieza: costoPorPieza
+                costo_por_pieza: costoPorPieza,
+                incompatibilidades
               });
             }
           });

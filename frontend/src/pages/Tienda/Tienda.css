@@ -530,6 +530,13 @@
   flex-direction: column;
   gap: 8px;
   background: #fff;
+  height: 100%;
+}
+
+.tiendaCardFooter {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
 }
 
 .tiendaCalificacionCard {
@@ -630,9 +637,40 @@
 
 .tiendaMeta {
   display: flex;
-  justify-content: space-between;
-  font-weight: 700;
+  justify-content: center;
+  gap: 8px;
+  align-items: center;
+}
+
+.tiendaMetaSolo,
+.tiendaMetaPrecio,
+.tiendaMetaDisponibilidad {
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 5px 10px;
+  display: inline-flex;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tiendaMetaSolo {
+  color: #375145;
+  background: #eef4f1;
+}
+
+.tiendaMetaPrecio {
   color: #24593f;
+  background: rgba(74, 124, 89, 0.14);
+  justify-self: start;
+}
+
+.tiendaMetaDisponibilidad {
+  color: #375145;
+  background: #eef4f1;
+  justify-self: end;
 }
 
 .tiendaEstadoActivo,
@@ -1197,7 +1235,7 @@
 
 .tiendaAdminLogosPagoLista {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
 }
 
@@ -1206,10 +1244,21 @@
   grid-template-columns: 1fr;
   gap: 8px;
   align-items: center;
+  align-content: start;
   border: 1px solid #dbe4df;
   border-radius: 12px;
   padding: 8px;
   background: #fff;
+}
+
+.tiendaAdminDropActiva {
+  border-color: #5f9568;
+  box-shadow: 0 0 0 3px rgba(95, 149, 104, 0.18);
+  background: #f3faf5;
+}
+
+.tiendaAdminMetodoPagoFila .botonPequeno {
+  width: 100%;
 }
 
 .tiendaAdminMetodoPagoSwitch {
@@ -1225,6 +1274,19 @@
 .tiendaAdminMetodoPagoSwitch input {
   width: 16px;
   height: 16px;
+.tiendaAdminImagenMiniWrap {
+  display: grid;
+  gap: 8px;
+}
+.tiendaAdminImagenMini {
+  width: 100%;
+  max-height: 84px;
+  object-fit: contain;
+  border: 1px solid #dce6df;
+  border-radius: 10px;
+  background: #f8fcf9;
+  padding: 6px;
+}
 }
 
 .tiendaAdminLogosPagoHint {
@@ -1233,6 +1295,36 @@
 }
 
 .tiendaAdminLogosPagoHintWarn {
+.tiendaAdminImagenCampanaAcciones {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tiendaAdminImagenCampanaDropZone {
+  border: 2px dashed #b8cbc0;
+  border-radius: 12px;
+  background: #f7fbf8;
+  padding: 10px;
+}
+.tiendaAdminImagenCampanaPreviewWrap {
+  border: 1px solid #dce6df;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px;
+}
+.tiendaAdminImagenCampanaPreview {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+@media (max-width: 760px) {
+  .tiendaAdminImagenCampanaAcciones {
+    grid-template-columns: 1fr;
+  }
+}
   font-size: 12px;
   color: #8a5a1f;
 }
@@ -1241,19 +1333,9 @@
   display: none;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1100px) {
   .tiendaAdminLogosPagoLista {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .tiendaAdminMetodoPagoFila {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 1480px) {
-  .tiendaAdminLogosPagoLista {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -2092,8 +2174,14 @@
 
 .tiendaAdminCampos5 {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 8px;
+}
+
+.tiendaAdminCampos5 > .tiendaSwitchConTexto,
+.tiendaAdminCampos5 > .tiendaAdminLogosPagoHintWarn,
+.tiendaAdminCampos5 > .tiendaAdminLogosPagoBox {
+  grid-column: 1 / -1;
 }
 
 .tiendaAdminHorariosBox {
@@ -2165,6 +2253,45 @@
   gap: 8px;
 }
 
+.tiendaAdminCorreosGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaAdminCorreosGrid .tiendaAdminHorariosBox {
+  height: 100%;
+}
+
+.tiendaAdminCorreosGrid .tiendaAdminHorariosBoxCampana {
+  grid-column: 1 / -1;
+}
+
+.tiendaAdminCorreoTextarea {
+  min-height: 220px;
+}
+
+.tiendaAdminCampanaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.tiendaAdminCampanaColumna {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.tiendaAdminCampanaColumna > input,
+.tiendaAdminCampanaColumna > textarea,
+.tiendaAdminCampanaColumna > .tiendaAdminImagenCampanaDropZone,
+.tiendaAdminCampanaColumna > .tiendaAdminImagenCampanaAcciones,
+.tiendaAdminCampanaColumna > .tiendaAdminImagenCampanaPreviewWrap,
+.tiendaAdminCampanaColumna > .tiendaAdminSubtexto {
+  width: 100%;
+}
+
 .tiendaAdminLinkCard {
   border: 1px solid #dce6df;
   border-radius: 10px;
@@ -2173,6 +2300,80 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.tiendaAdminLinkTextarea {
+  min-height: 360px;
+  resize: vertical;
+}
+
+.tiendaAdminAccionesCorreoFila {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiendaAdminAccionesCorreoFila .boton {
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .tiendaAdminCorreosGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminAccionesCorreoFila {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminCampanaGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tiendaPreviewCorreoModal {
+  width: min(860px, 96vw);
+  max-height: min(88vh, 760px);
+  overflow: hidden;
+}
+
+.tiendaPreviewCorreoContenido {
+  display: grid;
+  gap: 10px;
+}
+
+.tiendaPreviewCorreoSelector {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.tiendaPreviewCorreoSelector select {
+  width: 100%;
+  border: 1px solid #cfd9d3;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 16px;
+  color: #2f2f2f;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.tiendaPreviewCorreoSelector select:focus {
+  outline: none;
+  border-color: #6fa57a;
+  box-shadow: 0 0 0 3px rgba(111, 165, 122, 0.18);
+}
+
+.tiendaPreviewCorreoFrame {
+  width: 100%;
+  height: min(62vh, 560px);
+  border: 1px solid #d7e2db;
+  border-radius: 10px;
+  background: #ffffff;
 }
 
 .tiendaAdminTabs {
@@ -2207,6 +2408,24 @@
 .tiendaAdminOrdenCard {
   align-items: flex-start;
   gap: 10px;
+}
+
+.clientesGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .clientesGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .clientesGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tiendaAdminOrdenCard {

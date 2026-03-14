@@ -1,9 +1,28 @@
-﻿import React, { useEffect } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import './Recetas.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
 import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
+
+const CLAVE_SUBTAB_RECETAS = 'chipactli:recetas:subtab';
+const CLAVE_TAB_ARCHIVADO_RECETAS = 'chipactli:recetas:tabArchivado';
+
+function leerTabPersistidaRecetas(clave, permitidas, valorPorDefecto) {
+  try {
+    const valor = String(window.localStorage.getItem(clave) || '').trim();
+    return permitidas.includes(valor) ? valor : valorPorDefecto;
+  } catch {
+    return valorPorDefecto;
+  }
+}
+
+function guardarTabPersistidaRecetas(clave, valor) {
+  try {
+    window.localStorage.setItem(clave, valor);
+  } catch {
+  }
+}
 
 function escaparParaInlineJs(valor) {
   return String(valor || '')
@@ -16,6 +35,17 @@ function escaparParaInlineJs(valor) {
 }
 
 export default function Recetas() {
+  const [menuAccionesAbierto, setMenuAccionesAbierto] = useState(false);
+  const accionesRadialRef = useRef(null);
+
+  const accionesMenuRapido = [
+    { etiqueta: '+ Receta', icono: '➥', tx: '-70px', ty: '-30px', tilt: '0deg', accion: () => abrirModalNuevaReceta() },
+    { etiqueta: '+ Paquete', icono: '📦', tx: '-70px', ty: '0px', tilt: '0deg', accion: () => abrirModalNuevoPaquete() },
+    { etiqueta: '+ Categoria', icono: '➕', tx: '-70px', ty: '30px', tilt: '0deg', accion: () => abrirModal('modalCategoria') },
+    { etiqueta: 'Escalar', icono: '📋', tx: '-70px', ty: '60px', tilt: '0deg', accion: () => abrirModalEscaladoCategoria() },
+    { etiqueta: 'Archivar', icono: '🗂️', tx: '-70px', ty: '90px', tilt: '0deg', accion: () => abrirModalArchivadoRecetas() }
+  ];
+
   useEffect(() => {
     window.recetas = {
       cargarCategorias,
@@ -100,7 +130,7 @@ export default function Recetas() {
     cargarListadoRecetas();
     cargarPaquetesRecetas();
     cargarAjustesProduccion();
-    cambiarSubpestanaRecetas('recetas');
+    cambiarSubpestanaRecetas(subpestanaRecetasActiva);
 
     let timerRefrescoTiempoReal = null;
     const tiposRefrescar = new Set([
@@ -124,10 +154,17 @@ export default function Recetas() {
       if (!menu.contains(event.target)) {
         ocultarMenuCategoria();
       }
+
+      if (accionesRadialRef.current && !accionesRadialRef.current.contains(event.target)) {
+        setMenuAccionesAbierto(false);
+      }
     };
 
     const onEsc = (event) => {
-      if (event.key === 'Escape') ocultarMenuCategoria();
+      if (event.key === 'Escape') {
+        ocultarMenuCategoria();
+        setMenuAccionesAbierto(false);
+      }
     };
 
     document.addEventListener('click', onDocClick);
@@ -145,13 +182,34 @@ export default function Recetas() {
     <div className="tarjeta">
       <div className="encabezadoTarjeta">
         <h2>Gestión de Recetas</h2>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <button className="boton" onClick={() => abrirAjustesProduccion()}>% Producción</button>
-          <button className="boton" onClick={() => abrirModalNuevoPaquete()}>📦 Nuevo Paquete</button>
-          <button className="boton" onClick={() => abrirModalEscaladoCategoria()}>📋 Escalar por categoría</button>
-          <button className="boton" onClick={() => abrirModalArchivadoRecetas()}>🗂️ Archivar recetas</button>
-          <button className="boton" onClick={() => abrirModal('modalCategoria')}>➕ Nueva Categoría</button>
-          <button className="boton" onClick={() => abrirModalNuevaReceta()}>➥ Nueva Receta</button>
+        <div className="recetasAccionesEncabezado" ref={accionesRadialRef}>
+          <div className={menuAccionesAbierto ? 'recetasRadialMenu abierto' : 'recetasRadialMenu'}>
+            <button
+              type="button"
+              className={menuAccionesAbierto ? 'recetasRadialTrigger abierto' : 'recetasRadialTrigger'}
+              onClick={() => setMenuAccionesAbierto((valor) => !valor)}
+              aria-label="Abrir acciones rapidas"
+              aria-expanded={menuAccionesAbierto}
+            >
+              🌿
+            </button>
+            {accionesMenuRapido.map((item) => (
+              <button
+                key={item.etiqueta}
+                type="button"
+                className={menuAccionesAbierto ? 'recetasRadialAccion abierto' : 'recetasRadialAccion'}
+                style={{ '--tx': item.tx, '--ty': item.ty, '--tilt': item.tilt }}
+                title={item.etiqueta}
+                onClick={() => {
+                  setMenuAccionesAbierto(false);
+                  item.accion();
+                }}
+              >
+                <span className="recetasRadialAccionIcono">{item.icono}</span>
+                <span className="recetasRadialAccionTexto">{item.etiqueta}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -198,25 +256,27 @@ export default function Recetas() {
                 <input id="idInsumoSeleccionado" type="hidden" />
                 <div id="listaBusquedaInsumos"></div>
               </div>
-              <input id="cantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', false)} />
-              <select id="unidadIngrediente" disabled>
-                <option value="">Seleccionar</option>
-                <option value="g">Gramos (g)</option>
-                <option value="ml">Mililitros (ml)</option>
-                <option value="kg">Kilogramos (kg)</option>
-                <option value="l">Litros (l)</option>
-                <option value="pz">Piezas (pz)</option>
-                <option value="cda">Cucharadas (cda)</option>
-                <option value="cdta">Cucharaditas (cdta)</option>
-                <option value="taza">Tazas</option>
-                <option value="oz">Onzas (oz)</option>
-                <option value="gotas">Gotas (go)</option>
-              </select>
-              <input id="proveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', false)} />
-              <button type="button" className="boton" onClick={() => agregarIngrediente(false)}>+ Ing.</button>
+              <div className="recetaFilaInsumoControles">
+                <input id="proveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', false)} />
+                <input id="cantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', false)} />
+                <select id="unidadIngrediente" disabled>
+                  <option value="">Seleccionar</option>
+                  <option value="cda">Cucharadas (cda)</option>
+                  <option value="cdta">Cucharaditas (cdta)</option>
+                  <option value="gotas">Gotas (go)</option>
+                  <option value="g">Gramos (g)</option>
+                  <option value="kg">Kilogramos (kg)</option>
+                  <option value="l">Litros (l)</option>
+                  <option value="ml">Mililitros (ml)</option>
+                  <option value="oz">Onzas (oz)</option>
+                  <option value="pz">Piezas (pz)</option>
+                  <option value="taza">Tazas</option>
+                </select>
+                <button type="button" className="boton" onClick={() => agregarIngrediente(false)}>+ Ing.</button>
+              </div>
             </div>
             <table>
-              <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad</th><th></th></tr></thead>
+              <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad / costo uso</th><th></th></tr></thead>
               <tbody id="tablaIngredientesTemporales"></tbody>
             </table>
             <button className="boton botonExito" type="submit">Guardar</button>
@@ -240,25 +300,27 @@ export default function Recetas() {
                 <input id="editIdInsumoSeleccionado" type="hidden" />
                 <div id="editListaBusquedaInsumos"></div>
               </div>
-              <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', true)} />
-              <select id="editUnidadIngrediente" disabled>
-                <option value="">Seleccionar</option>
-                <option value="g">Gramos (g)</option>
-                <option value="ml">Mililitros (ml)</option>
-                <option value="kg">Kilogramos (kg)</option>
-                <option value="l">Litros (l)</option>
-                <option value="pz">Piezas (pz)</option>
-                <option value="cda">Cucharadas (cda)</option>
-                <option value="cdta">Cucharaditas (cdta)</option>
-                <option value="taza">Tazas</option>
-                <option value="oz">Onzas (oz)</option>
-                <option value="gotas">Gotas (go)</option>
-              </select>
-              <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', true)} />
-              <button type="button" className="boton" onClick={() => agregarIngrediente(true)}>+ Ing.</button>
+              <div className="recetaFilaInsumoControles">
+                <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', true)} />
+                <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', true)} />
+                <select id="editUnidadIngrediente" disabled>
+                  <option value="">Seleccionar</option>
+                  <option value="cda">Cucharadas (cda)</option>
+                  <option value="cdta">Cucharaditas (cdta)</option>
+                  <option value="gotas">Gotas (go)</option>
+                  <option value="g">Gramos (g)</option>
+                  <option value="kg">Kilogramos (kg)</option>
+                  <option value="l">Litros (l)</option>
+                  <option value="ml">Mililitros (ml)</option>
+                  <option value="oz">Onzas (oz)</option>
+                  <option value="pz">Piezas (pz)</option>
+                  <option value="taza">Tazas</option>
+                </select>
+                <button type="button" className="boton" onClick={() => agregarIngrediente(true)}>+ Ing.</button>
+              </div>
             </div>
             <table>
-              <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad</th><th></th></tr></thead>
+              <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad / costo uso</th><th></th></tr></thead>
               <tbody id="editTablaIngredientesTemporales"></tbody>
             </table>
             <button className="boton botonExito" type="submit">Guardar cambios</button>
@@ -319,22 +381,19 @@ export default function Recetas() {
               </div>
               <div>
                 <label htmlFor="cantidadProducir">Cantidad</label>
-                <input id="cantidadProducir" type="number" min="1" defaultValue="1" onChange={actualizarCostoProduccion} />
+                <input id="cantidadProducir" type="number" min="1" step="1" defaultValue="1" onInput={actualizarCostoProduccion} onChange={actualizarCostoProduccion} />
               </div>
               <div>
-                <label htmlFor="costoPorPiezaProducir">Costo por pieza</label>
-                <input id="costoPorPiezaProducir" type="number" step="0.01" onChange={actualizarCostoProduccion} onBlur={normalizarCostoPorPieza} />
+                <label htmlFor="costoPorPiezaProducir">Costo por pieza (receta)</label>
+                <input id="costoPorPiezaProducir" type="number" step="0.01" readOnly />
+              </div>
+              <div>
+                <label htmlFor="costoTotalProduccionRapida">Costo total</label>
+                <input id="costoTotalProduccionRapida" type="number" step="0.01" readOnly />
+                <div id="costoTotalProduccionRapidaMoneda" style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700, color: '#2e7d32' }}>$0.00</div>
               </div>
             </div>
             <div className="filaProduccionRapida filaProduccionRapidaBottom">
-              <div>
-                <label htmlFor="costoProducir">Costo producción</label>
-                <input id="costoProducir" type="number" step="0.01" readOnly />
-              </div>
-              <div>
-                <label htmlFor="precioVentaProducir">Precio venta</label>
-                <input id="precioVentaProducir" type="number" step="0.01" />
-              </div>
               <button className="boton botonExito" onClick={() => producirDesdeReceta()}>Registrar producción</button>
             </div>
           </div>
@@ -482,8 +541,6 @@ export default function Recetas() {
             <input id="ajusteFactorCostoProduccion" type="number" min="0.01" step="0.01" />
             <label htmlFor="ajusteFactorPrecioVenta">Factor precio venta</label>
             <input id="ajusteFactorPrecioVenta" type="number" min="0.01" step="0.01" />
-            <label htmlFor="ajusteRedondeoPrecio">Redondeo de precio</label>
-            <input id="ajusteRedondeoPrecio" type="number" min="0.01" step="0.01" />
             <button className="boton botonExito" type="button" onClick={() => guardarAjustesProduccion()}>Guardar ajustes</button>
           </div>
         </div>
@@ -499,6 +556,7 @@ export default function Recetas() {
 
 let categoriaRecetaActual = null;
 let ingredientesTemporales = [];
+let mapaInsumosReceta = new Map();
 let ultimoEnterNuevaRecetaMs = 0;
 let ultimoEnterEditarRecetaMs = 0;
 let cargandoRecetas = false;
@@ -510,8 +568,8 @@ let categoriaEditandoId = null;
 let nombreCategoriaEditandoTemporal = '';
 let recetasArchivadoActual = [];
 let recetasArchivadasActual = [];
-let tabArchivadoActiva = 'archivar';
-let subpestanaRecetasActiva = 'recetas';
+let tabArchivadoActiva = leerTabPersistidaRecetas(CLAVE_TAB_ARCHIVADO_RECETAS, ['archivar', 'archivadas'], 'archivar');
+let subpestanaRecetasActiva = leerTabPersistidaRecetas(CLAVE_SUBTAB_RECETAS, ['recetas', 'paquetes'], 'recetas');
 let recetaTiendaEditando = null;
 let fichaTiendaGaleriaActual = [];
 let fichaTiendaIngredientesActual = [];
@@ -523,10 +581,11 @@ let detallePaqueteActual = null;
 let filtroCategoriaPaqueteActual = '';
 let busquedaRecetaPaqueteActual = '';
 let paqueteProduccionActual = null;
+const REDONDEO_PRECIO_FIJO = 5;
 let ajustesProduccionActual = {
   factor_costo_produccion: 1.15,
   factor_precio_venta: 2.5,
-  redondeo_precio: 5
+  redondeo_precio: REDONDEO_PRECIO_FIJO
 };
 
 function claveNombreReceta(valor) {
@@ -538,7 +597,7 @@ function claveNombreReceta(valor) {
 
 function getAbrev(unidad) {
   if (!unidad) return '';
-  const u = unidad.toLowerCase().trim();
+  const u = normalizarUnidadReceta(unidad);
   if (u === 'go' || u === 'gota' || u === 'gotas') return 'go';
   if (u === 'ml') return 'ml';
   if (u === 'g') return 'g';
@@ -555,8 +614,49 @@ function getAbrev(unidad) {
 function normalizarUnidadReceta(unidad) {
   const u = String(unidad || '').toLowerCase().trim();
   if (!u) return '';
-  if (u === 'go' || u === 'gota' || u === 'gotas') return 'gotas';
+  if (u === 'go' || u === 'gotas') return 'gotas';
+  if (u === 'gramo' || u === 'gramos') return 'g';
+  if (u === 'mililitro' || u === 'mililitros') return 'ml';
+  if (u === 'kilogramo' || u === 'kilogramos') return 'kg';
+  if (u === 'litro' || u === 'litros') return 'l';
+  if (u === 'pieza' || u === 'piezas') return 'pz';
+  if (u === 'cucharada' || u === 'cucharadas') return 'cda';
+  if (u === 'cucharadita' || u === 'cucharaditas') return 'cdta';
+  if (u === 'tazas') return 'taza';
+  if (u === 'onza' || u === 'onzas') return 'oz';
   return u;
+}
+
+function convertirCantidadEntreUnidades(cantidad, unidadOrigen, unidadDestino) {
+  const valor = Number(cantidad);
+  if (!Number.isFinite(valor)) return null;
+  const origen = normalizarUnidadReceta(unidadOrigen);
+  const destino = normalizarUnidadReceta(unidadDestino);
+  if (!origen || !destino) return null;
+  if (origen === destino) return valor;
+
+  if (origen === 'kg' && destino === 'g') return valor * 1000;
+  if (origen === 'g' && destino === 'kg') return valor / 1000;
+  if (origen === 'l' && destino === 'ml') return valor * 1000;
+  if (origen === 'ml' && destino === 'l') return valor / 1000;
+  if (origen === 'gotas' && destino === 'ml') return valor / 20;
+  if (origen === 'ml' && destino === 'gotas') return valor * 20;
+
+  return null;
+}
+
+function calcularCostoUsoIngrediente(ing) {
+  const cantidad = Number(ing?.cantidad || 0);
+  const costoPorUnidad = Number(ing?.costo_por_unidad || 0);
+  const unidadCosto = normalizarUnidadReceta(ing?.unidad_costo || ing?.unidad || '');
+  const unidadCantidad = normalizarUnidadReceta(ing?.unidad || '');
+
+  if (!Number.isFinite(cantidad) || cantidad <= 0) return 0;
+  if (!Number.isFinite(costoPorUnidad) || costoPorUnidad <= 0) return null;
+
+  const cantidadCosto = convertirCantidadEntreUnidades(cantidad, unidadCantidad, unidadCosto);
+  if (!Number.isFinite(cantidadCosto) || cantidadCosto <= 0) return null;
+  return cantidadCosto * costoPorUnidad;
 }
 
 function ordenarTexto(a, b) {
@@ -582,6 +682,7 @@ function agruparInsumosPorProveedor(insumos = []) {
 function cambiarSubpestanaRecetas(tab) {
   if (tab === 'paquetes') subpestanaRecetasActiva = 'paquetes';
   else subpestanaRecetasActiva = 'recetas';
+  guardarTabPersistidaRecetas(CLAVE_SUBTAB_RECETAS, subpestanaRecetasActiva);
   const panelRecetas = document.getElementById('panelSubpestanaRecetas');
   const panelPaquetes = document.getElementById('panelSubpestanaPaquetes');
   const btnRecetas = document.getElementById('btnSubTabRecetas');
@@ -1086,6 +1187,7 @@ async function abrirModalArchivadoRecetas() {
 
 function cambiarPestanaArchivado(tab) {
   tabArchivadoActiva = tab === 'archivadas' ? 'archivadas' : 'archivar';
+  guardarTabPersistidaRecetas(CLAVE_TAB_ARCHIVADO_RECETAS, tabArchivadoActiva);
   const btnArchivar = document.getElementById('tabArchivarRecetas');
   const btnArchivadas = document.getElementById('tabArchivadasRecetas');
   const panelArchivar = document.getElementById('panelArchivarRecetas');
@@ -1473,28 +1575,25 @@ async function cargarAjustesProduccion() {
     ajustesProduccionActual = {
       factor_costo_produccion: Number(data?.factor_costo_produccion) || 1.15,
       factor_precio_venta: Number(data?.factor_precio_venta) || 2.5,
-      redondeo_precio: Number(data?.redondeo_precio) || 5
+      redondeo_precio: REDONDEO_PRECIO_FIJO
     };
   } catch {
-    ajustesProduccionActual = { factor_costo_produccion: 1.15, factor_precio_venta: 2.5, redondeo_precio: 5 };
+    ajustesProduccionActual = { factor_costo_produccion: 1.15, factor_precio_venta: 2.5, redondeo_precio: REDONDEO_PRECIO_FIJO };
   }
 }
 
 function abrirAjustesProduccion() {
   const f1 = document.getElementById('ajusteFactorCostoProduccion');
   const f2 = document.getElementById('ajusteFactorPrecioVenta');
-  const f3 = document.getElementById('ajusteRedondeoPrecio');
   if (f1) f1.value = Number(ajustesProduccionActual.factor_costo_produccion || 1.15).toFixed(2);
   if (f2) f2.value = Number(ajustesProduccionActual.factor_precio_venta || 2.5).toFixed(2);
-  if (f3) f3.value = Number(ajustesProduccionActual.redondeo_precio || 5).toFixed(2);
   abrirModal('modalAjustesProduccion');
 }
 
 async function guardarAjustesProduccion() {
   const factorCosto = Number(document.getElementById('ajusteFactorCostoProduccion')?.value);
   const factorVenta = Number(document.getElementById('ajusteFactorPrecioVenta')?.value);
-  const redondeo = Number(document.getElementById('ajusteRedondeoPrecio')?.value);
-  if (!Number.isFinite(factorCosto) || factorCosto <= 0 || !Number.isFinite(factorVenta) || factorVenta <= 0 || !Number.isFinite(redondeo) || redondeo <= 0) {
+  if (!Number.isFinite(factorCosto) || factorCosto <= 0 || !Number.isFinite(factorVenta) || factorVenta <= 0) {
     mostrarNotificacion('Completa valores válidos para porcentajes de producción', 'error');
     return;
   }
@@ -1503,14 +1602,14 @@ async function guardarAjustesProduccion() {
     const respuesta = await fetch(`${API}/api/recetas/ajustes-produccion`, {
       method: 'PUT',
       headers: headersConToken({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ factor_costo_produccion: factorCosto, factor_precio_venta: factorVenta, redondeo_precio: redondeo })
+      body: JSON.stringify({ factor_costo_produccion: factorCosto, factor_precio_venta: factorVenta })
     });
     const data = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(data?.error || 'No se pudieron guardar ajustes');
     ajustesProduccionActual = {
       factor_costo_produccion: factorCosto,
       factor_precio_venta: factorVenta,
-      redondeo_precio: redondeo
+      redondeo_precio: REDONDEO_PRECIO_FIJO
     };
     actualizarCostoProduccion();
     cerrarModal('modalAjustesProduccion');
@@ -1938,9 +2037,13 @@ function limpiarFormularioNuevaReceta() {
   if (idInsumo) idInsumo.value = '';
 
   const listaBusqueda = document.getElementById('listaBusquedaInsumos');
-  if (listaBusqueda) listaBusqueda.innerHTML = '';
+  if (listaBusqueda) {
+    listaBusqueda.innerHTML = '';
+    listaBusqueda.style.display = 'none';
+  }
 
   ingredientesTemporales = [];
+  mapaInsumosReceta = new Map();
   actualizarTablaIngredientes();
 }
 
@@ -2016,9 +2119,17 @@ async function editarReceta(id) {
       proveedor: ing.proveedor || '',
       cantidad: ing.cantidad,
       unidad: ing.unidad,
+      unidad_costo: ing.unidad,
+      costo_por_unidad: Number(ing.costo_por_unidad || 0),
       pendiente: ing.pendiente === true || ing.pendiente === 1
     }));
     actualizarTablaIngredientes();
+
+    const listaBusquedaEdit = document.getElementById('editListaBusquedaInsumos');
+    if (listaBusquedaEdit) {
+      listaBusquedaEdit.innerHTML = '';
+      listaBusquedaEdit.style.display = 'none';
+    }
 
     abrirModal('modalEditarReceta');
     setTimeout(() => {
@@ -2208,6 +2319,13 @@ async function buscarInsumoParaReceta(termino) {
     let encontrado = false;
     insumos.forEach(insumo => {
       encontrado = true;
+      mapaInsumosReceta.set(Number(insumo?.id || 0), {
+        id: Number(insumo?.id || 0),
+        nombre: String(insumo?.nombre || '').trim(),
+        proveedor: String(insumo?.proveedor || '').trim(),
+        unidad: normalizarUnidadReceta(insumo?.unidad || ''),
+        costo_por_unidad: Number(insumo?.costo_por_unidad || 0)
+      });
       const opcion = document.createElement('div');
       opcion.className = 'elementoSugerencia';
       opcion.textContent = `${insumo.nombre} (${insumo.codigo}${insumo.unidad ? ` • ${getAbrev(insumo.unidad)}` : ''})`;
@@ -2275,8 +2393,12 @@ function agregarIngrediente(esEdicion = false) {
   const idInsumo = parseInt(document.getElementById(idFieldId)?.value);
   const nombreInsumo = document.getElementById(nombreFieldId)?.value;
   const cantidad = parseFloat(document.getElementById(cantidadFieldId)?.value);
-  const unidad = normalizarUnidadReceta(document.getElementById(unidadFieldId)?.value);
+  const unidadCapturada = normalizarUnidadReceta(document.getElementById(unidadFieldId)?.value);
   const proveedor = (document.getElementById(proveedorFieldId)?.value || '').trim();
+  const infoInsumo = mapaInsumosReceta.get(Number(idInsumo)) || null;
+  const unidadInventario = normalizarUnidadReceta(infoInsumo?.unidad || '');
+  const unidad = unidadInventario || unidadCapturada;
+  const costoPorUnidad = Number(infoInsumo?.costo_por_unidad || 0);
 
   if (!idInsumo || !nombreInsumo || isNaN(cantidad) || !unidad) {
     mostrarNotificacion('Por favor completa todos los campos', 'error');
@@ -2288,7 +2410,16 @@ function agregarIngrediente(esEdicion = false) {
     return;
   }
 
-  ingredientesTemporales.push({ id_insumo: idInsumo, nombre: nombreInsumo, proveedor, cantidad, unidad, pendiente: false });
+  ingredientesTemporales.push({
+    id_insumo: idInsumo,
+    nombre: nombreInsumo,
+    proveedor,
+    cantidad,
+    unidad,
+    unidad_costo: unidadInventario || unidad,
+    costo_por_unidad: costoPorUnidad,
+    pendiente: false
+  });
 
   document.getElementById(idFieldId).value = '';
   document.getElementById(nombreFieldId).value = '';
@@ -2314,10 +2445,14 @@ function actualizarTablaIngredientes() {
     ingredientesTemporales.forEach((ing, idx) => {
       const fila = document.createElement('tr');
       if (ing.pendiente) fila.style.color = '#d32f2f';
+      const costoUso = calcularCostoUsoIngrediente(ing);
+      const costoUsoHtml = Number.isFinite(costoUso)
+        ? `<div style="font-size:12px;color:#4a7c59;font-weight:700">Costo uso: $${Number(costoUso || 0).toFixed(2)}</div>`
+        : '<div style="font-size:12px;color:#999">Costo uso: N/D</div>';
       fila.innerHTML = `
         <td>${ing.nombre}</td>
         <td>${ing.proveedor || '<span style="color:#999">Sin proveedor</span>'}</td>
-        <td>${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}</td>
+        <td>${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${costoUsoHtml}</td>
         <td><button onclick="window.recetas.eliminarIngrediente(${idx})" class="botonPequeno botonDanger">×</button></td>
       `;
       target.appendChild(fila);
@@ -2343,10 +2478,14 @@ async function mostrarIngredientes(idReceta) {
     } else {
       receta.ingredientes.forEach(ing => {
         const pendiente = ing.pendiente === true || ing.pendiente === 1;
+        const costoUso = calcularCostoUsoIngrediente(ing);
+        const costoUsoTexto = Number.isFinite(costoUso)
+          ? `$${Number(costoUso || 0).toFixed(2)}`
+          : 'N/D';
         const nombreIngredienteSeguro = escaparParaInlineJs(ing?.nombre);
         html += `<li class="itemIngredienteRecetaModal ${pendiente ? 'itemIngredienteRecetaPendiente' : ''}">
           <div class="itemIngredienteRecetaInfo itemIngredienteRecetaLineaPrincipal">
-            <span class="itemIngredienteRecetaNombre"><strong>${ing.nombre}</strong>: ${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${ing.proveedor ? ` (${ing.proveedor})` : ''}</span>
+            <span class="itemIngredienteRecetaNombre"><strong>${ing.nombre}</strong>: ${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${ing.proveedor ? ` (${ing.proveedor})` : ''} • Costo uso: ${costoUsoTexto}</span>
           </div>
           <div class="itemIngredienteRecetaFilaEdicion">
             <div class="itemIngredienteRecetaControles">
@@ -2529,16 +2668,6 @@ async function guardarFichaTiendaReceta() {
       .filter(Boolean);
 
     const payload = {
-      nombre: recetaTiendaEditando.nombre,
-      id_categoria: recetaTiendaEditando.id_categoria,
-      gramaje: recetaTiendaEditando.gramaje,
-      ingredientes: (recetaTiendaEditando.ingredientes || []).map((ing) => ({
-        id_insumo: ing.id_insumo,
-        nombre: ing.nombre,
-        proveedor: ing.proveedor || '',
-        cantidad: ing.cantidad,
-        unidad: ing.unidad
-      })),
       tienda_image_url: imagenPrincipal,
       tienda_galeria: galeriaSecundaria,
       tienda_descripcion: document.getElementById('fichaTiendaDescripcion')?.value || '',
@@ -2548,7 +2677,7 @@ async function guardarFichaTiendaReceta() {
       tienda_ingredientes: ingredientesVisibles.join('\n')
     };
 
-    const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}`, {
+    const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}/ficha-tienda`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -2610,16 +2739,6 @@ async function persistirFichaTiendaImagenesActual() {
     .filter(Boolean);
 
   const payload = {
-    nombre: recetaTiendaEditando.nombre,
-    id_categoria: recetaTiendaEditando.id_categoria,
-    gramaje: recetaTiendaEditando.gramaje,
-    ingredientes: (recetaTiendaEditando.ingredientes || []).map((ing) => ({
-      id_insumo: ing.id_insumo,
-      nombre: ing.nombre,
-      proveedor: ing.proveedor || '',
-      cantidad: ing.cantidad,
-      unidad: ing.unidad
-    })),
     tienda_image_url: imagenPrincipal,
     tienda_galeria: galeriaSecundaria,
     tienda_descripcion: document.getElementById('fichaTiendaDescripcion')?.value || '',
@@ -2629,7 +2748,7 @@ async function persistirFichaTiendaImagenesActual() {
     tienda_ingredientes: ingredientesVisibles.join('\n')
   };
 
-  const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}`, {
+  const respuesta = await fetch(`${API}/recetas/${recetaTiendaEditando.id}/ficha-tienda`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -2850,32 +2969,25 @@ async function abrirProduccionRapida(idReceta, nombreReceta, costoPorPieza = 0) 
   abrirModal('modalProduccionRapida');
 }
 
-function normalizarCostoPorPieza() {
-  const input = document.getElementById('costoPorPiezaProducir');
-  if (!input) return;
-  const valor = parseFloat(input.value);
-  if (!Number.isFinite(valor)) {
-    input.value = '0.00';
-  } else {
-    input.value = valor.toFixed(2);
-  }
-  actualizarCostoProduccion();
-}
-
 function actualizarCostoProduccion() {
-  const costoPorPieza = parseFloat(document.getElementById('costoPorPiezaProducir')?.value) || 0;
-  const factorCosto = Number(ajustesProduccionActual?.factor_costo_produccion) || 1.15;
-  const factorVenta = Number(ajustesProduccionActual?.factor_precio_venta) || 2.5;
-  const redondeo = Number(ajustesProduccionActual?.redondeo_precio) || 5;
-  const costoProduccionCalculado = costoPorPieza * factorCosto;
-  const out = document.getElementById('costoProducir');
-  if (out) out.value = costoProduccionCalculado.toFixed(2);
+  const inputCantidad = document.getElementById('cantidadProducir');
+  const inputCostoPieza = document.getElementById('costoPorPiezaProducir');
+  const inputCostoTotal = document.getElementById('costoTotalProduccionRapida');
+  const etiquetaCostoTotal = document.getElementById('costoTotalProduccionRapidaMoneda');
+  if (!inputCantidad || !inputCostoPieza || !inputCostoTotal) return;
 
-  const precioVenta = document.getElementById('precioVentaProducir');
-  if (precioVenta) {
-    const ventaCalculada = costoProduccionCalculado * factorVenta;
-    const ventaRedondeada = redondeo > 0 ? (Math.ceil(ventaCalculada / redondeo) * redondeo) : ventaCalculada;
-    precioVenta.value = ventaRedondeada.toFixed(2);
+  const cantidadCruda = Number(inputCantidad.value);
+  const cantidad = Number.isFinite(cantidadCruda) && cantidadCruda > 0 ? Math.floor(cantidadCruda) : 1;
+  if (Number(inputCantidad.value) !== cantidad) {
+    inputCantidad.value = String(cantidad);
+  }
+
+  const costoPorPieza = Number(inputCostoPieza.value);
+  const costoUnitario = Number.isFinite(costoPorPieza) && costoPorPieza >= 0 ? costoPorPieza : 0;
+  const costoTotal = costoUnitario * cantidad;
+  inputCostoTotal.value = costoTotal.toFixed(2);
+  if (etiquetaCostoTotal) {
+    etiquetaCostoTotal.textContent = `$${Number(costoTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 }
 
@@ -2883,11 +2995,12 @@ async function producirDesdeReceta() {
   const nombreReceta = document.getElementById('nombreRecetaProducir')?.value;
   const idReceta = parseInt(document.getElementById('idRecetaProducir')?.value, 10);
   const cantidad = parseInt(document.getElementById('cantidadProducir')?.value, 10);
-  const costoProduccion = parseFloat(document.getElementById('costoProducir')?.value);
-  const precioVenta = parseFloat(document.getElementById('precioVentaProducir')?.value);
+  const costoPorPieza = parseFloat(document.getElementById('costoPorPiezaProducir')?.value);
+  const costoProduccion = parseFloat(document.getElementById('costoTotalProduccionRapida')?.value);
+  const precioVenta = Number.isFinite(costoPorPieza) ? costoPorPieza : 0;
 
-  if (!nombreReceta || isNaN(cantidad) || cantidad <= 0 || isNaN(costoProduccion) || isNaN(precioVenta)) {
-    mostrarNotificacion('Por favor completa todos los campos correctamente', 'error');
+  if (!nombreReceta || isNaN(cantidad) || cantidad <= 0 || isNaN(costoPorPieza) || costoPorPieza < 0 || !Number.isFinite(costoProduccion) || costoProduccion < 0) {
+    mostrarNotificacion('Por favor completa nombre, cantidad y costo receta correctamente', 'error');
     return;
   }
 

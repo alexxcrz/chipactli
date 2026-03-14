@@ -15,9 +15,50 @@ function dbRun(db, sql, params = []) {
   });
 }
 
+function dbAll(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || [])));
+  });
+}
+
 export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
+  const PREFIJO_CORTESIA = 'CHCO';
+  const LONGITUD_CONSECUTIVO_CORTESIA = 6;
+
+  async function generarNumeroCortesia() {
+    try {
+      const rows = await dbAll(
+        bdVentas,
+        `SELECT numero_pedido
+         FROM cortesias
+         WHERE numero_pedido LIKE ?`,
+        [`%${PREFIJO_CORTESIA}%`]
+      );
+
+      const regex = new RegExp(`${PREFIJO_CORTESIA}(\\d+)`, 'i');
+      let maximo = 0;
+      for (const row of rows || []) {
+        const actual = String(row?.numero_pedido || '').trim();
+        const match = actual.match(regex);
+        if (!match) continue;
+        const numero = Number(match[1] || 0);
+        if (Number.isFinite(numero) && numero > maximo) maximo = numero;
+      }
+
+      const consecutivo = Number.isFinite(maximo) && maximo > 0 ? (maximo + 1) : 1;
+      return `${PREFIJO_CORTESIA}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_CORTESIA, '0')}`;
+    } catch {
+      return `${PREFIJO_CORTESIA}${String(1).padStart(LONGITUD_CONSECUTIVO_CORTESIA, '0')}`;
+    }
+  }
+
+  app.get('/cortesias/siguiente-codigo', async (_req, res) => {
+    const codigo = await generarNumeroCortesia();
+    res.json({ codigo });
+  });
+
   app.post("/cortesia/:id", async (req, res) => {
-    const { nombre_receta, cantidad, numero_pedido, motivo, para_quien } = req.body || {};
+    const { nombre_receta, cantidad, motivo, para_quien, observaciones } = req.body || {};
     const fechaNow = new Date().toISOString();
     const idProduccion = Number(req.params.id || 0);
     const cantidadSolicitada = Number(cantidad || 0);
@@ -39,14 +80,18 @@ export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
       const nombreReceta = String(nombre_receta || lote?.nombre_receta || '').trim();
       if (!nombreReceta) return res.status(400).json({ error: "Nombre de receta inválido" });
 
+      const numeroPedido = await generarNumeroCortesia();
+      const observacionesFinal = String(observaciones || '').trim();
+
       await dbRun(
         bdVentas,
-        "INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien) VALUES (?,?,?,?,?,?)",
-        [nombreReceta, cantidadSolicitada, fechaNow, numero_pedido || "", motivo || "", para_quien || ""]
+        "INSERT INTO cortesias (nombre_receta, cantidad, fecha_cortesia, numero_pedido, motivo, para_quien, observaciones) VALUES (?,?,?,?,?,?,?)",
+        [nombreReceta, cantidadSolicitada, fechaNow, numeroPedido, motivo || "", para_quien || "", observacionesFinal]
       );
 
       const restante = cantidadLote - cantidadSolicitada;
       if (restante <= 1e-9) {
+        await dbRun(bdProduccion, "DELETE FROM produccion_descuentos WHERE id_produccion=?", [idProduccion]);
         await dbRun(bdProduccion, "DELETE FROM produccion WHERE id=?", [idProduccion]);
       } else {
         const costoLote = Number(lote?.costo_produccion || 0);

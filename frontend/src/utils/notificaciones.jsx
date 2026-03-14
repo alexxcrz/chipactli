@@ -4,6 +4,7 @@ export const alertas = [];
 export const alertasPorClave = new Map();
 export const historialAlertas = [];
 export const MAX_HISTORIAL_ALERTAS = 200;
+const CLAVE_TAB_ALERTAS = 'chipactli:alertas:tab';
 let pestanaAlertasActual = 'activas';
 let audioCtx = null;
 let audioAlertaPreparado = false;
@@ -58,6 +59,33 @@ export function configurarSonidoNotificacion(preset) {
 
 cargarSonidoSeleccionado();
 
+function cargarPestanaAlertasGuardada() {
+  if (typeof window === 'undefined') return;
+  try {
+    const guardada = String(localStorage.getItem(CLAVE_TAB_ALERTAS) || '').trim();
+    if (guardada === 'activas' || guardada === 'historial') {
+      pestanaAlertasActual = guardada;
+    }
+  } catch {
+    // Ignorar errores de storage.
+  }
+}
+
+function guardarPestanaAlertasActual() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CLAVE_TAB_ALERTAS, pestanaAlertasActual);
+  } catch {
+    // Ignorar errores de storage.
+  }
+}
+
+cargarPestanaAlertasGuardada();
+
+export function obtenerPestanaAlertasActual() {
+  return pestanaAlertasActual === 'historial' ? 'historial' : 'activas';
+}
+
 export function actualizarUIAlertas() {
   const lista = document.getElementById('listaAlertas');
   const listaHistorial = document.getElementById('listaAlertasHistorial');
@@ -80,7 +108,31 @@ export function actualizarUIAlertas() {
         <div>${alerta.mensaje}</div>
         <div class="fechaAlerta">${formatearFechaAlerta(alerta.fecha)}</div>
       `;
-      item.addEventListener('click', () => moverAlertaAHistorial(alerta.clave));
+      if (alerta?.destino?.hash || alerta?.destino?.page) {
+        item.title = 'Abrir detalle';
+      }
+      item.addEventListener('click', () => {
+        if (alerta?.destino) {
+          try {
+            window.dispatchEvent(new CustomEvent('chipactli:alerta-click', {
+              detail: {
+                clave: alerta.clave,
+                mensaje: alerta.mensaje,
+                destino: alerta.destino,
+                meta: alerta.meta || null
+              }
+            }));
+          } catch {
+            // Ignorar errores de dispatch.
+          }
+
+          const hashDestino = String(alerta?.destino?.hash || '').trim();
+          if (hashDestino) {
+            window.location.hash = hashDestino;
+          }
+        }
+        moverAlertaAHistorial(alerta.clave);
+      });
       lista.appendChild(item);
     });
   }
@@ -114,16 +166,20 @@ export function actualizarUIAlertas() {
   }
 }
 
-export function agregarAlerta(clave, mensaje, tipo = '') {
+export function agregarAlerta(clave, mensaje, tipo = '', opciones = {}) {
+  const destino = opciones?.destino || null;
+  const meta = opciones?.meta || null;
   if (alertasPorClave.has(clave)) {
     const alertaExistente = alertasPorClave.get(clave);
     alertaExistente.mensaje = mensaje;
     alertaExistente.tipo = tipo;
+    alertaExistente.destino = destino;
+    alertaExistente.meta = meta;
     if (!alertaExistente.fecha) {
       alertaExistente.fecha = new Date().toISOString();
     }
   } else {
-    const nueva = { clave, mensaje, tipo, fecha: new Date().toISOString() };
+    const nueva = { clave, mensaje, tipo, destino, meta, fecha: new Date().toISOString() };
     alertas.unshift(nueva);
     alertasPorClave.set(clave, nueva);
     prepararAudioAlerta();
@@ -159,7 +215,8 @@ export function moverAlertaAHistorial(clave) {
 }
 
 export function cambiarPestanaAlertas(pestana) {
-  pestanaAlertasActual = pestana;
+  pestanaAlertasActual = pestana === 'historial' ? 'historial' : 'activas';
+  guardarPestanaAlertasActual();
   const tabActivas = document.getElementById('tabAlertasActivas');
   const tabHistorial = document.getElementById('tabAlertasHistorial');
   const listaActivas = document.getElementById('listaAlertas');

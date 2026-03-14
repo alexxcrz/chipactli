@@ -1,4 +1,4 @@
-﻿import React, { useEffect } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import './inventario.css';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
@@ -27,6 +27,29 @@ let modalEditarPrecioListaId = null;
 let colaSurtidoOrden = [];
 let indiceProveedorRapidoOrden = null;
 const CLAVE_ULTIMO_PROVEEDOR_INSUMO = 'chipactli:ultimoProveedorInsumo';
+const CLAVE_TAB_INVENTARIO_PRINCIPAL = 'chipactli:inventario:tabPrincipal';
+const CLAVE_TAB_INVENTARIO_ORDENES = 'chipactli:inventario:tabOrdenes';
+const CLAVE_TAB_INVENTARIO_ORDENES_COMPRA = 'chipactli:inventario:tabOrdenesCompra';
+
+function leerTabPersistida(clave, permitidas, valorPorDefecto) {
+  try {
+    const valor = String(window.localStorage.getItem(clave) || '').trim();
+    return permitidas.includes(valor) ? valor : valorPorDefecto;
+  } catch {
+    return valorPorDefecto;
+  }
+}
+
+function guardarTabPersistida(clave, valor) {
+  try {
+    window.localStorage.setItem(clave, valor);
+  } catch {
+  }
+}
+
+tabActiva = leerTabPersistida(CLAVE_TAB_INVENTARIO_PRINCIPAL, ['inventario', 'utensilios', 'ordenes'], tabActiva);
+tabOrdenesActiva = leerTabPersistida(CLAVE_TAB_INVENTARIO_ORDENES, ['lista-insumos', 'nueva', 'ordenes', 'proveedores'], tabOrdenesActiva);
+tabOrdenesCompraActiva = leerTabPersistida(CLAVE_TAB_INVENTARIO_ORDENES_COMPRA, ['creadas', 'historial-surtidas'], tabOrdenesCompraActiva);
 
 function texto(a) {
   return String(a || '');
@@ -39,6 +62,22 @@ function cmpTexto(a, b) {
 function abrevUnidad(unidad) {
   const u = texto(unidad).toLowerCase().trim();
   if (u === 'gotas' || u === 'gota' || u === 'go') return 'go';
+  return u;
+}
+
+function normalizarUnidadSelectInventario(unidad) {
+  const u = texto(unidad).toLowerCase().trim();
+  if (!u) return '';
+  if (u === 'go' || u === 'gota' || u === 'gotas') return 'go';
+  if (u === 'gramo' || u === 'gramos') return 'g';
+  if (u === 'kilogramo' || u === 'kilogramos') return 'kg';
+  if (u === 'mililitro' || u === 'mililitros') return 'ml';
+  if (u === 'litro' || u === 'litros') return 'l';
+  if (u === 'pieza' || u === 'piezas') return 'pz';
+  if (u === 'cucharada' || u === 'cucharadas') return 'cda';
+  if (u === 'cucharadita' || u === 'cucharaditas') return 'cdta';
+  if (u === 'tazas') return 'taza';
+  if (u === 'onza' || u === 'onzas') return 'oz';
   return u;
 }
 
@@ -137,6 +176,7 @@ function agruparPorProveedor(lista = []) {
 
 function setTab(tab) {
   tabActiva = ['inventario', 'utensilios', 'ordenes'].includes(tab) ? tab : 'inventario';
+  guardarTabPersistida(CLAVE_TAB_INVENTARIO_PRINCIPAL, tabActiva);
   const panelInv = document.getElementById('panelInv');
   const panelUt = document.getElementById('panelUt');
   const panelOc = document.getElementById('panelOc');
@@ -308,6 +348,7 @@ async function eliminarArchivoListaPrecios(idArchivo) {
 
 function setTabOrdenes(tab) {
   tabOrdenesActiva = ['lista-insumos', 'nueva', 'ordenes', 'proveedores'].includes(tab) ? tab : 'lista-insumos';
+  guardarTabPersistida(CLAVE_TAB_INVENTARIO_ORDENES, tabOrdenesActiva);
   const panelListaInsumos = document.getElementById('panelOrdenListaInsumos');
   const panelNueva = document.getElementById('panelOrdenNueva');
   const panelOrdenes = document.getElementById('panelOrdenesCompra');
@@ -337,6 +378,7 @@ function setTabOrdenes(tab) {
 
 function setTabOrdenesCompra(tab) {
   tabOrdenesCompraActiva = ['creadas', 'historial-surtidas'].includes(tab) ? tab : 'creadas';
+  guardarTabPersistida(CLAVE_TAB_INVENTARIO_ORDENES_COMPRA, tabOrdenesCompraActiva);
   const panelCreadas = document.getElementById('panelOrdenesCreadas');
   const panelHistorial = document.getElementById('panelOrdenesSurtidas');
   const btnCreadas = document.getElementById('btnOrdenCompraCreadas');
@@ -568,7 +610,7 @@ function seleccionarInsumoOrden() {
   const id = Number(document.getElementById('insumoOrden')?.value || 0);
   const ins = inventarioData.find((i) => Number(i.id) === id);
   const unidad = document.getElementById('unidadOrden');
-  if (unidad) unidad.value = ins?.unidad ? abrevUnidad(ins.unidad) : '';
+  if (unidad) unidad.value = normalizarUnidadSelectInventario(ins?.unidad || '');
   const prov = document.getElementById('proveedorOrden');
   if (prov && !texto(prov.value).trim() && ins?.proveedor) prov.value = ins.proveedor;
 }
@@ -1538,7 +1580,7 @@ async function editarInsumo(id) {
       }
       selectProveedor.value = proveedorInsumo;
     }
-    document.getElementById('editUnidadInsumo').value = insumo.unidad || '';
+    document.getElementById('editUnidadInsumo').value = normalizarUnidadSelectInventario(insumo.unidad || '');
     document.getElementById('editCantidadInsumo').value = insumo.cantidad_total || 0;
     document.getElementById('editCostoInsumo').value = insumo.costo_total || 0;
     abrirModal('modalEditarInsumo');
@@ -1564,13 +1606,33 @@ async function guardarEditarInsumo(event) {
     }
   }
 
+  // Obtener valores anteriores
+  let insumoAnterior = null;
+  try {
+    insumoAnterior = await fetchAPIJSON(`${API}/inventario/${id}`);
+  } catch {}
+
+  const nombreAnterior = insumoAnterior?.nombre || '';
+  const codigoAnterior = insumoAnterior?.codigo || '';
+  const proveedorAnterior = insumoAnterior?.proveedor || '';
+  const unidadAnterior = insumoAnterior?.unidad || '';
+  const cantidadAnterior = Number(insumoAnterior?.cantidad_total || 0);
+  const costoAnterior = Number(insumoAnterior?.costo_total || 0);
+
+  const nombreNuevo = document.getElementById('editNombreInsumo')?.value;
+  const codigoNuevo = texto(document.getElementById('editCodigoInsumo')?.value).trim();
+  const proveedorNuevo = texto(document.getElementById('editProveedorInsumo')?.value).trim();
+  const unidadNuevo = document.getElementById('editUnidadInsumo')?.value;
+  const cantidadNuevo = Number(document.getElementById('editCantidadInsumo')?.value || 0);
+  const costoNuevo = Number(document.getElementById('editCostoInsumo')?.value || 0);
+
   const payload = {
-    codigo,
-    nombre: document.getElementById('editNombreInsumo')?.value,
-    proveedor: texto(document.getElementById('editProveedorInsumo')?.value).trim(),
-    unidad: document.getElementById('editUnidadInsumo')?.value,
-    cantidad_total: Number(document.getElementById('editCantidadInsumo')?.value || 0),
-    costo_total: Number(document.getElementById('editCostoInsumo')?.value || 0)
+    codigo: codigoNuevo,
+    nombre: nombreNuevo,
+    proveedor: proveedorNuevo,
+    unidad: unidadNuevo,
+    cantidad_total: cantidadNuevo,
+    costo_total: costoNuevo
   };
   try {
     const respuesta = await fetchAPI(`${API}/inventario/${id}`, {
@@ -1580,8 +1642,28 @@ async function guardarEditarInsumo(event) {
     });
     if (respuesta.ok) {
       cerrarModal('modalEditarInsumo');
-      mostrarNotificacion('Insumo actualizado correctamente', 'exito');
+      // Notificación detallada
+      let detalles = [];
+      if (nombreAnterior !== nombreNuevo) detalles.push(`nombre: "${codigoAnterior} - ${nombreAnterior}" → "${codigoNuevo} - ${nombreNuevo}"`);
+      if (codigoAnterior !== codigoNuevo) detalles.push(`código: "${codigoAnterior}" → "${codigoNuevo}"`);
+      if (proveedorAnterior !== proveedorNuevo) detalles.push(`proveedor: "${proveedorAnterior}" → "${proveedorNuevo}"`);
+      if (unidadAnterior !== unidadNuevo) detalles.push(`unidad: "${unidadAnterior}" → "${unidadNuevo}"`);
+      if (cantidadAnterior !== cantidadNuevo) detalles.push(`cantidad: ${cantidadAnterior} → ${cantidadNuevo}`);
+      if (costoAnterior !== costoNuevo) detalles.push(`costo: $${costoAnterior} → $${costoNuevo}`);
+      if (detalles.length) {
+        // Notificación precisa en alertas
+        const clave = `insumo-edit-${id}`;
+        const mensaje = `Inventario: ${detalles.join(', ')}`;
+        agregarAlerta(clave, mensaje, 'exito');
+        mostrarNotificacion(mensaje, 'exito');
+      } else {
+        agregarAlerta(`insumo-edit-${id}`, 'Inventario: insumo actualizado sin cambios visibles', 'info');
+        mostrarNotificacion('Insumo actualizado sin cambios visibles', 'info');
+      }
+      // Mantener filtro actual
+      const filtroActual = document.getElementById('busquedaInventario')?.value || '';
       await Promise.all([cargarInventario(), cargarEstadisticasInventario(), cargarCatalogoProveedores()]);
+      if (filtroActual) filtrarInventario(filtroActual);
     }
   } catch (error) {
     console.error(error);
@@ -1621,13 +1703,33 @@ async function mostrarHistorialInsumo(id, nombre) {
 function filtrarInventario(termino) {
   const filas = document.querySelectorAll('#cuerpoInventario tr');
   const t = normalizarTextoBusqueda(termino);
+  let ultimoProveedorRow = null;
+  let insumosVisibles = 0;
   filas.forEach((fila) => {
+    // Detect provider row
+    if (fila.classList.contains('filaGrupoProveedorInventario')) {
+      if (ultimoProveedorRow) {
+        // Hide previous provider if no insumos visible
+        if (insumosVisibles === 0) ultimoProveedorRow.style.display = 'none';
+        else ultimoProveedorRow.style.display = '';
+      }
+      ultimoProveedorRow = fila;
+      insumosVisibles = 0;
+      return;
+    }
     if (fila.cells.length < 2) return;
     const codigo = normalizarTextoBusqueda(fila.cells[0]?.textContent || '');
     const nombre = normalizarTextoBusqueda(fila.cells[1]?.textContent || '');
     const proveedor = normalizarTextoBusqueda(fila.cells[2]?.textContent || '');
-    fila.style.display = (codigo.includes(t) || nombre.includes(t) || proveedor.includes(t)) ? '' : 'none';
+    const visible = (codigo.includes(t) || nombre.includes(t) || proveedor.includes(t));
+    fila.style.display = visible ? '' : 'none';
+    if (visible) insumosVisibles++;
   });
+  // Hide last provider if no insumos visible
+  if (ultimoProveedorRow) {
+    if (insumosVisibles === 0) ultimoProveedorRow.style.display = 'none';
+    else ultimoProveedorRow.style.display = '';
+  }
 }
 
 async function mostrarHistorialInversion() {
@@ -1705,6 +1807,8 @@ function toggleHistorialFecha(fecha) {
 }
 
 export default function Inventario() {
+  const [mostrarTarjetasStats, setMostrarTarjetasStats] = useState(false);
+
   useEffect(() => {
     window.inventario = {
       setTab,
@@ -1747,7 +1851,7 @@ export default function Inventario() {
 
     cargarInventario();
     cargarEstadisticasInventario();
-    setTab('inventario');
+    setTab(tabActiva);
 
     return () => {
       delete window.inventario;
@@ -1759,6 +1863,15 @@ export default function Inventario() {
       <div className="encabezadoTarjeta">
         <h2>Inventario</h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+          <button
+            type="button"
+            className={`boton botonHojitaInventario ${mostrarTarjetasStats ? 'activo' : ''}`}
+            onClick={() => setMostrarTarjetasStats((prev) => !prev)}
+            title={mostrarTarjetasStats ? 'Ocultar tarjetas' : 'Mostrar tarjetas'}
+          >
+            <span className="iconoHojitaInventario">🍃</span>
+            {mostrarTarjetasStats ? 'Ocultar tarjetas' : 'Mostrar tarjetas'}
+          </button>
           <input type="text" className="cajaBusqueda" id="busquedaInventario" placeholder="🔍 Buscar insumo..." onChange={(e) => filtrarInventario(e.target.value)} style={{ width: '220px' }} />
           <button className="boton" onClick={() => abrirModalAgregarInsumo()}>➥ Agregar Insumo</button>
           <button id="btnPendientesInventario" className="boton" onClick={() => mostrarPendientesInventario()}>⏳ Revisar pendientes</button>
@@ -1773,11 +1886,13 @@ export default function Inventario() {
       </div>
 
       <div id="panelInv">
-        <div className="gridEstadisticas" style={{ marginBottom: '15px' }}>
-          <div className="tarjetaEstadistica"><h3 id="totalInsumos">0</h3><p>Total de Insumos</p></div>
-          <div className="tarjetaEstadistica"><h3 id="inversionTotal">$0.00</h3><p>Inversión Total</p></div>
-          <div className="tarjetaEstadistica"><h3 id="inversionRecuperada">$0.00</h3><p>Inversión Recuperada</p></div>
-          <div className="tarjetaEstadistica"><h3 id="inversionNeta">$0.00</h3><p>Inversión Neta</p></div>
+        <div className={`panelTarjetasOcultables ${mostrarTarjetasStats ? 'visible' : 'oculto'}`}>
+          <div className="gridEstadisticas" style={{ marginBottom: '15px' }}>
+            <div className="tarjetaEstadistica"><h3 id="totalInsumos">0</h3><p>Total de Insumos</p></div>
+            <div className="tarjetaEstadistica"><h3 id="inversionTotal">$0.00</h3><p>Inversión Total</p></div>
+            <div className="tarjetaEstadistica"><h3 id="inversionRecuperada">$0.00</h3><p>Inversión Recuperada</p></div>
+            <div className="tarjetaEstadistica"><h3 id="inversionNeta">$0.00</h3><p>Inversión Neta</p></div>
+          </div>
         </div>
         <table>
           <thead>
@@ -1788,7 +1903,7 @@ export default function Inventario() {
       </div>
 
       <div id="panelUt" style={{ display: 'none' }}>
-        <Utensilios />
+        <Utensilios mostrarTarjetasStats={mostrarTarjetasStats} />
       </div>
 
       <div id="panelOc" style={{ display: 'none' }}>
@@ -1894,16 +2009,16 @@ export default function Inventario() {
               <select id="proveedorInsumo" required><option value="">Selecciona proveedor</option></select>
               <select id="unidadInsumo" required>
                 <option value="">Unidad</option>
-                <option value="g">Gramos (g)</option>
-                <option value="kg">Kilogramos (kg)</option>
-                <option value="ml">Mililitros (ml)</option>
-                <option value="l">Litros (l)</option>
-                <option value="pz">Piezas (pz)</option>
                 <option value="cda">Cucharadas (cda)</option>
                 <option value="cdta">Cucharaditas (cdta)</option>
-                <option value="taza">Tazas</option>
-                <option value="oz">Onzas (oz)</option>
                 <option value="go">Gotas (go)</option>
+                <option value="g">Gramos (g)</option>
+                <option value="kg">Kilogramos (kg)</option>
+                <option value="l">Litros (l)</option>
+                <option value="ml">Mililitros (ml)</option>
+                <option value="oz">Onzas (oz)</option>
+                <option value="pz">Piezas (pz)</option>
+                <option value="taza">Tazas</option>
               </select>
               <input id="cantidadInsumo" type="number" step="0.01" min="0" placeholder="Cantidad" required />
               <input id="costoInsumo" type="number" step="0.01" min="0" placeholder="Costo" required />
@@ -1931,16 +2046,16 @@ export default function Inventario() {
             <div className="filaFormulario filaFormulario-UnidadCantidadCosto">
               <select id="editUnidadInsumo" required>
                 <option value="">Unidad</option>
-                <option value="g">Gramos (g)</option>
-                <option value="kg">Kilogramos (kg)</option>
-                <option value="ml">Mililitros (ml)</option>
-                <option value="l">Litros (l)</option>
-                <option value="pz">Piezas (pz)</option>
                 <option value="cda">Cucharadas (cda)</option>
                 <option value="cdta">Cucharaditas (cdta)</option>
-                <option value="taza">Tazas</option>
-                <option value="oz">Onzas (oz)</option>
                 <option value="go">Gotas (go)</option>
+                <option value="g">Gramos (g)</option>
+                <option value="kg">Kilogramos (kg)</option>
+                <option value="l">Litros (l)</option>
+                <option value="ml">Mililitros (ml)</option>
+                <option value="oz">Onzas (oz)</option>
+                <option value="pz">Piezas (pz)</option>
+                <option value="taza">Tazas</option>
               </select>
               <input id="editCantidadInsumo" type="number" step="0.01" min="0" required />
               <input id="editCostoInsumo" type="number" step="0.01" min="0" required />

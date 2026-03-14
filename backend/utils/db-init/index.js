@@ -354,7 +354,8 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       costo_produccion REAL,
       precio_venta REAL,
       ganancia REAL,
-      numero_pedido TEXT
+      numero_pedido TEXT,
+      observaciones TEXT
     )`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS cortesias (
@@ -364,7 +365,26 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       fecha_cortesia TEXT,
       numero_pedido TEXT,
       motivo TEXT,
-      para_quien TEXT
+      para_quien TEXT,
+      observaciones TEXT
+    )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS devoluciones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_venta_original INTEGER,
+      nombre_receta TEXT,
+      cantidad INTEGER,
+      fecha_produccion TEXT,
+      fecha_venta_original TEXT,
+      fecha_devolucion TEXT,
+      costo_produccion REAL,
+      precio_venta REAL,
+      ganancia_original REAL,
+      numero_pedido TEXT,
+      categoria TEXT,
+      motivo TEXT,
+      tipo_devolucion TEXT,
+      observaciones TEXT
     )`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_catalogo (
@@ -423,6 +443,7 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       fecha_nacimiento TEXT,
       direccion_default TEXT,
       forma_pago_preferida TEXT,
+      recibe_promociones INTEGER DEFAULT 0,
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
@@ -554,6 +575,9 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!err && columnas && !columnas.some(col => col.name === "numero_pedido")) {
         bdVentas.run("ALTER TABLE ventas ADD COLUMN numero_pedido TEXT");
       }
+      if (!err && columnas && !columnas.some(col => col.name === "observaciones")) {
+        bdVentas.run("ALTER TABLE ventas ADD COLUMN observaciones TEXT");
+      }
     });
 
     bdVentas.all("PRAGMA table_info(cortesias)", (err, columnas) => {
@@ -567,8 +591,29 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
         if (!columnas.some(col => col.name === "para_quien")) {
           bdVentas.run("ALTER TABLE cortesias ADD COLUMN para_quien TEXT");
         }
+        if (!columnas.some(col => col.name === "observaciones")) {
+          bdVentas.run("ALTER TABLE cortesias ADD COLUMN observaciones TEXT");
+        }
       }
     });
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS devoluciones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_venta_original INTEGER,
+      nombre_receta TEXT,
+      cantidad INTEGER,
+      fecha_produccion TEXT,
+      fecha_venta_original TEXT,
+      fecha_devolucion TEXT,
+      costo_produccion REAL,
+      precio_venta REAL,
+      ganancia_original REAL,
+      numero_pedido TEXT,
+      categoria TEXT,
+      motivo TEXT,
+      tipo_devolucion TEXT,
+      observaciones TEXT
+    )`);
 
     bdVentas.all("PRAGMA table_info(tienda_catalogo)", (err, columnas) => {
       if (err || !Array.isArray(columnas)) return;
@@ -631,6 +676,9 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       }
       if (!columnas.some((col) => col.name === "fecha_nacimiento")) {
         bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN fecha_nacimiento TEXT");
+      }
+      if (!columnas.some((col) => col.name === "recibe_promociones")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN recibe_promociones INTEGER DEFAULT 0");
       }
     });
   });

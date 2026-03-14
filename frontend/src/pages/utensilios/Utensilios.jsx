@@ -12,7 +12,7 @@ function escaparParaInlineJs(valor) {
     .replace(/\r?\n/g, ' ');
 }
 
-export default function Utensilios() {
+export default function Utensilios({ mostrarTarjetasStats = false }) {
   useEffect(() => {
     window.utensilios = {
       cargarUtensilios,
@@ -38,11 +38,13 @@ export default function Utensilios() {
           <h2>Estadísticas de Utensilios</h2>
           <button className="boton" onClick={() => mostrarHistorialAgregadoUtensilios()}>📊 Historial Agrupado</button>
         </div>
-        <div className="gridEstadisticas">
-          <div className="tarjetaEstadistica"><h3 id="inversionTotalUtensilios">$0.00</h3><p>Inversión Total</p></div>
-          <div className="tarjetaEstadistica"><h3 id="inversionRecuperadaUtensilios">$0.00</h3><p>Inversión Recuperada</p></div>
-          <div className="tarjetaEstadistica"><h3 id="inversionNetaUtensilios">$0.00</h3><p>Inversión Neta</p></div>
-          <div className="tarjetaEstadistica"><h3 id="totalUtensilios">0</h3><p>Total de Utensilios</p></div>
+        <div className={`panelTarjetasOcultables ${mostrarTarjetasStats ? 'visible' : 'oculto'}`}>
+          <div className="gridEstadisticas">
+            <div className="tarjetaEstadistica"><h3 id="inversionTotalUtensilios">$0.00</h3><p>Inversión Total</p></div>
+            <div className="tarjetaEstadistica"><h3 id="inversionRecuperadaUtensilios">$0.00</h3><p>Inversión Recuperada</p></div>
+            <div className="tarjetaEstadistica"><h3 id="inversionNetaUtensilios">$0.00</h3><p>Inversión Neta</p></div>
+            <div className="tarjetaEstadistica"><h3 id="totalUtensilios">0</h3><p>Total de Utensilios</p></div>
+          </div>
         </div>
       </div>
 

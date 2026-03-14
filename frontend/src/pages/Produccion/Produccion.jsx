@@ -22,6 +22,7 @@ function formatearMoneda(valor) {
 export default function Produccion() {
   const [produccionData, setProduccionData] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [mostrarTarjetasStats, setMostrarTarjetasStats] = useState(false);
   const [modalHistorialAbierto, setModalHistorialAbierto] = useState(false);
   const [historialData, setHistorialData] = useState({ produccion: [], ventasCortesias: [] });
   const [pestanaHistorial, setPestanaHistorial] = useState('produccion');
@@ -165,7 +166,7 @@ export default function Produccion() {
     await ejecutarEliminacion(receta, cantidad);
   }
 
-  function abrirModalVenta(receta) {
+  async function abrirModalVenta(receta) {
     const historial = (Array.isArray(receta?.historial) ? receta.historial : [])
       .filter((l) => Number(l?.cantidad || 0) > 0)
       .sort((a, b) => String(a?.fecha_produccion || '').localeCompare(String(b?.fecha_produccion || '')) || (Number(a?.id || 0) - Number(b?.id || 0)));
@@ -178,9 +179,21 @@ export default function Produccion() {
 
     ventaPendiente = { receta, historial, disponibles };
     const input = document.getElementById('numeroPedidoVenta');
-    if (input) input.value = '';
+    if (input) {
+      input.value = '';
+      input.readOnly = true;
+    }
     const inputCantidad = document.getElementById('cantidadVentaPiezas');
     if (inputCantidad) inputCantidad.value = String(Math.min(1, disponibles));
+    const inputObservaciones = document.getElementById('observacionesVenta');
+    if (inputObservaciones) inputObservaciones.value = '';
+
+    try {
+      const data = await fetchAPIJSON('/ventas/siguiente-codigo?tipo=directa');
+      if (input) input.value = String(data?.codigo || '').trim();
+    } catch {
+      if (input) input.value = '';
+    }
     abrirModal('modalVentaPedido');
   }
 
@@ -190,6 +203,7 @@ export default function Produccion() {
 
     const numeroPedido = String(document.getElementById('numeroPedidoVenta')?.value || '').trim();
     const cantidadSolicitada = Number(document.getElementById('cantidadVentaPiezas')?.value || 0);
+    const observaciones = String(document.getElementById('observacionesVenta')?.value || '').trim();
     cerrarModal('modalVentaPedido');
 
     const { receta, historial, disponibles } = ventaPendiente;
@@ -210,13 +224,16 @@ export default function Produccion() {
       const cantidadLote = Number(lote?.cantidad || 0);
       if (cantidadLote <= 0) continue;
       const usar = Math.min(restante, cantidadLote);
+      const costoLote = Number(lote?.costo_produccion || 0);
+      const costoUsar = cantidadLote > 0 ? (costoLote * (usar / cantidadLote)) : 0;
       await registrarVenta(
         Number(lote?.id || 0),
         String(receta?.nombre_receta || ''),
         usar,
-        Number(lote?.costo_produccion || 0),
-        Number(lote?.precio_venta || receta?.precio_sugerido || 0),
-        numeroPedido
+        costoUsar,
+        Number(receta?.precio_sugerido || lote?.precio_venta || 0),
+        numeroPedido,
+        observaciones
       );
       restante -= usar;
     }
@@ -225,7 +242,7 @@ export default function Produccion() {
     mostrarNotificacion('Venta registrada correctamente', 'exito');
   }
 
-  async function registrarVenta(idProduccion, nombreReceta, cantidad, costoProduccion, precioVenta, numeroPedido) {
+  async function registrarVenta(idProduccion, nombreReceta, cantidad, costoProduccion, precioVenta, numeroPedido, observaciones) {
     try {
       await fetchAPIJSON('/ventas', {
         method: 'POST',
@@ -235,7 +252,8 @@ export default function Produccion() {
           cantidad,
           costo_produccion: costoProduccion,
           precio_venta: precioVenta,
-          numero_pedido: numeroPedido
+          numero_pedido: numeroPedido,
+          observaciones
         }
       });
     } catch (error) {
@@ -244,7 +262,7 @@ export default function Produccion() {
     }
   }
 
-  function abrirModalCortesia(receta) {
+  async function abrirModalCortesia(receta) {
     const historial = (Array.isArray(receta?.historial) ? receta.historial : [])
       .filter((l) => Number(l?.cantidad || 0) > 0)
       .sort((a, b) => String(a?.fecha_produccion || '').localeCompare(String(b?.fecha_produccion || '')) || (Number(a?.id || 0) - Number(b?.id || 0)));
@@ -260,10 +278,22 @@ export default function Produccion() {
     const cantidad = document.getElementById('cantidadCortesiaPiezas');
     const motivo = document.getElementById('motivoCortesia');
     const paraQuien = document.getElementById('paraQuienCortesia');
-    if (pedido) pedido.value = '';
+    const observaciones = document.getElementById('observacionesCortesia');
+    if (pedido) {
+      pedido.value = '';
+      pedido.readOnly = true;
+    }
     if (cantidad) cantidad.value = String(Math.min(1, disponibles));
     if (motivo) motivo.value = '';
     if (paraQuien) paraQuien.value = '';
+    if (observaciones) observaciones.value = '';
+
+    try {
+      const data = await fetchAPIJSON('/cortesias/siguiente-codigo');
+      if (pedido) pedido.value = String(data?.codigo || '').trim();
+    } catch {
+      if (pedido) pedido.value = '';
+    }
     abrirModal('modalCortesia');
   }
 
@@ -275,9 +305,10 @@ export default function Produccion() {
     const cantidadSolicitada = Number(document.getElementById('cantidadCortesiaPiezas')?.value || 0);
     const motivo = String(document.getElementById('motivoCortesia')?.value || '').trim();
     const paraQuien = String(document.getElementById('paraQuienCortesia')?.value || '').trim();
+    const observaciones = String(document.getElementById('observacionesCortesia')?.value || '').trim();
 
-    if (!numeroPedido || !motivo) {
-      mostrarNotificacion('Por favor completa número de pedido y motivo', 'error');
+    if (!motivo) {
+      mostrarNotificacion('Por favor completa el motivo', 'error');
       return;
     }
 
@@ -306,7 +337,8 @@ export default function Produccion() {
         usar,
         numeroPedido,
         motivo,
-        paraQuien
+        paraQuien,
+        observaciones
       );
       restante -= usar;
     }
@@ -315,7 +347,7 @@ export default function Produccion() {
     mostrarNotificacion('Cortesía registrada correctamente', 'exito');
   }
 
-  async function registrarCortesia(idProduccion, nombreReceta, cantidad, numeroPedido, motivo, paraQuien) {
+  async function registrarCortesia(idProduccion, nombreReceta, cantidad, numeroPedido, motivo, paraQuien, observaciones) {
     try {
       await fetchAPIJSON(`/cortesia/${idProduccion}`, {
         method: 'POST',
@@ -324,7 +356,8 @@ export default function Produccion() {
           cantidad,
           numero_pedido: numeroPedido,
           motivo,
-          para_quien: paraQuien
+          para_quien: paraQuien,
+          observaciones
         }
       });
       window.dispatchEvent(new CustomEvent('cortesiasActualizadas'));
@@ -395,6 +428,15 @@ export default function Produccion() {
         <div className="encabezadoTarjeta">
           <h2>Registro de Producción</h2>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className={`boton botonHojitaProduccion ${mostrarTarjetasStats ? 'activo' : ''}`}
+              onClick={() => setMostrarTarjetasStats((prev) => !prev)}
+              title={mostrarTarjetasStats ? 'Ocultar tarjetas' : 'Mostrar tarjetas'}
+            >
+              <span className="iconoHojitaProduccion">🍃</span>
+              {mostrarTarjetasStats ? 'Ocultar tarjetas' : 'Mostrar tarjetas'}
+            </button>
             <input
               type="text"
               className="cajaBusqueda"
@@ -405,23 +447,25 @@ export default function Produccion() {
           </div>
         </div>
 
-        <div className="produccionStatsGrid">
-          <article className="produccionStatCard">
-            <h4>Piezas en producción</h4>
-            <p>{estadisticasGenerales.piezas.toFixed(2)}</p>
-          </article>
-          <article className="produccionStatCard">
-            <h4>Costo de producción</h4>
-            <p>{formatearMoneda(estadisticasGenerales.costoProduccion)}</p>
-          </article>
-          <article className="produccionStatCard">
-            <h4>Valor a precio de venta</h4>
-            <p>{formatearMoneda(estadisticasGenerales.valorVenta)}</p>
-          </article>
-          <article className="produccionStatCard">
-            <h4>Utilidad estimada</h4>
-            <p>{formatearMoneda(estadisticasGenerales.utilidad)}</p>
-          </article>
+        <div className={`panelTarjetasOcultablesProduccion ${mostrarTarjetasStats ? 'visible' : 'oculto'}`}>
+          <div className="produccionStatsGrid">
+            <article className="produccionStatCard">
+              <h4>Piezas en producción</h4>
+              <p>{estadisticasGenerales.piezas.toFixed(2)}</p>
+            </article>
+            <article className="produccionStatCard">
+              <h4>Costo de producción</h4>
+              <p>{formatearMoneda(estadisticasGenerales.costoProduccion)}</p>
+            </article>
+            <article className="produccionStatCard">
+              <h4>Valor a precio de venta</h4>
+              <p>{formatearMoneda(estadisticasGenerales.valorVenta)}</p>
+            </article>
+            <article className="produccionStatCard">
+              <h4>Utilidad estimada</h4>
+              <p>{formatearMoneda(estadisticasGenerales.utilidad)}</p>
+            </article>
+          </div>
         </div>
 
         <div className="produccionCardsGrid">
@@ -437,6 +481,9 @@ export default function Produccion() {
               const piezasProducidas = Number(receta?.piezas_producidas || 0);
               const piezasFaltantesPedido = Number(receta?.piezas_faltantes_pedido || 0);
               const piezasDisponibles = Number(receta?.piezas_disponibles || 0);
+              const historialActivo = (Array.isArray(receta?.historial) ? receta.historial : []).filter((l) => Number(l?.cantidad || 0) > 0);
+              const costoTotalPiezasProducidas = historialActivo.reduce((acc, lote) => acc + (Number(lote?.costo_produccion || 0)), 0);
+              const costoPorPiezaProducida = piezasProducidas > 0 ? (costoTotalPiezasProducidas / piezasProducidas) : 0;
               const loteVenta = receta?.lote_venta || null;
 
               return (
@@ -452,6 +499,8 @@ export default function Produccion() {
                   <div className="produccionCardStats">
                     <div><strong>Producidas</strong><span>{piezasProducidas.toFixed(2)}</span></div>
                     <div><strong>Faltantes pedido</strong><span>{piezasFaltantesPedido.toFixed(2)}</span></div>
+                    <div><strong>Costo por pieza</strong><span>{formatearMoneda(costoPorPiezaProducida)}</span></div>
+                    <div><strong>Costo total producido</strong><span>{formatearMoneda(costoTotalPiezasProducidas)}</span></div>
                     <div><strong>Precio sugerido</strong><span>{formatearMoneda(precioSugerido)}</span></div>
                     <div><strong>Caducidad lote activo</strong><span>{loteVenta?.fecha_caducidad ? formatearFechaCorta(loteVenta.fecha_caducidad) : '-'}</span></div>
                   </div>
@@ -505,7 +554,9 @@ export default function Produccion() {
             <label htmlFor="cantidadVentaPiezas">Piezas a vender</label>
             <input id="cantidadVentaPiezas" type="number" min="0.01" step="0.01" required />
             <label htmlFor="numeroPedidoVenta">Número de pedido</label>
-            <input id="numeroPedidoVenta" type="text" placeholder="Opcional, si se deja vacío se genera VECHI..." />
+            <input id="numeroPedidoVenta" type="text" readOnly />
+            <label htmlFor="observacionesVenta">Observaciones</label>
+            <input id="observacionesVenta" type="text" placeholder="Opcional" />
             <button className="boton botonExito" type="submit">Confirmar</button>
           </form>
         </div>
@@ -521,11 +572,13 @@ export default function Produccion() {
             <label htmlFor="cantidadCortesiaPiezas">Piezas a cortesía</label>
             <input id="cantidadCortesiaPiezas" type="number" min="0.01" step="0.01" required />
             <label htmlFor="numeroPedidoCortesia">Número de pedido</label>
-            <input id="numeroPedidoCortesia" type="text" required />
+            <input id="numeroPedidoCortesia" type="text" readOnly />
             <label htmlFor="motivoCortesia">Motivo</label>
             <input id="motivoCortesia" type="text" required />
             <label htmlFor="paraQuienCortesia">Para quién</label>
             <input id="paraQuienCortesia" type="text" />
+            <label htmlFor="observacionesCortesia">Observaciones</label>
+            <input id="observacionesCortesia" type="text" placeholder="Opcional" />
             <button className="boton botonExito" type="submit">Confirmar</button>
           </form>
         </div>

@@ -35,6 +35,48 @@
   margin: 10px 0 14px 0;
 }
 
+.botonHojitaProduccion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iconoHojitaProduccion {
+  display: inline-block;
+  transition: transform 0.45s ease;
+}
+
+.botonHojitaProduccion.activo .iconoHojitaProduccion {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.panelTarjetasOcultablesProduccion {
+  overflow: hidden;
+  transform-origin: top center;
+  transition: max-height 0.45s ease, opacity 0.35s ease, transform 0.45s ease, margin 0.35s ease;
+}
+
+.panelTarjetasOcultablesProduccion.oculto {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-18px) scale(0.98);
+  margin-bottom: 0;
+  pointer-events: none;
+}
+
+.panelTarjetasOcultablesProduccion.visible {
+  max-height: 420px;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  animation: tarjetasArrojadasProduccion 0.42s ease;
+}
+
+@keyframes tarjetasArrojadasProduccion {
+  0% { opacity: 0; transform: translateY(-24px) scale(0.96); }
+  70% { opacity: 1; transform: translateY(4px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .produccionStatCard {
   border: 1px solid #ded6ca;
   border-radius: 12px;

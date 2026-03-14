@@ -5,7 +5,8 @@ import {
   removerAlertaPorClave,
   moverAlertaAHistorial,
   cambiarPestanaAlertas,
-  actualizarUIAlertas
+  actualizarUIAlertas,
+  obtenerPestanaAlertasActual
 } from '../../utils/notificaciones.jsx';
 
 export default function Alertas() {
@@ -19,7 +20,7 @@ export default function Alertas() {
       actualizarUIAlertas
     };
     actualizarUIAlertas();
-    cambiarPestanaAlertas('activas');
+    cambiarPestanaAlertas(obtenerPestanaAlertasActual());
   }, []);
 
   return (

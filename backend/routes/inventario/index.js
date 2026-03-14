@@ -1,10 +1,7 @@
-import { transmitir, normalizarTextoBusqueda } from "../../utils/index.js";
+import { transmitir, normalizarTextoBusqueda, normalizarUnidad } from "../../utils/index.js";
 
 function normalizarUnidadInsumo(unidad) {
-  const u = String(unidad || '').toLowerCase().trim();
-  if (!u) return '';
-  if (u === 'go' || u === 'gota' || u === 'gotas') return 'gotas';
-  return u;
+  return normalizarUnidad(unidad);
 }
 
 function dbRun(db, sql, params = []) {
@@ -28,7 +25,7 @@ function dbAll(db, sql, params = []) {
   });
 }
 
-export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
+export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bdVentas = null) {
   const sincronizarIngredienteReceta = (idInsumo, nombre, proveedor, callback = () => {}) => {
     if (!bdRecetas) {
       callback(0);
@@ -72,26 +69,39 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
     });
   });
 
-  app.get('/inventario/estadisticas', (req, res) => {
-    bdInventario.get(
-      'SELECT COUNT(*) as total_insumos, COALESCE(SUM(costo_total),0) as inversion_total FROM inventario',
-      (err, inv) => {
-        bdInventario.get(
-          'SELECT COALESCE(SUM(costo_recuperado),0) as inversion_recuperada FROM inversion_recuperada',
-          (err2, rec) => {
-            const inversionTotal = inv ? inv.inversion_total : 0;
-            const inversionRecuperada = rec ? rec.inversion_recuperada : 0;
-            const inversionNeta = inversionTotal - inversionRecuperada;
-            res.json({
-              total_insumos: inv ? inv.total_insumos : 0,
-              inversion_total: inversionTotal,
-              inversion_recuperada: inversionRecuperada,
-              inversion_neta: inversionNeta
-            });
-          }
+  app.get('/inventario/estadisticas', async (req, res) => {
+    try {
+      const inv = await dbGet(
+        bdInventario,
+        'SELECT COUNT(*) as total_insumos, COALESCE(SUM(costo_total),0) as inversion_total FROM inventario'
+      );
+
+      let inversionRecuperada = 0;
+      if (bdVentas) {
+        const recVentas = await dbGet(
+          bdVentas,
+          'SELECT COALESCE(SUM(COALESCE(precio_venta,0) * COALESCE(cantidad,0)),0) as inversion_recuperada FROM ventas'
         );
+        inversionRecuperada = Number(recVentas?.inversion_recuperada || 0);
+      } else {
+        const recLegacy = await dbGet(
+          bdInventario,
+          'SELECT COALESCE(SUM(costo_recuperado),0) as inversion_recuperada FROM inversion_recuperada'
+        );
+        inversionRecuperada = Number(recLegacy?.inversion_recuperada || 0);
       }
-    );
+
+      const inversionTotal = Number(inv?.inversion_total || 0);
+      const inversionNeta = inversionTotal - inversionRecuperada;
+      res.json({
+        total_insumos: Number(inv?.total_insumos || 0),
+        inversion_total: inversionTotal,
+        inversion_recuperada: inversionRecuperada,
+        inversion_neta: inversionNeta
+      });
+    } catch {
+      res.status(500).json({ error: 'Error calculando estadísticas de inventario' });
+    }
   });
 
   app.get('/inventario/lista-insumos-ordenes', (req, res) => {
@@ -483,7 +493,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
          VALUES (?,?,?,?,?,?,?,?,1)`,
         [codigoPendiente, nombre, String(proveedor || '').trim(), unidad || '', 0, 0, 0, 0],
         function () {
-          transmitir({ tipo: 'inventario_actualizado' });
+          transmitir({ tipo: 'inventario_actualizado', accion: 'agregado', nombre_insumo: String(nombre || '').trim() });
           res.json({ ok: true, id: this.lastID });
         }
       );
@@ -508,7 +518,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
               'INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)',
               [idInv, new Date().toISOString(), cantidad, costo],
               () => {
-                transmitir({ tipo: 'inventario_actualizado' });
+                transmitir({ tipo: 'inventario_actualizado', accion: 'agregado', nombre_insumo: String(nombre || '').trim(), cantidad });
                 res.json({ ok: true });
               }
             );
@@ -528,7 +538,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
               'INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)',
               [insumo.id, new Date().toISOString(), cantidad, costo],
               () => {
-                transmitir({ tipo: 'inventario_actualizado' });
+                transmitir({ tipo: 'inventario_actualizado', accion: 'aumentado', nombre_insumo: String(nombre || insumo?.nombre || '').trim(), cantidad });
                 res.json({ ok: true });
               }
             );
@@ -559,7 +569,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
             'INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)',
             [id, new Date().toISOString(), cantidad, costo],
             () => {
-              transmitir({ tipo: 'inventario_actualizado' });
+              transmitir({ tipo: 'inventario_actualizado', accion: 'aumentado', nombre_insumo: String(insumo?.nombre || '').trim(), cantidad });
               res.json({ ok: true });
             }
           );
@@ -1091,7 +1101,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
         const proveedorFinal = String(proveedor || '').trim();
 
         const finalizar = () => {
-          transmitir({ tipo: 'inventario_actualizado' });
+          transmitir({ tipo: 'inventario_actualizado', accion: 'actualizado', nombre_insumo: nombreFinal || String(insumo?.nombre || '').trim() });
           res.json({ ok: true });
         };
 
@@ -1116,7 +1126,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null) {
       const continuarEliminacion = () => {
         bdInventario.run('DELETE FROM inventario WHERE id=?', [id], () => {
           bdInventario.run('DELETE FROM historial_inventario WHERE id_inventario=?', [id], () => {
-            transmitir({ tipo: 'inventario_actualizado' });
+            transmitir({ tipo: 'inventario_actualizado', accion: 'eliminado', nombre_insumo: String(insumo?.nombre || '').trim() });
             res.json({ ok: true });
           });
         });

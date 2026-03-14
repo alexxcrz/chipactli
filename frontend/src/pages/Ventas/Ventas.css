@@ -21,3 +21,172 @@
   font-size: 22px;
   font-weight: 800;
 }
+
+.flatpickr-day.chipactli-dia-con-registro {
+  position: relative;
+}
+
+.flatpickr-day.chipactli-dia-con-registro::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #2f7f52;
+}
+
+.flatpickr-day.chipactli-dia-con-registro-ventas::after {
+  background: #2f7f52;
+}
+
+.flatpickr-day.chipactli-dia-con-registro-cortesias::after {
+  background: #b08418;
+}
+
+.flatpickr-day.chipactli-dia-con-registro-devoluciones::after {
+  background: #b23a3a;
+}
+
+.ventasGraficaCard {
+  border: 2px solid #2a2a2a;
+  border-radius: 24px;
+  background: #ffffff;
+}
+
+.ventasGraficaHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.ventasIndicadorTendencia {
+  color: #2f7f52;
+  font-weight: 800;
+  font-size: 12px;
+  background: #eef7f1;
+  border: 1px solid #c6ddce;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.ventasGraficaSvg {
+  width: 100%;
+  height: auto;
+  min-height: 220px;
+  display: block;
+  border-radius: 14px;
+}
+
+.ventasGraficaLeyenda {
+  margin-top: 10px;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #4d6159;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ventasGraficaLeyenda .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.ventasGraficaLeyenda .dot.ingresos {
+  background: #2f7f52;
+}
+
+.ventasGraficaLeyenda .dot.ganancia {
+  background: #8aa34b;
+}
+
+.ventasGraficaLeyenda .dot.compras {
+  background: #b67c2a;
+}
+
+.ventasBarrasWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.ventasBarraFila {
+  display: grid;
+  grid-template-columns: minmax(110px, 230px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.ventasBarraEtiqueta {
+  color: #2e4f3f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ventasBarraTrack {
+  height: 12px;
+  border-radius: 999px;
+  background: #e6eee9;
+  border: 1px solid #d2ddd6;
+  overflow: hidden;
+}
+
+.ventasBarraFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4a7c59, #7ca652);
+  transition: width 0.45s ease;
+}
+
+.ventasBarraValor {
+  min-width: 36px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 800;
+  color: #355644;
+}
+
+.ventasGraficaVacio {
+  font-size: 12px;
+  color: #6d7f76;
+  padding: 8px 0;
+}
+
+.resumenDetalleBtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resumenDetalleBtn:hover span {
+  color: #2f7f52;
+  text-decoration: underline;
+}
+
+.resumenDetalleLista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.resumenDetalleLista p {
+  margin: 0;
+  color: #2f2f2f;
+  font-size: 13px;
+  line-height: 1.5;
+}

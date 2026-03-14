@@ -667,7 +667,7 @@ function cerrarBase(db) {
 
 // Registrar rutas
 registrarRutasUsuarios(app, bdAdminAuth);
-registrarRutasInventario(app, bdInventarioRutas, bdRecetasRutas);
+registrarRutasInventario(app, bdInventarioRutas, bdRecetasRutas, bdVentasRutas);
 registrarRutasUtensilios(app, bdInventarioRutas);
 registrarRutasCategorias(app, bdRecetasRutas);
 registrarRutasRecetas(app, bdRecetasRutas, bdInventarioRutas);
@@ -1045,6 +1045,25 @@ function normalizarEntradaImportacionTodo(payload) {
   return normalizado;
 }
 
+function buscarListaLegacyPorTabla(payload, tabla) {
+  const nombre = String(tabla || '').trim();
+  if (!nombre) return [];
+
+  const candidatos = [
+    payload?.[nombre],
+    payload?.datos?.[nombre],
+    payload?.backup?.[nombre],
+    payload?.contenido?.[nombre],
+    payload?.datos?.backup?.[nombre]
+  ];
+
+  for (const candidato of candidatos) {
+    if (Array.isArray(candidato)) return candidato;
+  }
+
+  return [];
+}
+
 function escaparIdentificadorSql(nombre) {
   return `"${String(nombre || '').replaceAll('"', '""')}"`;
 }
@@ -1136,12 +1155,14 @@ app.post('/api/importar/todo', async (req, res) => {
   try {
     for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
       const origenDb = dbsEntrada[nombreDb];
-      const tablasEntrada = origenDb?.tablas || null;
-      if (!tablasEntrada || typeof tablasEntrada !== 'object') continue;
+      const tablasEntrada = (origenDb?.tablas && typeof origenDb.tablas === 'object') ? origenDb.tablas : {};
 
       const tablasExistentes = await listarTablasUsuario(db);
-      const setTablasExistentes = new Set(tablasExistentes);
-      const tablasObjetivo = Object.keys(tablasEntrada).filter((t) => setTablasExistentes.has(t));
+      const tablasObjetivo = tablasExistentes.filter((tabla) => {
+        if (Object.prototype.hasOwnProperty.call(tablasEntrada, tabla)) return true;
+        const legacy = buscarListaLegacyPorTabla(payload, tabla);
+        return Array.isArray(legacy) && legacy.length > 0;
+      });
 
       if (!tablasObjetivo.length) continue;
 
@@ -1152,7 +1173,9 @@ app.post('/api/importar/todo', async (req, res) => {
 
       try {
         for (const tabla of tablasObjetivo) {
-          const rows = toArrayMaybe(tablasEntrada[tabla]);
+          const rows = Object.prototype.hasOwnProperty.call(tablasEntrada, tabla)
+            ? toArrayMaybe(tablasEntrada[tabla])
+            : toArrayMaybe(buscarListaLegacyPorTabla(payload, tabla));
           const columnasExistentes = await obtenerColumnasTabla(db, tabla);
           const setColumnas = new Set(columnasExistentes);
 

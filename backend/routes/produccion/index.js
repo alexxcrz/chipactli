@@ -1,4 +1,4 @@
-import { transmitir, convertirCantidad } from "../../utils/index.js";
+import { transmitir, convertirCantidadDetallada } from "../../utils/index.js";
 
 function dbGet(db, sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -38,6 +38,20 @@ function claveReceta(nombre) {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function redondearPrecioVenta(valor) {
+  const base = Number(valor) || 0;
+  if (base <= 0) return 0;
+  return Math.ceil(base / 5) * 5;
+}
+
+function convertirCantidadValidada(cantidad, unidadOrigen, unidadDestino) {
+  const conversion = convertirCantidadDetallada(cantidad, unidadOrigen, unidadDestino);
+  if (!conversion?.compatible) return null;
+  const convertido = Number(conversion?.valor);
+  if (!Number.isFinite(convertido) || convertido <= 0) return null;
+  return convertido;
 }
 
 export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventario, bdVentas = null) {
@@ -143,6 +157,7 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       );
 
       const planDescuentos = [];
+      const incompatibilidades = [];
       if (receta?.id) {
         const ingredientes = await dbAll(
           bdRecetas,
@@ -157,8 +172,18 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
           const insumo = await dbGet(bdInventario, "SELECT * FROM inventario WHERE id=?", [idInsumo]);
           if (!insumo) continue;
 
-          const requerido = convertirCantidad((Number(ing?.cantidad) || 0) * cantidadProduccion, ing?.unidad, insumo?.unidad);
-          if (!Number.isFinite(requerido) || requerido <= 0) continue;
+          const unidadReceta = String(ing?.unidad || '').trim();
+          const unidadInsumo = String(insumo?.unidad || '').trim();
+          const requerido = convertirCantidadValidada((Number(ing?.cantidad) || 0) * cantidadProduccion, unidadReceta, unidadInsumo);
+          if (!Number.isFinite(requerido) || requerido <= 0) {
+            incompatibilidades.push({
+              id_insumo: idInsumo,
+              nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              unidad_receta: unidadReceta,
+              unidad_inventario: unidadInsumo
+            });
+            continue;
+          }
 
           const disponible = Number(insumo?.cantidad_disponible) || 0;
           const faltante = requerido > disponible ? (requerido - disponible) : 0;
@@ -173,6 +198,13 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
             faltante
           });
         }
+      }
+
+      if (incompatibilidades.length) {
+        return res.status(400).json({
+          error: "Unidades incompatibles entre receta e inventario",
+          incompatibilidades
+        });
       }
 
       const faltantes = planDescuentos.filter((item) => item.faltante > 0);
@@ -190,15 +222,17 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         });
       }
 
+      const precioVentaFinal = redondearPrecioVenta(precio_venta);
+
       const insertProd = await dbRun(
         bdProduccion,
         `INSERT INTO produccion (nombre_receta, cantidad, fecha_produccion, costo_produccion, precio_venta)
          VALUES (?,?,?,?,?)`,
-        [nombreReceta, cantidadProduccion, fechaNow, costo_produccion, precio_venta]
+        [nombreReceta, cantidadProduccion, fechaNow, costo_produccion, precioVentaFinal]
       );
 
       if (receta?.id) {
-        const precioVentaNumero = Number(precio_venta) || 0;
+        const precioVentaNumero = Number(precioVentaFinal) || 0;
         await dbRun(bdRecetas, "UPDATE recetas SET tienda_precio_publico=? WHERE id=?", [precioVentaNumero, receta.id]).catch(() => {});
       }
 
@@ -233,9 +267,9 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       }
 
       if (descuentosAplicados.length > 0) {
-        transmitir({ tipo: "inventario_actualizado" });
+        transmitir({ tipo: "inventario_actualizado", accion: "descontado", nombre_receta: nombreReceta, cantidad: cantidadProduccion });
       }
-      transmitir({ tipo: "produccion_actualizado" });
+      transmitir({ tipo: "produccion_actualizado", accion: "registrada", nombre_receta: nombreReceta, cantidad: cantidadProduccion });
       if (descuentosAplicados.length > 0) {
         transmitir({ tipo: "produccion_descuento", receta: nombreReceta, cantidad: cantidadProduccion, descuentos: descuentosAplicados });
       }
@@ -274,6 +308,7 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       const fechaNow = new Date().toISOString();
       const produccionesPlan = [];
       const requeridosMap = new Map();
+      const incompatibilidades = [];
 
       for (const item of items) {
         const recetaNombre = String(item?.receta_nombre || "").trim();
@@ -298,8 +333,19 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
           const insumo = await dbGet(bdInventario, "SELECT * FROM inventario WHERE id=?", [idInsumo]);
           if (!insumo) continue;
 
-          const requerido = convertirCantidad((Number(ing?.cantidad) || 0) * cantidadTotalReceta, ing?.unidad, insumo?.unidad);
-          if (!Number.isFinite(requerido) || requerido <= 0) continue;
+          const unidadReceta = String(ing?.unidad || '').trim();
+          const unidadInsumo = String(insumo?.unidad || '').trim();
+          const requerido = convertirCantidadValidada((Number(ing?.cantidad) || 0) * cantidadTotalReceta, unidadReceta, unidadInsumo);
+          if (!Number.isFinite(requerido) || requerido <= 0) {
+            incompatibilidades.push({
+              receta: recetaNombre,
+              id_insumo: idInsumo,
+              nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              unidad_receta: unidadReceta,
+              unidad_inventario: unidadInsumo
+            });
+            continue;
+          }
 
           const existente = requeridosMap.get(idInsumo);
           if (existente) {
@@ -330,6 +376,13 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
           costo_produccion: Number(item?.costo_produccion) || 0,
           precio_venta: Number(item?.precio_venta) || 0,
           descuentos: descuentosReceta
+        });
+      }
+
+      if (incompatibilidades.length) {
+        return res.status(400).json({
+          error: "Unidades incompatibles entre receta e inventario",
+          incompatibilidades
         });
       }
 
@@ -399,8 +452,18 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         );
       }
 
-      transmitir({ tipo: "inventario_actualizado" });
-      transmitir({ tipo: "produccion_actualizado" });
+      transmitir({
+        tipo: "inventario_actualizado",
+        accion: "descontado",
+        paquete: String(req.body?.nombre_paquete || nombrePaquete || "").trim() || `Paquete #${idPaquete}`,
+        cantidad: cantidadPaquetes
+      });
+      transmitir({
+        tipo: "produccion_actualizado",
+        accion: "registrada",
+        paquete: String(req.body?.nombre_paquete || nombrePaquete || "").trim() || `Paquete #${idPaquete}`,
+        cantidad: totalPiezas
+      });
       transmitir({
         tipo: "produccion_descuento",
         paquete: String(req.body?.nombre_paquete || nombrePaquete || "").trim() || `Paquete #${idPaquete}`,
@@ -600,8 +663,20 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
             const insumo = await dbGet(bdInventario, "SELECT * FROM inventario WHERE id=?", [idInsumo]);
             if (!insumo) continue;
 
-            const devolver = convertirCantidad((Number(ing?.cantidad) || 0) * cantidadProduccion, ing?.unidad, insumo?.unidad);
-            if (!Number.isFinite(devolver) || devolver <= 0) continue;
+            const unidadReceta = String(ing?.unidad || '').trim();
+            const unidadInsumo = String(insumo?.unidad || '').trim();
+            const devolver = convertirCantidadValidada((Number(ing?.cantidad) || 0) * cantidadProduccion, unidadReceta, unidadInsumo);
+            if (!Number.isFinite(devolver) || devolver <= 0) {
+              return res.status(400).json({
+                error: "No se pudo revertir producción por unidades incompatibles",
+                detalle: {
+                  id_insumo: idInsumo,
+                  nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+                  unidad_receta: unidadReceta,
+                  unidad_inventario: unidadInsumo
+                }
+              });
+            }
 
             const disponibleActual = Number(insumo?.cantidad_disponible) || 0;
             const totalActual = Number(insumo?.cantidad_total) || 0;
@@ -635,8 +710,18 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       await dbRun(bdProduccion, "DELETE FROM produccion_descuentos WHERE id_produccion=?", [idProduccion]);
       await dbRun(bdProduccion, "DELETE FROM produccion WHERE id=?", [idProduccion]);
 
-      transmitir({ tipo: "inventario_actualizado" });
-      transmitir({ tipo: "produccion_actualizado" });
+      transmitir({
+        tipo: "inventario_actualizado",
+        accion: "devuelto",
+        nombre_receta: String(produccion?.nombre_receta || "").trim(),
+        cantidad: Number(produccion?.cantidad || 0)
+      });
+      transmitir({
+        tipo: "produccion_actualizado",
+        accion: "eliminada",
+        nombre_receta: String(produccion?.nombre_receta || "").trim(),
+        cantidad: Number(produccion?.cantidad || 0)
+      });
       return res.json({ ok: true, devoluciones });
     } catch {
       return res.status(500).json({ error: "No se pudo eliminar la producción" });
@@ -721,8 +806,18 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         await dbRun(bdProduccion, "UPDATE produccion SET cantidad=? WHERE id=?", [nuevaCantidad, idProduccion]);
       }
 
-      transmitir({ tipo: "inventario_actualizado" });
-      transmitir({ tipo: "produccion_actualizado" });
+      transmitir({
+        tipo: "inventario_actualizado",
+        accion: "devuelto",
+        nombre_receta: String(produccion?.nombre_receta || "").trim(),
+        cantidad: Number(cantidadEliminar || 0)
+      });
+      transmitir({
+        tipo: "produccion_actualizado",
+        accion: "eliminada_parcial",
+        nombre_receta: String(produccion?.nombre_receta || "").trim(),
+        cantidad: Number(cantidadEliminar || 0)
+      });
       return res.json({ ok: true, parcial: true, cantidad_eliminada: cantidadEliminar, devoluciones });
     } catch {
       return res.status(500).json({ error: "No se pudo eliminar parcialmente la producción" });

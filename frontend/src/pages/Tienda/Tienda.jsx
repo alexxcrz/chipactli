@@ -1601,8 +1601,26 @@ export default function Tienda({
       `Mensaje: ${mensajeUsuario}`
     ].filter(Boolean).join('\n');
 
-    const url = `https://wa.me/${telefono}?text=${encodeURIComponent(texto)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const textEnc = encodeURIComponent(texto);
+    const webUrl = `https://api.whatsapp.com/send?phone=${telefono}&text=${textEnc}`;
+    const mobileIntent = `intent://send?phone=${telefono}&text=${textEnc}#Intent;scheme=whatsapp;package=com.whatsapp;end`;
+    const esMovil = /Android|iPhone|iPad|iPod/i.test(String(navigator.userAgent || ''));
+
+    if (esMovil) {
+      window.location.href = mobileIntent;
+      setTimeout(() => {
+        window.location.href = webUrl;
+      }, 900);
+    } else {
+      try {
+        const popup = window.open(webUrl, '_blank', 'noopener,noreferrer');
+        if (!popup) {
+          window.location.href = webUrl;
+        }
+      } catch (_) {
+        window.location.href = webUrl;
+      }
+    }
     setMostrarWhatsForm(false);
     setWhatsForm({ nombre: '', mensaje: '' });
   }
@@ -5818,13 +5836,7 @@ export default function Tienda({
                 className="boton botonExito"
                 onClick={enviarMensajeWhatsDesdePagina}
                 disabled={whatsMensajeInvalido}
-              >Enviar por WhatsApp</button>
-              <a
-                href={`https://wa.me/${String(configTienda.whatsapp_numero).replace(/\D/g, '')}`}
-                target="_blank"
-                rel="noreferrer"
-                className="boton"
-              >Abrir directo</a>
+              >Enviar</button>
             </div>
           </div>
         )}

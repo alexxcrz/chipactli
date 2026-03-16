@@ -1469,7 +1469,7 @@ export default function Tienda({
         setCheckout((prev) => ({ ...prev, notas: '' }));
         cerrarCarrito();
         await cargarMisOrdenes();
-        await cargarProductos();
+        await cargarProductos({ silencioso: true });
         limpiarRetornoMercadoPago();
         limpiarPendienteLocal();
 
@@ -2222,7 +2222,7 @@ export default function Tienda({
         })
       });
       setEditorProducto(null);
-      await cargarProductos();
+      await cargarProductos({ silencioso: true });
       mostrarNotificacion('Ficha de producto guardada', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar la ficha', 'error');
@@ -3187,7 +3187,7 @@ export default function Tienda({
           activo: Boolean(producto?.visible_publico)
         })
       });
-      await cargarProductos();
+      await cargarProductos({ silencioso: true });
       mostrarNotificacion(`Clasificación guardada para ${recetaNombre}`, 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar clasificación', 'error');
@@ -3219,7 +3219,7 @@ export default function Tienda({
         })
       );
 
-      await cargarProductos();
+      await cargarProductos({ silencioso: true });
       mostrarNotificacion('Clasificación guardada para todos los productos', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar toda la clasificación', 'error');
@@ -3332,7 +3332,7 @@ export default function Tienda({
 
       setResenaNueva({ calificacion: 5, comentario: '' });
       await cargarResenasProducto(receta);
-      await cargarProductos();
+      await cargarProductos({ silencioso: true });
 
       const resumen = data?.resumen || {};
       setSeleccionado((prev) => {
@@ -3726,7 +3726,7 @@ export default function Tienda({
       setCheckout((prev) => ({ ...prev, notas: '' }));
       cerrarCarrito();
       await cargarMisOrdenes();
-      await cargarProductos();
+      await cargarProductos({ silencioso: true });
 
       mostrarNotificacion(`Orden ${orden.folio} creada correctamente`, 'exito');
     } catch (error) {

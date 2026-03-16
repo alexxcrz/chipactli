@@ -1035,6 +1035,10 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
      FROM tienda_catalogo`
   );
   const catalogoVacio = !Array.isArray(catalogoRows) || catalogoRows.length === 0;
+  const catalogoSinActivos = Array.isArray(catalogoRows)
+    && catalogoRows.length > 0
+    && !catalogoRows.some((row) => Number(row?.activo) !== 0);
+  const fallbackVisibilidadGlobal = catalogoVacio || catalogoSinActivos;
 
   const mapaCatalogo = new Map();
   const mapaCatalogoBase = new Map();
@@ -1070,7 +1074,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       || mapaCatalogoBase.get(claveRecetaBase(nombreReceta))
       || null;
     // By default, a recipe variant is hidden until explicitly enabled in tienda_catalogo.
-    const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : catalogoVacio;
+    const visibleCatalogo = catalogo
+      ? (fallbackVisibilidadGlobal ? true : Number(catalogo.activo) !== 0)
+      : fallbackVisibilidadGlobal;
     if (!visibleCatalogo && !incluirOcultos) continue;
 
     const stock = Number(prod?.stock) || Number(prodBase?.stock) || 0;
@@ -1165,7 +1171,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
         categoria_nombre: item.categoria_nombre,
         nombre_receta: base,
         slug: String(catalogoBase?.slug || slugify(base)),
-        visible_publico: catalogoBase ? Number(catalogoBase.activo) !== 0 : catalogoVacio,
+        visible_publico: catalogoBase
+          ? (fallbackVisibilidadGlobal ? true : Number(catalogoBase.activo) !== 0)
+          : fallbackVisibilidadGlobal,
         stock: 0,
         disponible: false,
         activo: false,
@@ -3260,7 +3268,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const esFavorito = tieneClave(body, 'es_favorito') ? boolToInt(body.es_favorito) : boolToInt(previo?.es_favorito);
       const esOferta = tieneClave(body, 'es_oferta') ? boolToInt(body.es_oferta) : boolToInt(previo?.es_oferta);
       const esAccesorio = tieneClave(body, 'es_accesorio') ? boolToInt(body.es_accesorio) : boolToInt(previo?.es_accesorio);
-      const activo = tieneClave(body, 'activo') ? (body.activo === false ? 0 : 1) : (previo ? (Number(previo?.activo) === 0 ? 0 : 1) : 0);
+      const activo = tieneClave(body, 'activo') ? (body.activo === false ? 0 : 1) : (previo ? (Number(previo?.activo) === 0 ? 0 : 1) : 1);
 
       await dbRun(
         bdVentas,

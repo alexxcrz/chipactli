@@ -3174,7 +3174,8 @@ export default function Tienda({
           es_lanzamiento: Boolean(producto?.es_lanzamiento),
           es_favorito: Boolean(producto?.es_favorito),
           es_oferta: Boolean(producto?.es_oferta),
-          es_accesorio: Boolean(producto?.es_accesorio)
+          es_accesorio: Boolean(producto?.es_accesorio),
+          activo: Boolean(producto?.visible_publico)
         })
       });
       await cargarProductos();
@@ -3202,7 +3203,8 @@ export default function Tienda({
               es_lanzamiento: Boolean(producto?.es_lanzamiento),
               es_favorito: Boolean(producto?.es_favorito),
               es_oferta: Boolean(producto?.es_oferta),
-              es_accesorio: Boolean(producto?.es_accesorio)
+              es_accesorio: Boolean(producto?.es_accesorio),
+              activo: Boolean(producto?.visible_publico)
             })
           });
         })
@@ -3228,7 +3230,8 @@ export default function Tienda({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           receta_nombre: recetaNombre,
-          es_oferta: Boolean(marcado)
+          es_oferta: Boolean(marcado),
+          activo: Boolean(producto?.visible_publico)
         })
       });
       setProductos((prev) => prev.map((item) => (

@@ -1283,6 +1283,16 @@ export default function Tienda({
 
   useEffect(() => {
     if (esVistaTrastienda) return;
+
+    const infoInvalida = vistaActiva === 'info' && !String(infoSeleccionada?.titulo || '').trim();
+    const detalleInvalido = vistaActiva === 'detalle' && !seleccionado;
+    if (infoInvalida || detalleInvalido) {
+      setVistaActiva('tienda');
+    }
+  }, [esVistaTrastienda, vistaActiva, infoSeleccionada, seleccionado]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
     guardarValorPersistido(CLAVE_TIENDA_SECCION_ACTIVA, seccionActiva);
   }, [esVistaTrastienda, seccionActiva]);
 
@@ -1700,6 +1710,16 @@ export default function Tienda({
     }
     return Array.from(setCategorias).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   }, [productos]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    if (categoriaActiva === 'todas') return;
+
+    const existe = categoriasDisponibles.some((cat) => cat.toLowerCase() === categoriaActiva);
+    if (!existe) {
+      setCategoriaActiva('todas');
+    }
+  }, [esVistaTrastienda, categoriaActiva, categoriasDisponibles]);
 
   const controlesSecciones = useMemo(() => {
     const opciones = [
@@ -5407,11 +5427,28 @@ export default function Tienda({
             const descripcionFinal = esPaqueteDetalle
               ? String(detalleActivo?.descripcion || descripcionActiva).trim()
               : descripcionActiva;
+            // Ordenar ingredientes de mayor a menor cantidad
+            const mapaCantidad = new Map();
+            if (Array.isArray(seleccionado?.ingredientes_cantidades)) {
+              seleccionado.ingredientes_cantidades.forEach((item) => {
+                mapaCantidad.set(String(item.nombre).trim().toLowerCase(), Number(item.cantidad) || 0);
+              });
+            }
+            const ordenarIngredientes = (lista) => {
+              return Array.isArray(lista)
+                ? lista.slice().sort((a, b) => {
+                    const ca = Number(mapaCantidad.get(String(a).trim().toLowerCase()) || 0);
+                    const cb = Number(mapaCantidad.get(String(b).trim().toLowerCase()) || 0);
+                    if (cb !== ca) return cb - ca;
+                    return String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
+                  })
+                : [];
+            };
             const ingredientesFinal = esPaqueteDetalle
               ? (Array.isArray(detalleActivo?.ingredientes) && detalleActivo.ingredientes.length
-                ? detalleActivo.ingredientes
-                : ingredientesActivos)
-              : ingredientesActivos;
+                ? ordenarIngredientes(detalleActivo.ingredientes)
+                : ordenarIngredientes(ingredientesActivos))
+              : ordenarIngredientes(ingredientesActivos);
             const variantesDisponibles = variantes;
             const precioFichaDetalle = Number(seleccionado?.tienda_precio_publico) || 0;
             const tienePrecioDetalle = precioFichaDetalle > 0;

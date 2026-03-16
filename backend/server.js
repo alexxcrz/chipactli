@@ -272,6 +272,24 @@ const bdProduccion = new Database(path.join(dbDir, "produccion.db"));
 const bdVentas = new Database(path.join(dbDir, "ventas.db"));
 const bdAdmin = new Database(path.join(dbDir, "admin.db"));
 
+// Log DB state for debugging
+try {
+  const recetasCount = bdRecetas.prepare('SELECT COUNT(*) AS total FROM recetas WHERE COALESCE(archivada,0)=0').get().total;
+  console.log(`[DB] Recetas activas en bdRecetas: ${recetasCount}`);
+  if (recetasCount === 0) {
+    console.warn('[DB] Recetas DB está vacía, intentando restaurar desde backup...');
+    const backupReciente = path.join(backupDir, 'recetas.db.' + (await fs.readdir(backupDir)).filter(f => f.startsWith('recetas.db.') && f.endsWith('.backup')).sort().reverse()[0]);
+    if (backupReciente) {
+      await fs.copyFile(backupReciente, path.join(dbDir, 'recetas.db'));
+      console.log('[DB] Recetas restauradas desde backup:', backupReciente);
+    } else {
+      console.warn('[DB] No se encontró backup reciente para recetas.db');
+    }
+  }
+} catch (err) {
+  console.error('[DB] Error al verificar/restaurar recetas:', err);
+}
+
 async function crearConexionAdminAuth() {
   const usarPgAdminAuth = String(process.env.PG_ADMIN_AUTH || "0").trim() === "1";
   if (!usarPgAdminAuth) {

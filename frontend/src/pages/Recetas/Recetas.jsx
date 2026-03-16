@@ -3020,7 +3020,8 @@ async function producirDesdeReceta() {
     if (respuesta.ok) {
       cerrarModal('modalProduccionRapida');
       mostrarNotificacion('Producción registrada correctamente', 'exito');
-      window.dispatchEvent(new CustomEvent('produccionActualizada'));
+      // Recarga eliminada: ya no se refresca recetas
+      // window.dispatchEvent(new CustomEvent('produccionActualizada'));
     }
   } catch (error) {
     console.error('Error registrando producción:', error);
@@ -3085,7 +3086,8 @@ async function producirDesdePaquete() {
       `Producción registrada: ${Number(data?.total_producciones) || 0} receta(s), ${Number(data?.total_piezas) || 0} pieza(s)`,
       'exito'
     );
-    window.dispatchEvent(new CustomEvent('produccionActualizada'));
+    // Recarga eliminada: ya no se refresca recetas ni paquetes
+    // window.dispatchEvent(new CustomEvent('produccionActualizada'));
   } catch (error) {
     console.error('Error produciendo paquete:', error);
     mostrarNotificacion(error?.message || 'Error al producir paquete', 'error');

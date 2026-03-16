@@ -1034,6 +1034,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
             es_lanzamiento, es_favorito, es_oferta, es_accesorio
      FROM tienda_catalogo`
   );
+  const catalogoVacio = !Array.isArray(catalogoRows) || catalogoRows.length === 0;
 
   const mapaCatalogo = new Map();
   const mapaCatalogoBase = new Map();
@@ -1069,7 +1070,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       || mapaCatalogoBase.get(claveRecetaBase(nombreReceta))
       || null;
     // By default, a recipe variant is hidden until explicitly enabled in tienda_catalogo.
-    const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : false;
+    const visibleCatalogo = catalogo ? Number(catalogo.activo) !== 0 : catalogoVacio;
     if (!visibleCatalogo && !incluirOcultos) continue;
 
     const stock = Number(prod?.stock) || Number(prodBase?.stock) || 0;
@@ -1164,7 +1165,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
         categoria_nombre: item.categoria_nombre,
         nombre_receta: base,
         slug: String(catalogoBase?.slug || slugify(base)),
-        visible_publico: catalogoBase ? Number(catalogoBase.activo) !== 0 : false,
+        visible_publico: catalogoBase ? Number(catalogoBase.activo) !== 0 : catalogoVacio,
         stock: 0,
         disponible: false,
         activo: false,

@@ -124,6 +124,16 @@ function normalizarPermisos(permisos, rol) {
   return out;
 }
 
+function limpiarPayloadImportacionTodo(datos) {
+  const payload = (datos && typeof datos === 'object' && !Array.isArray(datos)) ? { ...datos } : datos;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  if (Object.prototype.hasOwnProperty.call(payload, 'archivos_uploads_tienda')) {
+    delete payload.archivos_uploads_tienda;
+  }
+  payload.incluye_uploads_tienda = false;
+  return payload;
+}
+
 function normalizarUsuario(usuario) {
   if (!usuario) return null;
   return {
@@ -598,9 +608,10 @@ export default function App() {
 
       if (importacionTodoPendiente?.datos) {
         try {
+          const payloadImportacion = limpiarPayloadImportacionTodo(importacionTodoPendiente.datos);
           await fetchAPIJSON('/api/importar/todo', {
             method: 'POST',
-            body: importacionTodoPendiente.datos
+            body: payloadImportacion
           });
           setImportacionTodoPendiente(null);
           mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
@@ -1083,11 +1094,13 @@ export default function App() {
           throw new Error('El archivo está vacío');
         }
 
+        const payloadImportacion = limpiarPayloadImportacionTodo(datos);
+
         setMenuContextoTrastienda({ visible: false, x: 0, y: 0 });
 
         await fetchAPIJSON('/api/importar/todo', {
           method: 'POST',
-          body: datos
+          body: payloadImportacion
         });
         mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
         refrescarDatosSinRecargar();

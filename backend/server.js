@@ -1159,6 +1159,7 @@ const MAPA_DATABASES = {
 // Exportar respaldo completo de todas las tablas de todas las DBs.
 app.get('/api/exportar/todo', async (req, res) => {
   try {
+    const incluirUploads = String(req.query?.include_uploads || '0').trim() === '1';
     const salida = {
       tipo: 'todo',
       version: 1,
@@ -1188,7 +1189,7 @@ app.get('/api/exportar/todo', async (req, res) => {
     const tiendaPaquetes = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_paquetes);
     const tiendaPaquetesItems = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_paquetes_items);
     const tiendaCatalogo = toArrayMaybe(salida?.dbs?.ventas?.tablas?.tienda_catalogo);
-    const archivosUploadsTienda = await exportarUploadsTienda();
+    const archivosUploadsTienda = incluirUploads ? await exportarUploadsTienda() : [];
 
     res.json({
       ...salida,
@@ -1200,7 +1201,7 @@ app.get('/api/exportar/todo', async (req, res) => {
       tienda_paquetes_items: tiendaPaquetesItems,
       tienda_catalogo: tiendaCatalogo,
       archivos_uploads_tienda: archivosUploadsTienda,
-      incluye_uploads_tienda: true
+      incluye_uploads_tienda: incluirUploads
     });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: 'Error al exportar TODO', detalle: error.message });
@@ -1217,7 +1218,12 @@ app.post('/api/importar/todo', async (req, res) => {
   }
 
   const resultado = {};
-  const archivosUploadsEntrada = toArrayMaybe(payload?.archivos_uploads_tienda);
+  const incluirUploads = (
+    String(req.query?.include_uploads || '').trim() === '1'
+    || payload?.incluye_uploads_tienda === true
+    || String(payload?.incluye_uploads_tienda || '').trim() === '1'
+  );
+  const archivosUploadsEntrada = incluirUploads ? toArrayMaybe(payload?.archivos_uploads_tienda) : [];
 
   try {
     for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
@@ -1281,7 +1287,13 @@ app.post('/api/importar/todo', async (req, res) => {
     }
 
     const archivosRestaurados = await importarUploadsTienda(archivosUploadsEntrada);
-    res.json({ exito: true, mensaje: 'Respaldo total importado', importados: resultado, archivos_uploads_tienda_restaurados: archivosRestaurados });
+    res.json({
+      exito: true,
+      mensaje: 'Respaldo total importado',
+      importados: resultado,
+      incluye_uploads_tienda: incluirUploads,
+      archivos_uploads_tienda_restaurados: archivosRestaurados
+    });
   } catch (error) {
     res.status(500).json({ exito: false, mensaje: 'Error al importar TODO: ' + error.message });
   }

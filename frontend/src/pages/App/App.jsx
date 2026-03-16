@@ -89,6 +89,8 @@ const TITULOS_PAGINA = {
   'admin-usuarios': 'Chipactli - admin usuarios'
 };
 
+const TITULO_PESTANA = 'Chipactli - Cosmética Sólida para tu Cuidado';
+
 function normalizarPermisos(permisos, rol) {
   if (rol === 'ceo' || rol === 'admin') {
     return {
@@ -270,11 +272,7 @@ export default function App() {
   }, [isAuthenticated]);
 
   React.useEffect(() => {
-    if (!isAuthenticated) {
-      document.title = 'Chipactli';
-      return;
-    }
-    document.title = TITULOS_PAGINA[page] || 'Chipactli';
+    document.title = TITULO_PESTANA;
   }, [page, isAuthenticated]);
 
   React.useEffect(() => {

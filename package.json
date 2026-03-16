@@ -2,7 +2,7 @@
   "type": "module",
   "name": "chipactli",
   "version": "1.0.0",
-  "description": "Sistema Chipacti",
+  "description": "Sistema Chipactli",
   "scripts": {
     "guard:local": "node scripts/ensure-local-path.mjs",
     "free:dev-ports": "node scripts/free-dev-ports.mjs",

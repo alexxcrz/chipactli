@@ -684,9 +684,11 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
 
     bdVentas.all("PRAGMA table_info(tienda_ordenes)", (err, columnas) => {
       if (err || !Array.isArray(columnas)) return;
-      if (!columnas.some(col => col.name === "origen_pedido")) {
-        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN origen_pedido TEXT DEFAULT 'web'");
-      }
+
+      let tieneOrigenPedido = columnas.some((col) => col.name === "origen_pedido");
+      let tieneEstadoPago = columnas.some((col) => col.name === "estado_pago");
+      let tieneEstadoPagoActualizado = columnas.some((col) => col.name === "estado_pago_actualizado_en");
+
       if (!columnas.some(col => col.name === "id_punto_entrega")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN id_punto_entrega INTEGER");
       }
@@ -699,30 +701,67 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!columnas.some(col => col.name === "numero_guia")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN numero_guia TEXT");
       }
-      if (!columnas.some(col => col.name === "estado_pago")) {
-        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago TEXT DEFAULT 'pendiente'");
-      }
-      if (!columnas.some(col => col.name === "estado_pago_actualizado_en")) {
-        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago_actualizado_en TEXT");
-      }
-      bdVentas.run(
-        `UPDATE tienda_ordenes
-         SET estado_pago = CASE
-           WHEN LOWER(COALESCE(metodo_pago, '')) = 'mercado_pago' THEN 'pendiente'
-           ELSE 'pendiente_manual'
-         END
-         WHERE COALESCE(TRIM(estado_pago), '') = ''`
-      );
-      bdVentas.run(
-        `UPDATE tienda_ordenes
-         SET estado_pago_actualizado_en = COALESCE(NULLIF(TRIM(estado_pago_actualizado_en), ''), CURRENT_TIMESTAMP)
-         WHERE estado_pago_actualizado_en IS NULL OR COALESCE(TRIM(estado_pago_actualizado_en), '') = ''`
-      );
-      bdVentas.run(
-        `UPDATE tienda_ordenes
-         SET origen_pedido = 'web'
-         WHERE COALESCE(TRIM(origen_pedido), '') = ''`
-      );
+
+      const continuarNormalizacion = () => {
+        if (tieneEstadoPago) {
+          bdVentas.run(
+            `UPDATE tienda_ordenes
+             SET estado_pago = CASE
+               WHEN LOWER(COALESCE(metodo_pago, '')) = 'mercado_pago' THEN 'pendiente'
+               ELSE 'pendiente_manual'
+             END
+             WHERE COALESCE(TRIM(estado_pago), '') = ''`,
+            [],
+            () => {}
+          );
+        }
+
+        if (tieneEstadoPagoActualizado) {
+          bdVentas.run(
+            `UPDATE tienda_ordenes
+             SET estado_pago_actualizado_en = COALESCE(NULLIF(TRIM(estado_pago_actualizado_en), ''), CURRENT_TIMESTAMP)
+             WHERE estado_pago_actualizado_en IS NULL OR COALESCE(TRIM(estado_pago_actualizado_en), '') = ''`,
+            [],
+            () => {}
+          );
+        }
+
+        if (tieneOrigenPedido) {
+          bdVentas.run(
+            `UPDATE tienda_ordenes
+             SET origen_pedido = 'web'
+             WHERE COALESCE(TRIM(origen_pedido), '') = ''`,
+            [],
+            () => {}
+          );
+        }
+      };
+
+      const asegurarEstadoPagoActualizado = () => {
+        if (tieneEstadoPagoActualizado) return continuarNormalizacion();
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago_actualizado_en TEXT", [], (alterErr) => {
+          if (!alterErr) tieneEstadoPagoActualizado = true;
+          continuarNormalizacion();
+        });
+      };
+
+      const asegurarEstadoPago = () => {
+        if (tieneEstadoPago) return asegurarEstadoPagoActualizado();
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago TEXT DEFAULT 'pendiente'", [], (alterErr) => {
+          if (!alterErr) tieneEstadoPago = true;
+          asegurarEstadoPagoActualizado();
+        });
+      };
+
+      const asegurarOrigenPedido = () => {
+        if (tieneOrigenPedido) return asegurarEstadoPago();
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN origen_pedido TEXT DEFAULT 'web'", [], (alterErr) => {
+          if (!alterErr) tieneOrigenPedido = true;
+          asegurarEstadoPago();
+        });
+      };
+
+      asegurarOrigenPedido();
     });
 
     bdVentas.all("PRAGMA table_info(tienda_checkout_intentos)", (err, columnas) => {

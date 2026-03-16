@@ -1836,6 +1836,16 @@ export default function Tienda({
     setVistaActiva('info');
   }
 
+  function restablecerVistaTienda() {
+    setVistaActiva('tienda');
+    setSeccionActiva('todos');
+    setCategoriaActiva('todas');
+    setFiltro('');
+    setInfoSeleccionada(null);
+    setSeleccionado(null);
+    mostrarNotificacion('Vitrina restablecida', 'exito');
+  }
+
   function enviarMensajeWhatsDesdePagina() {
     const telefono = String(configTienda?.whatsapp_numero || '').replace(/\D/g, '');
     if (!telefono) {
@@ -3851,6 +3861,9 @@ export default function Tienda({
             value={filtro}
             onChange={(e) => setFiltro(e.target.value)}
           />
+          <button type="button" className="tiendaResetBtn" onClick={restablecerVistaTienda}>
+            Restablecer vitrina
+          </button>
         </div>
       </div>
       )}
@@ -3901,6 +3914,15 @@ export default function Tienda({
             onChange={(e) => setFiltro(e.target.value)}
           />
         </div>
+        <button
+          type="button"
+          className="tiendaResetBtn tiendaResetBtnIcon tiendaSoloDesktop"
+          onClick={restablecerVistaTienda}
+          title="Restablecer vitrina"
+          aria-label="Restablecer vitrina"
+        >
+          ↺
+        </button>
       </div>
       )}
 
@@ -5427,28 +5449,11 @@ export default function Tienda({
             const descripcionFinal = esPaqueteDetalle
               ? String(detalleActivo?.descripcion || descripcionActiva).trim()
               : descripcionActiva;
-            // Ordenar ingredientes de mayor a menor cantidad
-            const mapaCantidad = new Map();
-            if (Array.isArray(seleccionado?.ingredientes_cantidades)) {
-              seleccionado.ingredientes_cantidades.forEach((item) => {
-                mapaCantidad.set(String(item.nombre).trim().toLowerCase(), Number(item.cantidad) || 0);
-              });
-            }
-            const ordenarIngredientes = (lista) => {
-              return Array.isArray(lista)
-                ? lista.slice().sort((a, b) => {
-                    const ca = Number(mapaCantidad.get(String(a).trim().toLowerCase()) || 0);
-                    const cb = Number(mapaCantidad.get(String(b).trim().toLowerCase()) || 0);
-                    if (cb !== ca) return cb - ca;
-                    return String(a).localeCompare(String(b), 'es', { sensitivity: 'base' });
-                  })
-                : [];
-            };
             const ingredientesFinal = esPaqueteDetalle
               ? (Array.isArray(detalleActivo?.ingredientes) && detalleActivo.ingredientes.length
-                ? ordenarIngredientes(detalleActivo.ingredientes)
-                : ordenarIngredientes(ingredientesActivos))
-              : ordenarIngredientes(ingredientesActivos);
+                ? detalleActivo.ingredientes
+                : ingredientesActivos)
+              : ingredientesActivos;
             const variantesDisponibles = variantes;
             const precioFichaDetalle = Number(seleccionado?.tienda_precio_publico) || 0;
             const tienePrecioDetalle = precioFichaDetalle > 0;

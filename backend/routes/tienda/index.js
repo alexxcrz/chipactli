@@ -1097,7 +1097,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       Array.from(new Set(ingredientesRecetaLista.map((ing) => String(ing?.nombre || '').trim()).filter(Boolean))),
       mapaCantidadIngredientes
     );
-    const ingredientesTienda = ordenarIngredientesPorCantidad(lineasTexto(receta?.tienda_ingredientes), mapaCantidadIngredientes);
+    // Si el admin captura ingredientes manualmente en receta, respetar ese orden tal cual.
+    const ingredientesTienda = lineasTexto(receta?.tienda_ingredientes);
+    const ingredientesCatalogo = parseJSON(catalogo?.ingredientes, ingredientesAuto);
     const galeriaTienda = parseJSON(receta?.tienda_galeria, []);
     const galeria = normalizarMediaLista(Array.isArray(galeriaTienda) ? galeriaTienda : []);
     const imagenPrincipal = normalizarMediaUrl(receta?.tienda_image_url || catalogo?.image_url || galeria[0] || "");
@@ -1130,7 +1132,9 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
       galeria: normalizarMediaLista(galeria),
       ingredientes: ingredientesTienda.length
         ? ingredientesTienda
-        : ordenarIngredientesPorCantidad(parseJSON(catalogo?.ingredientes, ingredientesAuto), mapaCantidadIngredientes),
+        : (Array.isArray(ingredientesCatalogo) && ingredientesCatalogo.length
+          ? ingredientesCatalogo
+          : ingredientesAuto),
       variantes: parseJSON(catalogo?.variantes, []),
       es_lanzamiento: Number(catalogo?.es_lanzamiento) === 1,
       es_favorito: Number(catalogo?.es_favorito) === 1,

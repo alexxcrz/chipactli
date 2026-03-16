@@ -270,6 +270,34 @@
   width: 100%;
 }
 
+.tiendaResetBtn {
+  flex: 0 0 auto;
+  border: 1px solid #cfdbd3;
+  border-radius: 999px;
+  background: #f7fbf8;
+  color: #355244;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tiendaResetBtn:hover {
+  background: #eef6f1;
+}
+
+.tiendaResetBtnIcon {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
 .tiendaSoloMovil {
   display: none;
 }
@@ -1940,6 +1968,12 @@
     padding: 8px 10px;
     font-size: 14px;
     border-radius: 12px;
+  }
+
+  .tiendaResetBtn {
+    margin-top: 8px;
+    font-size: 10px;
+    padding: 6px 10px;
   }
 
   .tiendaHeaderCentroShop {

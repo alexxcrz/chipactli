@@ -471,8 +471,8 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
   });
   const PREFIJO_VENTA_GENERAL = 'CHIVT'; // Venta por tienda
   const LONGITUD_CONSECUTIVO_VENTA_GENERAL = 6;
-  const PREFIJO_VENTA_DIRECTA = 'CHIVT'; // Venta directa en tienda
-  const LONGITUD_CONSECUTIVO_VENTA_DIRECTA = 6;
+  const PREFIJO_VENTA_DIRECTA = 'CHIVI'; // Venta desde trastienda
+  const LONGITUD_CONSECUTIVO_VENTA_DIRECTA = 5;
   const PREFIJO_VENTA_APP = 'CHIAPP'; // Venta desde la app
   const LONGITUD_CONSECUTIVO_VENTA_APP = 6;
 
@@ -483,7 +483,7 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
         `SELECT numero_pedido
          FROM ventas
          WHERE numero_pedido LIKE ?`,
-        [`%${prefijo}%`]
+        [`${prefijo}%`]
       );
 
       const regex = new RegExp(`${prefijo}(\\d+)`, 'i');
@@ -507,7 +507,7 @@ export function registrarRutasVentas(app, bdVentas, bdProduccion, bdInventario, 
     const tipo = String(req.query?.tipo || '').trim().toLowerCase();
     let prefijo = PREFIJO_VENTA_GENERAL;
     let longitud = LONGITUD_CONSECUTIVO_VENTA_GENERAL;
-    if (tipo === 'directa' || tipo === 'produccion' || tipo === 'chvi' || tipo === 'tienda') {
+    if (tipo === 'directa' || tipo === 'produccion' || tipo === 'chvi' || tipo === 'chivi' || tipo === 'tienda') {
       prefijo = PREFIJO_VENTA_DIRECTA;
       longitud = LONGITUD_CONSECUTIVO_VENTA_DIRECTA;
     } else if (tipo === 'app' || tipo === 'chiapp') {

@@ -20,6 +20,10 @@ export default defineConfig(({ command, mode }) => ({
         target: BACKEND_TARGET,
         changeOrigin: true
       },
+      '^/uploads': {
+        target: BACKEND_TARGET,
+        changeOrigin: true
+      },
       // Additional backend endpoints used by the legacy frontend
       '^/recetas': { target: BACKEND_TARGET, changeOrigin: true },
       '^/categorias': { target: BACKEND_TARGET, changeOrigin: true },

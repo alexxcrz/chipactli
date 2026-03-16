@@ -83,13 +83,14 @@ const usarBuildReact = hasReactBuild && (forzarBuildReact || enRender || esProdu
 const app = express();
 const servidor = http.createServer(app);
 const wss = new WebSocketServer({ server: servidor });
+const BODY_JSON_LIMIT = String(process.env.BODY_JSON_LIMIT || '300mb').trim();
 
 // Inicializar WebSocket
 inicializarWss(wss);
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: BODY_JSON_LIMIT }));
 
 // Configurar multer para uploads
 const upload = multer({ 
@@ -114,6 +115,8 @@ const dbDir = process.env.DB_DIR
   : ((ejecutandoEnRender || discoRenderDisponible) ? '/opt/render/data/backend' : dbDirLocalPorDefecto);
 const uploadsDir = path.join(dbDir, 'uploads');
 const uploadsTiendaDir = path.join(uploadsDir, 'tienda');
+const uploadsDirLegacy = path.join(__dirname, 'uploads');
+const uploadsTiendaDirLegacy = path.join(uploadsDirLegacy, 'tienda');
 const backupDir = path.join(dbDir, 'backups');
 const DB_FILES = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
 
@@ -150,6 +153,30 @@ async function migrarDbLegacyDesdeRaizLocal() {
         // Ignorar: son temporales y SQLite los regenera cuando aplica.
       }
     }
+  }
+}
+
+async function migrarUploadsLegacyDesdeRaizLocal() {
+  if (path.resolve(uploadsTiendaDir) === path.resolve(uploadsTiendaDirLegacy)) return;
+
+  try {
+    const nombres = await fs.readdir(uploadsTiendaDirLegacy);
+    for (const nombre of nombres) {
+      const limpio = path.basename(String(nombre || '').trim());
+      if (!limpio) continue;
+      const origen = path.join(uploadsTiendaDirLegacy, limpio);
+      const destino = path.join(uploadsTiendaDir, limpio);
+
+      const esArchivoOrigen = await fs.stat(origen).then((s) => s.isFile()).catch(() => false);
+      if (!esArchivoOrigen) continue;
+
+      const existeDestino = await fs.stat(destino).then((s) => s.isFile()).catch(() => false);
+      if (!existeDestino) {
+        await fs.copyFile(origen, destino);
+      }
+    }
+  } catch {
+    // Si no existe carpeta legacy, no hay nada que migrar.
   }
 }
 
@@ -233,8 +260,10 @@ configurarBackup({
 await reforzarPersistenciaDb();
 await migrarDbLegacyDesdeRaizLocal();
 await fs.mkdir(uploadsTiendaDir, { recursive: true });
+await migrarUploadsLegacyDesdeRaizLocal();
 
 app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(uploadsDirLegacy));
 
 // Inicializar bases de datos
 const bdInventario = new Database(path.join(dbDir, "inventario.db"));

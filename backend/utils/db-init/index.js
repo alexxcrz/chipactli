@@ -484,16 +484,19 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_ordenes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       folio TEXT UNIQUE,
+      origen_pedido TEXT DEFAULT 'web',
       id_cliente INTEGER,
       nombre_cliente TEXT,
       email_cliente TEXT,
       telefono_cliente TEXT,
       metodo_pago TEXT,
       estado TEXT,
+      estado_pago TEXT DEFAULT 'pendiente',
       total REAL,
       moneda TEXT DEFAULT 'MXN',
       referencia_externa TEXT,
       detalle_pago TEXT,
+      estado_pago_actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       id_punto_entrega INTEGER,
       nombre_punto_entrega TEXT,
       direccion_entrega TEXT,
@@ -538,6 +541,35 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       variante TEXT,
       FOREIGN KEY(id_orden) REFERENCES tienda_ordenes(id)
     )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_checkout_intentos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      folio TEXT,
+      id_cliente INTEGER,
+      origen_pedido TEXT DEFAULT 'web',
+      metodo_pago TEXT,
+      id_punto_entrega INTEGER,
+      nombre_punto_entrega TEXT,
+      direccion_entrega TEXT,
+      notas TEXT,
+      total REAL,
+      items_json TEXT,
+      preference_id TEXT,
+      payment_id TEXT,
+      payment_status TEXT DEFAULT 'pendiente',
+      payment_status_detail TEXT,
+      detalle_pago TEXT,
+      id_orden_generada INTEGER,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id),
+      FOREIGN KEY(id_orden_generada) REFERENCES tienda_ordenes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_checkout_intentos_cliente
+      ON tienda_checkout_intentos (id_cliente, id DESC)`);
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_checkout_intentos_preference
+      ON tienda_checkout_intentos (preference_id, id DESC)`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_resenas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -652,6 +684,9 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
 
     bdVentas.all("PRAGMA table_info(tienda_ordenes)", (err, columnas) => {
       if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some(col => col.name === "origen_pedido")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN origen_pedido TEXT DEFAULT 'web'");
+      }
       if (!columnas.some(col => col.name === "id_punto_entrega")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN id_punto_entrega INTEGER");
       }
@@ -664,6 +699,57 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!columnas.some(col => col.name === "numero_guia")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN numero_guia TEXT");
       }
+      if (!columnas.some(col => col.name === "estado_pago")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago TEXT DEFAULT 'pendiente'");
+      }
+      if (!columnas.some(col => col.name === "estado_pago_actualizado_en")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN estado_pago_actualizado_en TEXT");
+      }
+      bdVentas.run(
+        `UPDATE tienda_ordenes
+         SET estado_pago = CASE
+           WHEN LOWER(COALESCE(metodo_pago, '')) = 'mercado_pago' THEN 'pendiente'
+           ELSE 'pendiente_manual'
+         END
+         WHERE COALESCE(TRIM(estado_pago), '') = ''`
+      );
+      bdVentas.run(
+        `UPDATE tienda_ordenes
+         SET estado_pago_actualizado_en = COALESCE(NULLIF(TRIM(estado_pago_actualizado_en), ''), CURRENT_TIMESTAMP)
+         WHERE estado_pago_actualizado_en IS NULL OR COALESCE(TRIM(estado_pago_actualizado_en), '') = ''`
+      );
+      bdVentas.run(
+        `UPDATE tienda_ordenes
+         SET origen_pedido = 'web'
+         WHERE COALESCE(TRIM(origen_pedido), '') = ''`
+      );
+    });
+
+    bdVentas.all("PRAGMA table_info(tienda_checkout_intentos)", (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === "id_orden_generada")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN id_orden_generada INTEGER");
+      }
+      if (!columnas.some((col) => col.name === "origen_pedido")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN origen_pedido TEXT DEFAULT 'web'");
+      }
+      if (!columnas.some((col) => col.name === "payment_status")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN payment_status TEXT DEFAULT 'pendiente'");
+      }
+      if (!columnas.some((col) => col.name === "payment_status_detail")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN payment_status_detail TEXT");
+      }
+      if (!columnas.some((col) => col.name === "payment_id")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN payment_id TEXT");
+      }
+      if (!columnas.some((col) => col.name === "detalle_pago")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN detalle_pago TEXT");
+      }
+      bdVentas.run(
+        `UPDATE tienda_checkout_intentos
+         SET origen_pedido = 'web'
+         WHERE COALESCE(TRIM(origen_pedido), '') = ''`
+      );
     });
 
     bdVentas.all("PRAGMA table_info(tienda_clientes)", (err, columnas) => {

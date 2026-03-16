@@ -22,7 +22,7 @@ function dbAll(db, sql, params = []) {
 }
 
 export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
-  const PREFIJO_CORTESIA = 'CHCO';
+  const PREFIJO_CORTESIA = 'CHICO';
   const LONGITUD_CONSECUTIVO_CORTESIA = 6;
 
   async function generarNumeroCortesia() {
@@ -32,7 +32,7 @@ export function registrarRutasCortesias(app, bdVentas, bdProduccion) {
         `SELECT numero_pedido
          FROM cortesias
          WHERE numero_pedido LIKE ?`,
-        [`%${PREFIJO_CORTESIA}%`]
+        [`${PREFIJO_CORTESIA}%`]
       );
 
       const regex = new RegExp(`${PREFIJO_CORTESIA}(\\d+)`, 'i');

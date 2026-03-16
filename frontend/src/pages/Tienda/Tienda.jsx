@@ -28,6 +28,8 @@ const CLAVE_TIENDA_CATEGORIA_ACTIVA = 'chipactli:tienda:categoriaActiva';
 const CLAVE_TRASTIENDA_VISTA_ADMIN = 'chipactli:trastienda:adminVista';
 const CLAVE_TRASTIENDA_CONFIG_TAB = 'chipactli:trastienda:configAdminTab';
 const CLAVE_TRASTIENDA_DESCUENTOS_TAB = 'chipactli:trastienda:descuentoTabInterna';
+const CLAVE_MP_CHECKOUT_PENDIENTE = 'chipactli:tienda:mp-checkout-pendiente';
+const OCULTAR_MERCADO_PAGO = true;
 const EXPIRACION_CARRITO_INVITADO_MS = 24 * 60 * 60 * 1000;
 const SECCIONES_INFO_LINKS = [
   { idx: 2, titulo: 'Nosotros' },
@@ -58,6 +60,7 @@ const CONFIG_DEFAULT = {
   atencion_horario_lunes_sabado: '09:00 a.m. - 09:00 p.m.',
   atencion_horario_domingo: '08:00 a.m. - 12:00 p.m.',
   atencion_correo: 'atc@chipactli.mx',
+  transferencia_clabe: '',
   whatsapp_numero: '',
   social_facebook_url: '',
   social_facebook_activo: '0',
@@ -107,7 +110,8 @@ const CONFIG_DEFAULT = {
   correo_bienvenida_asunto: 'Bienvenido a CHIPACTLI, {{nombre_cliente}}',
   correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra tienda.\n\nIr a la tienda: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
   correo_confirmacion_asunto: 'Confirmacion de pedido {{folio}}',
-  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
+  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}} correctamente.\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\n{{clabe_transferencia_linea}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nImportante:\nRealiza tu transferencia usando la CLABE indicada y guarda tu comprobante.\nEn cuanto se confirme el pago, te notificaremos el siguiente avance de tu pedido.\n\nGracias por tu compra en CHIPACTLI.',
+  correo_confirmacion_cuerpo_contraentrega: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\n{{estado_preparacion_linea}}\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
   correo_estado_asunto: 'Actualizacion de pedido {{folio}}: {{estado_titulo}}',
   correo_estado_cuerpo: 'Hola {{nombre_cliente}},\n\nTu pedido {{folio}} cambio de estado.\nEstado actual: {{estado_titulo}}\n{{mensaje_estado}}\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{paqueteria_linea}}\n{{guia_linea}}\n\nGracias por comprar en CHIPACTLI.',
   correo_diagnostico_asunto: 'Diagnostico correo CHIPACTLI{{etiqueta_sufijo}}',
@@ -143,6 +147,14 @@ const ESTATUS_PEDIDO_OPCIONES = [
   { value: 'no_entregado', label: 'No entregado' },
   { value: 'devuelto', label: 'Devuelto' },
   { value: 'cancelado', label: 'Cancelado' }
+];
+
+const ESTATUS_PAGO_OPCIONES = [
+  { value: 'pendiente', label: 'Pendiente' },
+  { value: 'pendiente_manual', label: 'Pendiente (manual)' },
+  { value: 'pagado', label: 'Pagado' },
+  { value: 'rechazado', label: 'Rechazado' },
+  { value: 'reembolsado', label: 'Reembolsado' }
 ];
 
 const PAQUETERIAS_MX = [
@@ -207,6 +219,39 @@ function etiquetaPaqueteria(paqueteria) {
   const clave = String(paqueteria || '').trim().toLowerCase();
   const match = PAQUETERIAS_MX.find((item) => item.value === clave);
   return match ? match.label : (clave || 'Sin paquetería');
+}
+
+function etiquetaEstadoPago(estadoPago) {
+  const clave = String(estadoPago || '').trim().toLowerCase();
+  const match = ESTATUS_PAGO_OPCIONES.find((item) => item.value === clave);
+  return match ? match.label : (clave || 'Pendiente');
+}
+
+function etiquetaOrigenPedido(origenPedido) {
+  const origen = String(origenPedido || '').trim().toLowerCase();
+  return origen === 'app' ? 'App' : 'Web';
+}
+
+function resolverOrigenPedidoCliente() {
+  if (typeof window === 'undefined') return 'web';
+  try {
+    if (window.__chipactliApp === true || window.__chipactliOrigenPedido === 'app') return 'app';
+
+    const capacitor = window.Capacitor;
+    if (capacitor && typeof capacitor.isNativePlatform === 'function' && capacitor.isNativePlatform()) {
+      return 'app';
+    }
+    if (capacitor && typeof capacitor.getPlatform === 'function') {
+      const plataforma = String(capacitor.getPlatform() || '').trim().toLowerCase();
+      if (plataforma && plataforma !== 'web') return 'app';
+    }
+
+    const userAgent = String(window.navigator?.userAgent || '').toLowerCase();
+    const esWebViewMovil = /android|iphone|ipad|ipod/.test(userAgent) && /wv|version\/4\.0|; wv\)/.test(userAgent);
+    return esWebViewMovil ? 'app' : 'web';
+  } catch {
+    return 'web';
+  }
 }
 
 function construirLinkRastreo(paqueteria, numeroGuia) {
@@ -382,6 +427,11 @@ function obtenerMetodosPagoConfig(valor, config = {}) {
     cursor += 1;
   }
   return lista;
+}
+
+function metodoPagoOculto(idMetodo = '') {
+  const id = String(idMetodo || '').trim().toLowerCase();
+  return OCULTAR_MERCADO_PAGO && id === 'mercado_pago';
 }
 
 function esLogoPng(ruta = '') {
@@ -604,6 +654,7 @@ export default function Tienda({
   const [mostrarCarrito, setMostrarCarrito] = useState(false);
   const [pasoCheckout, setPasoCheckout] = useState(1);
   const [creandoOrden, setCreandoOrden] = useState(false);
+  const [procesandoPagoMp, setProcesandoPagoMp] = useState(false);
   const [modoAuth, setModoAuth] = useState('login');
   const [mostrarModalAuthCliente, setMostrarModalAuthCliente] = useState(false);
   const [mostrarModalPerfilCliente, setMostrarModalPerfilCliente] = useState(false);
@@ -639,6 +690,8 @@ export default function Tienda({
   const [adminClientes, setAdminClientes] = useState([]);
   const [adminOrdenes, setAdminOrdenes] = useState([]);
   const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
+  const [procesandoPedidosAdmin, setProcesandoPedidosAdmin] = useState(false);
+  const [modalResetContadoresAdmin, setModalResetContadoresAdmin] = useState({ visible: false, password: '' });
   const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'config'], 'pedidos'));
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
   const [busquedaAdmin, setBusquedaAdmin] = useState('');
@@ -693,6 +746,7 @@ export default function Tienda({
   const [previewCorreoHtml, setPreviewCorreoHtml] = useState('');
   const [previewCorreoAsunto, setPreviewCorreoAsunto] = useState('');
   const [previewTipoCorreo, setPreviewTipoCorreo] = useState('campana');
+  const [mpReconcileTick, setMpReconcileTick] = useState(0);
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
@@ -703,6 +757,7 @@ export default function Tienda({
   const eventosPedidoNotificadosRef = useRef(new Set());
   const estadoOrdenesClienteRef = useRef(new Map());
   const estadoOrdenesInicializadoRef = useRef(false);
+  const confirmandoPagoMpRef = useRef(false);
 
   const totalNoLeidasCliente = useMemo(() => (
     (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
@@ -761,7 +816,7 @@ export default function Tienda({
   );
 
   const metodosPagoFooterVisibles = useMemo(
-    () => metodosPagoFooter.filter((item) => String(item?.activo ?? '1') !== '0'),
+    () => metodosPagoFooter.filter((item) => String(item?.activo ?? '1') !== '0' && !metodoPagoOculto(item?.id)),
     [metodosPagoFooter]
   );
 
@@ -769,7 +824,7 @@ export default function Tienda({
   const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
 
   const metodosPagoAdmin = useMemo(
-    () => obtenerMetodosPagoConfig(configTiendaAdmin?.footer_pagos_metodos, configTiendaAdmin),
+    () => obtenerMetodosPagoConfig(configTiendaAdmin?.footer_pagos_metodos, configTiendaAdmin).filter((item) => !metodoPagoOculto(item?.id)),
     [configTiendaAdmin?.footer_pagos_metodos, configTiendaAdmin?.footer_pagos_logos, configTiendaAdmin?.footer_pagos_logo_url]
   );
 
@@ -1214,7 +1269,7 @@ export default function Tienda({
     { value: 'transferencia', label: 'Transferencia' },
     { value: 'tarjeta', label: 'Tarjeta presencial' },
     { value: 'mercado_pago', label: 'Mercado Pago' }
-  ];
+  ].filter((item) => !metodoPagoOculto(item?.value));
 
   useEffect(() => {
     if (!esVistaTrastienda) return;
@@ -1250,6 +1305,191 @@ export default function Tienda({
     if (!esVistaTrastienda) return;
     guardarValorPersistido(CLAVE_TRASTIENDA_DESCUENTOS_TAB, descuentoTabInterna);
   }, [esVistaTrastienda, descuentoTabInterna]);
+
+  useEffect(() => {
+    if (!clienteToken) return;
+    const onFocus = () => setMpReconcileTick((v) => v + 1);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setMpReconcileTick((v) => v + 1);
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [clienteToken]);
+
+  useEffect(() => {
+    if (!clienteToken) return;
+
+    const intervalo = window.setInterval(() => {
+      try {
+        const raw = String(localStorage.getItem(CLAVE_MP_CHECKOUT_PENDIENTE) || '').trim();
+        if (!raw) return;
+        const data = JSON.parse(raw) || {};
+        const creadoEn = Number(data?.creado_en) || 0;
+        if (creadoEn > 0 && (Date.now() - creadoEn) > (20 * 60 * 1000)) {
+          localStorage.removeItem(CLAVE_MP_CHECKOUT_PENDIENTE);
+          return;
+        }
+        setMpReconcileTick((v) => v + 1);
+      } catch {
+      }
+    }, 7000);
+
+    return () => window.clearInterval(intervalo);
+  }, [clienteToken]);
+
+  useEffect(() => {
+    if (!clienteToken) return;
+    if (confirmandoPagoMpRef.current) return;
+
+    const limpiarRetornoMercadoPago = () => {
+      try {
+        const url = new URL(window.location.href);
+        const claves = [
+          'mp_status',
+          'status',
+          'collection_status',
+          'payment_id',
+          'collection_id',
+          'preference_id'
+        ];
+        let huboCambios = false;
+        claves.forEach((clave) => {
+          if (url.searchParams.has(clave)) {
+            url.searchParams.delete(clave);
+            huboCambios = true;
+          }
+        });
+        if (huboCambios) {
+          const siguiente = `${url.pathname}${url.search}${url.hash}`;
+          window.history.replaceState({}, document.title, siguiente);
+        }
+      } catch {
+      }
+    };
+
+    const obtenerParametro = (paramsA, paramsB, ...claves) => {
+      for (const clave of claves) {
+        const a = String(paramsA.get(clave) || '').trim();
+        if (a) return a;
+        const b = String(paramsB.get(clave) || '').trim();
+        if (b) return b;
+      }
+      return '';
+    };
+
+    const ejecutar = async () => {
+      const limpiarPendienteLocal = () => {
+        try {
+          localStorage.removeItem(CLAVE_MP_CHECKOUT_PENDIENTE);
+        } catch {
+        }
+      };
+
+      const leerPendienteLocal = () => {
+        try {
+          const raw = String(localStorage.getItem(CLAVE_MP_CHECKOUT_PENDIENTE) || '').trim();
+          if (!raw) return null;
+          const data = JSON.parse(raw) || {};
+          return {
+            preference_id: String(data?.preference_id || '').trim(),
+            folio: String(data?.folio || '').trim(),
+            creado_en: Number(data?.creado_en) || 0
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      const searchParams = new URLSearchParams(String(window.location.search || ''));
+      const hashRaw = String(window.location.hash || '');
+      const hashQuery = hashRaw.includes('?') ? hashRaw.slice(hashRaw.indexOf('?') + 1) : '';
+      const hashParams = new URLSearchParams(hashQuery);
+
+      const statusRaw = obtenerParametro(searchParams, hashParams, 'collection_status', 'status', 'mp_status');
+      const paymentId = obtenerParametro(searchParams, hashParams, 'payment_id', 'collection_id');
+      const preferenceIdUrl = obtenerParametro(searchParams, hashParams, 'preference_id');
+      const pendienteLocal = leerPendienteLocal();
+      const preferenceId = String(preferenceIdUrl || pendienteLocal?.preference_id || '').trim();
+      const vieneDeCallback = Boolean(statusRaw || paymentId || preferenceIdUrl);
+
+      if (!vieneDeCallback && !preferenceId) return;
+
+      const status = String(statusRaw || '').trim().toLowerCase();
+      if (vieneDeCallback && status && status !== 'approved' && status !== 'authorized' && status !== 'success') {
+        limpiarRetornoMercadoPago();
+        if (status === 'rejected' || status === 'cancelled') {
+          limpiarPendienteLocal();
+        }
+        mostrarNotificacion(
+          status === 'pending'
+            ? 'Tu pago aún está pendiente de confirmación en Mercado Pago.'
+            : 'El pago no se completó en Mercado Pago.',
+          status === 'pending' ? 'advertencia' : 'error'
+        );
+        return;
+      }
+
+      confirmandoPagoMpRef.current = true;
+      if (vieneDeCallback) {
+        setProcesandoPagoMp(true);
+      }
+      try {
+        if (vieneDeCallback) {
+          mostrarNotificacion('Pago detectado. Estamos confirmando y generando tu pedido...', 'exito');
+        }
+        const endpoint = vieneDeCallback
+          ? '/tienda/checkout/mercado-pago/confirmar'
+          : '/tienda/checkout/mercado-pago/reconciliar';
+        const data = await fetchJson(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${clienteToken}`
+          },
+          body: JSON.stringify({
+            payment_id: paymentId,
+            preference_id: preferenceId
+          })
+        });
+
+        const orden = data?.orden;
+        if (!orden?.folio) {
+          if (!vieneDeCallback && data?.pendiente) return;
+          throw new Error('No se pudo generar la orden después del pago');
+        }
+
+        setCarrito([]);
+        setCarritoCreadoEn(Date.now());
+        setCheckout((prev) => ({ ...prev, notas: '' }));
+        cerrarCarrito();
+        await cargarMisOrdenes();
+        await cargarProductos();
+        limpiarRetornoMercadoPago();
+        limpiarPendienteLocal();
+
+        await mostrarConfirmacion(
+          `Pago confirmado. Tu pedido ${orden.folio} ya fue generado correctamente.`,
+          'Pago confirmado'
+        );
+      } catch (error) {
+        limpiarRetornoMercadoPago();
+        mostrarNotificacion(error?.message || 'No se pudo confirmar el pago de Mercado Pago', 'error');
+      } finally {
+        if (vieneDeCallback) {
+          setProcesandoPagoMp(false);
+        }
+        confirmandoPagoMpRef.current = false;
+      }
+    };
+
+    ejecutar();
+  }, [clienteToken, mpReconcileTick]);
 
   useEffect(() => {
     if (!esVistaTrastienda) return;
@@ -1603,23 +1843,13 @@ export default function Tienda({
 
     const textEnc = encodeURIComponent(texto);
     const webUrl = `https://api.whatsapp.com/send?phone=${telefono}&text=${textEnc}`;
-    const mobileIntent = `intent://send?phone=${telefono}&text=${textEnc}#Intent;scheme=whatsapp;package=com.whatsapp;end`;
-    const esMovil = /Android|iPhone|iPad|iPod/i.test(String(navigator.userAgent || ''));
-
-    if (esMovil) {
-      window.location.href = mobileIntent;
-      setTimeout(() => {
-        window.location.href = webUrl;
-      }, 900);
-    } else {
-      try {
-        const popup = window.open(webUrl, '_blank', 'noopener,noreferrer');
-        if (!popup) {
-          window.location.href = webUrl;
-        }
-      } catch (_) {
+    try {
+      const popup = window.open(webUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
         window.location.href = webUrl;
       }
+    } catch (_) {
+      window.location.href = webUrl;
     }
     setMostrarWhatsForm(false);
     setWhatsForm({ nombre: '', mensaje: '' });
@@ -1790,6 +2020,7 @@ export default function Tienda({
       if (!id) continue;
       draft[id] = {
         estado: String(orden?.estado || 'pendiente').trim().toLowerCase(),
+        estado_pago: String(orden?.estado_pago || 'pendiente_manual').trim().toLowerCase(),
         paqueteria: String(orden?.paqueteria || '').trim().toLowerCase(),
         numero_guia: String(orden?.numero_guia || '').trim()
       };
@@ -2008,7 +2239,7 @@ export default function Tienda({
       });
       setCheckout((prev) => ({
         ...prev,
-        metodo_pago: data?.cliente?.forma_pago_preferida || prev.metodo_pago
+        metodo_pago: metodoPagoOculto(data?.cliente?.forma_pago_preferida) ? prev.metodo_pago : (data?.cliente?.forma_pago_preferida || prev.metodo_pago)
       }));
     } catch {
       localStorage.removeItem(CLAVE_TOKEN_CLIENTE);
@@ -2799,6 +3030,7 @@ export default function Tienda({
       const payloadRaw = (typeof cambios === 'string') ? { estado: cambios } : (cambios || {});
       const payload = {
         estado: String(payloadRaw?.estado || '').trim().toLowerCase(),
+        estado_pago: String(payloadRaw?.estado_pago || '').trim().toLowerCase(),
         paqueteria: String(payloadRaw?.paqueteria || '').trim().toLowerCase(),
         numero_guia: String(payloadRaw?.numero_guia || '').trim()
       };
@@ -2820,6 +3052,112 @@ export default function Tienda({
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo actualizar estado', 'error');
     }
+  }
+
+  async function actualizarEstadoPagoOrdenAdmin(id, estadoPago) {
+    try {
+      await fetchAdmin(`/tienda/admin/ordenes/${id}/pago`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado_pago: String(estadoPago || '').trim().toLowerCase() })
+      });
+      await cargarAdminOrdenes();
+      mostrarNotificacion('Estado de pago actualizado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo actualizar estado de pago', 'error');
+    }
+  }
+
+  async function eliminarOrdenAdmin(idOrden) {
+    const id = Number(idOrden || 0);
+    if (!Number.isFinite(id) || id <= 0) return;
+
+    const confirmar = await mostrarConfirmacion('¿Eliminar este pedido? Esta acción no se puede deshacer.', 'Eliminar pedido');
+    if (!confirmar) return;
+
+    setProcesandoPedidosAdmin(true);
+    try {
+      await fetchAdmin(`/tienda/admin/ordenes/${id}`, { method: 'DELETE' });
+      await cargarAdminOrdenes();
+      mostrarNotificacion('Pedido eliminado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo eliminar el pedido', 'error');
+    } finally {
+      setProcesandoPedidosAdmin(false);
+    }
+  }
+
+  async function eliminarPedidosFiltradosAdmin() {
+    const ids = ordenesAdminFiltradas
+      .map((orden) => Number(orden?.id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (!ids.length) {
+      mostrarNotificacion('No hay pedidos filtrados para eliminar', 'error');
+      return;
+    }
+
+    const confirmar = await mostrarConfirmacion(
+      `¿Eliminar ${ids.length} pedido(s) visibles en el filtro actual? Esta acción no se puede deshacer.`,
+      'Eliminar pedidos filtrados'
+    );
+    if (!confirmar) return;
+
+    setProcesandoPedidosAdmin(true);
+    try {
+      await fetchAdmin('/tienda/admin/ordenes/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+      });
+      await cargarAdminOrdenes();
+      mostrarNotificacion('Pedidos filtrados eliminados', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudieron eliminar los pedidos filtrados', 'error');
+    } finally {
+      setProcesandoPedidosAdmin(false);
+    }
+  }
+
+  async function reiniciarContadoresPedidosAdmin() {
+    const passwordAdmin = String(modalResetContadoresAdmin.password || '').trim();
+    if (!passwordAdmin) {
+      mostrarNotificacion('Se requiere la contraseña del admin', 'error');
+      return;
+    }
+
+    setProcesandoPedidosAdmin(true);
+    try {
+      await fetchAdmin('/tienda/admin/ordenes/reset-contadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password_admin: passwordAdmin,
+          password_ceo: passwordAdmin,
+          password: passwordAdmin
+        })
+      });
+      await cargarAdminOrdenes();
+      setBusquedaAdmin('');
+      setFiltroEstadoOrdenAdmin('todos');
+      setOrdenObjetivoAdmin({ id: '', folio: '' });
+      setModalResetContadoresAdmin({ visible: false, password: '' });
+      mostrarNotificacion('Contadores y pedidos reiniciados', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudieron reiniciar los contadores', 'error');
+    } finally {
+      setProcesandoPedidosAdmin(false);
+    }
+  }
+
+  function abrirModalResetContadoresAdmin() {
+    if (procesandoPedidosAdmin) return;
+    setModalResetContadoresAdmin({ visible: true, password: '' });
+  }
+
+  function cerrarModalResetContadoresAdmin() {
+    if (procesandoPedidosAdmin) return;
+    setModalResetContadoresAdmin({ visible: false, password: '' });
   }
 
 
@@ -3232,7 +3570,7 @@ export default function Tienda({
       });
       setCheckout((prev) => ({
         ...prev,
-        metodo_pago: data?.cliente?.forma_pago_preferida || prev.metodo_pago
+        metodo_pago: metodoPagoOculto(data?.cliente?.forma_pago_preferida) ? prev.metodo_pago : (data?.cliente?.forma_pago_preferida || prev.metodo_pago)
       }));
       mostrarNotificacion('Perfil guardado', 'exito');
     } catch (error) {
@@ -3262,8 +3600,91 @@ export default function Tienda({
       return;
     }
 
+    if (metodoPagoOculto(checkout.metodo_pago)) {
+      setCheckout((prev) => ({ ...prev, metodo_pago: 'transferencia' }));
+      mostrarNotificacion('Mercado Pago está oculto temporalmente. Usa transferencia, efectivo o tarjeta.', 'info');
+      return;
+    }
+
+    if (String(checkout.metodo_pago || '').trim().toLowerCase() === 'mercado_pago') {
+      const confirmar = await mostrarConfirmacion(
+        'Se creará tu pedido y te redirigiremos a Mercado Pago para completar el pago. ¿Deseas continuar?',
+        'Continuar con Mercado Pago'
+      );
+      if (!confirmar) return;
+    }
+
     try {
       setCreandoOrden(true);
+
+      if (String(checkout.metodo_pago || '').trim().toLowerCase() === 'mercado_pago') {
+        const urlRetornoBase = (() => {
+          try {
+            const origen = String(window.location.origin || '').trim();
+            const ruta = String(window.location.pathname || '').trim();
+            return `${origen}${ruta}`;
+          } catch {
+            return '';
+          }
+        })();
+
+        const dataCheckout = await fetchJson('/tienda/checkout/mercado-pago/preferencia', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${clienteToken}`
+          },
+          body: JSON.stringify({
+            items: carrito.map((item) => ({
+              nombre_receta: item.nombre_receta,
+              categoria_nombre: item.categoria_nombre || '',
+              descripcion_mp: item.descripcion_mp || '',
+              cantidad: item.cantidad,
+              variante: item.variante || ''
+            })),
+            origen_pedido: resolverOrigenPedidoCliente(),
+            id_punto_entrega: Number(checkout.id_punto_entrega) || 0,
+            notas: checkout.notas,
+            url_retorno_base: urlRetornoBase
+          })
+        });
+
+        const mpUrl = String(dataCheckout?.checkout?.init_point || '').trim();
+        if (!mpUrl) throw new Error('No se pudo iniciar checkout de Mercado Pago');
+
+        try {
+          localStorage.setItem(CLAVE_MP_CHECKOUT_PENDIENTE, JSON.stringify({
+            preference_id: String(dataCheckout?.checkout?.preference_id || '').trim(),
+            folio: String(dataCheckout?.folio || '').trim(),
+            creado_en: Date.now()
+          }));
+        } catch {
+        }
+
+        let popup = null;
+        try {
+          popup = window.open(mpUrl, '_blank', 'noopener,noreferrer');
+        } catch {
+          popup = null;
+        }
+        if (!popup) {
+          window.location.href = mpUrl;
+        } else {
+          const monitorPopup = window.setInterval(() => {
+            try {
+              if (popup.closed) {
+                window.clearInterval(monitorPopup);
+                setMpReconcileTick((v) => v + 1);
+              }
+            } catch {
+            }
+          }, 1200);
+          window.setTimeout(() => window.clearInterval(monitorPopup), 20 * 60 * 1000);
+        }
+        mostrarNotificacion('Te estamos redirigiendo a Mercado Pago para confirmar tu pago.', 'exito');
+        return;
+      }
+
       const data = await fetchJson('/tienda/ordenes', {
         method: 'POST',
         headers: {
@@ -3278,6 +3699,7 @@ export default function Tienda({
             cantidad: item.cantidad,
             variante: item.variante || ''
           })),
+          origen_pedido: resolverOrigenPedidoCliente(),
           metodo_pago: checkout.metodo_pago,
           id_punto_entrega: Number(checkout.id_punto_entrega) || 0,
           notas: checkout.notas
@@ -3293,17 +3715,6 @@ export default function Tienda({
       cerrarCarrito();
       await cargarMisOrdenes();
       await cargarProductos();
-
-      if (data?.checkout?.init_point) {
-        window.open(data.checkout.init_point, '_blank', 'noopener,noreferrer');
-        mostrarNotificacion(`Orden ${orden.folio} creada. Abriendo Mercado Pago...`, 'exito');
-        return;
-      }
-
-      if (data?.checkout?.error) {
-        mostrarNotificacion(`Orden ${orden.folio} creada. ${data.checkout.error}`, 'error');
-        return;
-      }
 
       mostrarNotificacion(`Orden ${orden.folio} creada correctamente`, 'exito');
     } catch (error) {
@@ -3789,6 +4200,11 @@ export default function Tienda({
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, atencion_correo: e.target.value }))}
                     />
                     <input
+                      placeholder="CLABE para transferencias"
+                      value={configTiendaAdmin.transferencia_clabe || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, transferencia_clabe: e.target.value }))}
+                    />
+                    <input
                       placeholder="WhatsApp (solo números, ej 5212220001111)"
                       value={configTiendaAdmin.whatsapp_numero || ''}
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, whatsapp_numero: e.target.value }))}
@@ -3996,6 +4412,15 @@ export default function Tienda({
                       value={configTiendaAdmin.correo_confirmacion_cuerpo || ''}
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_confirmacion_cuerpo: e.target.value }))}
                     />
+                    <div className="tiendaAdminSubtexto">Variables sugeridas: {'{{nombre_cliente}}'}, {'{{folio}}'}, {'{{total}}'}, {'{{metodo_pago}}'}, {'{{clabe_transferencia_linea}}'}, {'{{punto_entrega}}'}, {'{{direccion_entrega}}'}, {'{{detalle_items}}'}</div>
+                    <textarea
+                      rows={8}
+                      className="tiendaAdminCorreoTextarea"
+                      placeholder="Cuerpo (contra entrega: efectivo/tarjeta)"
+                      value={configTiendaAdmin.correo_confirmacion_cuerpo_contraentrega || ''}
+                      onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_confirmacion_cuerpo_contraentrega: e.target.value }))}
+                    />
+                    <div className="tiendaAdminSubtexto">Variables sugeridas (contra entrega): {'{{nombre_cliente}}'}, {'{{folio}}'}, {'{{total}}'}, {'{{metodo_pago}}'}, {'{{estado_preparacion_linea}}'}, {'{{punto_entrega}}'}, {'{{direccion_entrega}}'}, {'{{detalle_items}}'}</div>
                   </div>
 
                   <div className="tiendaAdminHorariosBox">
@@ -4702,13 +5127,73 @@ export default function Tienda({
                   </div>
                 )}
                 <div className="tiendaAdminResumenPedidos">
-                  <span>Total: <strong>{resumenOrdenesAdmin.total}</strong></span>
-                  <span>Pendientes: <strong>{resumenOrdenesAdmin.pendiente}</strong></span>
-                  <span>Procesando: <strong>{resumenOrdenesAdmin.procesando}</strong></span>
-                  <span>Enviados por paquetería: <strong>{resumenOrdenesAdmin.enviado_por_paqueteria}</strong></span>
-                  <span>En tránsito: <strong>{resumenOrdenesAdmin.en_transito}</strong></span>
-                  <span>Entregados: <strong>{resumenOrdenesAdmin.entregado}</strong></span>
-                  <span>Cancelados: <strong>{resumenOrdenesAdmin.cancelado}</strong></span>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'todos' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('todos')}
+                  >
+                    Total: <strong>{resumenOrdenesAdmin.total}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'pendiente' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('pendiente')}
+                  >
+                    Pendientes: <strong>{resumenOrdenesAdmin.pendiente}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'procesando' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('procesando')}
+                  >
+                    Procesando: <strong>{resumenOrdenesAdmin.procesando}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'enviado_por_paqueteria' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('enviado_por_paqueteria')}
+                  >
+                    Enviados por paquetería: <strong>{resumenOrdenesAdmin.enviado_por_paqueteria}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'en_transito' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('en_transito')}
+                  >
+                    En tránsito: <strong>{resumenOrdenesAdmin.en_transito}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'entregado' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('entregado')}
+                  >
+                    Entregados: <strong>{resumenOrdenesAdmin.entregado}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className={filtroEstadoOrdenAdmin === 'cancelado' ? 'activo' : ''}
+                    onClick={() => setFiltroEstadoOrdenAdmin('cancelado')}
+                  >
+                    Cancelados: <strong>{resumenOrdenesAdmin.cancelado}</strong>
+                  </button>
+                </div>
+                <div className="tiendaAdminPedidosDangerActions">
+                  <button
+                    type="button"
+                    className="boton botonDanger"
+                    onClick={eliminarPedidosFiltradosAdmin}
+                    disabled={procesandoPedidosAdmin || !ordenesAdminFiltradas.length}
+                  >
+                    {procesandoPedidosAdmin ? 'Procesando...' : `Eliminar filtrados (${ordenesAdminFiltradas.length})`}
+                  </button>
+                  <button
+                    type="button"
+                    className="boton botonEliminar"
+                    onClick={abrirModalResetContadoresAdmin}
+                    disabled={procesandoPedidosAdmin}
+                  >
+                    {procesandoPedidosAdmin ? 'Procesando...' : 'Reiniciar contadores de pedidos'}
+                  </button>
                 </div>
                 <div className="tiendaAdminListado tiendaAdminListadoAmplio tiendaAdminListadoPedidos">
                   <div className="tiendaAdminOrdenGrid">
@@ -4716,6 +5201,7 @@ export default function Tienda({
                     (() => {
                       const draft = seguimientoDraftPorOrden[o.id] || {
                         estado: String(o.estado || 'pendiente').trim().toLowerCase(),
+                        estado_pago: String(o.estado_pago || 'pendiente_manual').trim().toLowerCase(),
                         paqueteria: String(o.paqueteria || '').trim().toLowerCase(),
                         numero_guia: String(o.numero_guia || '').trim()
                       };
@@ -4741,7 +5227,7 @@ export default function Tienda({
                             <strong>{o.folio}</strong>
                             <div className="tiendaAdminSubtexto">{o.nombre_cliente} · {o.email_cliente || 'Sin correo'} · {o.telefono_cliente || 'Sin teléfono'}</div>
                             <div className="tiendaAdminSubtexto">Entrega: {o.nombre_punto_entrega || '-'} · {o.direccion_entrega || '-'}</div>
-                            <div className="tiendaAdminSubtexto">Pago: {o.metodo_pago || '-'} · Total: {precio(o.total)} · {String(o.creado_en || '').replace('T', ' ').slice(0, 16)}</div>
+                            <div className="tiendaAdminSubtexto">Origen: {etiquetaOrigenPedido(o.origen_pedido)} · Pago: {o.metodo_pago || '-'} · Estatus pago: {etiquetaEstadoPago(draft.estado_pago || o.estado_pago)} · Total: {precio(o.total)} · {String(o.creado_en || '').replace('T', ' ').slice(0, 16)}</div>
                             <div className="tiendaAdminSubtexto">Estado actual: {etiquetaEstadoPedido(estadoActual)}</div>
                             {String(o.notas || '').trim() && <div className="tiendaAdminSubtexto">Notas: {o.notas}</div>}
                             {Boolean(draft.paqueteria || draft.numero_guia) && (
@@ -4759,13 +5245,14 @@ export default function Tienda({
                               value={estadoSeleccionado}
                               onChange={(e) => {
                                 const nuevoEstado = String(e.target.value || '').trim().toLowerCase();
-                                const draftActual = seguimientoDraftPorOrden[o.id] || { estado: estadoActual, paqueteria: '', numero_guia: '' };
+                                const draftActual = seguimientoDraftPorOrden[o.id] || { estado: estadoActual, estado_pago: String(o.estado_pago || 'pendiente_manual').trim().toLowerCase(), paqueteria: '', numero_guia: '' };
                                 actualizarDraftSeguimientoOrden(o.id, { estado: nuevoEstado });
                                 if (nuevoEstado === 'enviado_por_paqueteria') {
                                   return;
                                 }
                                 actualizarEstadoOrdenAdmin(o.id, {
                                   estado: nuevoEstado,
+                                  estado_pago: draftActual.estado_pago,
                                   paqueteria: draftActual.paqueteria,
                                   numero_guia: draftActual.numero_guia
                                 });
@@ -4773,6 +5260,21 @@ export default function Tienda({
                             >
                               {ESTATUS_PEDIDO_OPCIONES.map((estado) => (
                                 <option key={`estado-${o.id}-${estado.value}`} value={estado.value}>{estado.label}</option>
+                              ))}
+                            </select>
+
+                            <label htmlFor={`orden-estado-pago-${o.id}`} className="tiendaAdminMiniLabel">Estatus del pago</label>
+                            <select
+                              id={`orden-estado-pago-${o.id}`}
+                              value={String(draft.estado_pago || o.estado_pago || 'pendiente_manual').trim().toLowerCase()}
+                              onChange={(e) => {
+                                const nuevoEstadoPago = String(e.target.value || '').trim().toLowerCase();
+                                actualizarDraftSeguimientoOrden(o.id, { estado_pago: nuevoEstadoPago });
+                                actualizarEstadoPagoOrdenAdmin(o.id, nuevoEstadoPago);
+                              }}
+                            >
+                              {ESTATUS_PAGO_OPCIONES.map((estadoPago) => (
+                                <option key={`estado-pago-${o.id}-${estadoPago.value}`} value={estadoPago.value}>{estadoPago.label}</option>
                               ))}
                             </select>
 
@@ -4818,6 +5320,15 @@ export default function Tienda({
                                 )}
                               </div>
                             )}
+
+                            <button
+                              type="button"
+                              className="botonPequeno botonDanger"
+                              onClick={() => eliminarOrdenAdmin(o.id)}
+                              disabled={procesandoPedidosAdmin}
+                            >
+                              {procesandoPedidosAdmin ? 'Procesando...' : 'Eliminar pedido'}
+                            </button>
 
                           </div>
                         </div>
@@ -5228,7 +5739,7 @@ export default function Tienda({
                         <option value="efectivo">Efectivo</option>
                         <option value="transferencia">Transferencia</option>
                         <option value="tarjeta">Tarjeta terminal</option>
-                        <option value="mercado_pago">Mercado Pago</option>
+                        {!OCULTAR_MERCADO_PAGO && <option value="mercado_pago">Mercado Pago</option>}
                       </select>
                     </div>
                   </div>
@@ -5267,7 +5778,9 @@ export default function Tienda({
                           return (
                             <>
                               <strong>{orden.folio}</strong>
+                              <span>Origen: {etiquetaOrigenPedido(orden.origen_pedido)}</span>
                               <span>Pago: {orden.metodo_pago}</span>
+                              <span>Estatus pago: {etiquetaEstadoPago(orden.estado_pago)}</span>
                               <span>Total: {precio(orden.total)}</span>
                               <span>Estado: {etiquetaEstadoPedido(orden.estado)}</span>
                               {String(orden?.paqueteria || '').trim() && <span>Paquetería: {etiquetaPaqueteria(orden.paqueteria)}</span>}
@@ -5947,6 +6460,38 @@ export default function Tienda({
         </div>
       )}
 
+      {modalResetContadoresAdmin.visible && (
+        <div className="modal tiendaModalTop" style={{ display: 'flex' }} onClick={cerrarModalResetContadoresAdmin}>
+          <div className="contenidoModal tiendaAuthModal tiendaAdminResetModal" onClick={(e) => e.stopPropagation()}>
+            <div className="encabezadoModal">
+              <h3>Reiniciar contadores de pedidos</h3>
+              <button className="cerrarModal" type="button" onClick={cerrarModalResetContadoresAdmin} disabled={procesandoPedidosAdmin}>&times;</button>
+            </div>
+            <div className="tiendaAdminResetModalBody">
+              <p className="tiendaAdminResetAviso">
+                Esta acción eliminará todos los pedidos y reiniciará los contadores de folios.
+                Para confirmar, ingresa la contraseña del admin.
+              </p>
+              <div className="tiendaAdminResetPasswordRow">
+                <PasswordInput
+                  value={modalResetContadoresAdmin.password}
+                  onChange={(e) => setModalResetContadoresAdmin((prev) => ({ ...prev, password: e.target.value }))}
+                  inputClassName="tiendaAdminResetPasswordInput"
+                  placeholder="Contraseña del admin"
+                  disabled={procesandoPedidosAdmin}
+                />
+              </div>
+              <div className="tiendaAdminResetAcciones">
+                <button className="boton" type="button" onClick={cerrarModalResetContadoresAdmin} disabled={procesandoPedidosAdmin}>Cancelar</button>
+                <button className="boton botonEliminar" type="button" onClick={reiniciarContadoresPedidosAdmin} disabled={procesandoPedidosAdmin}>
+                  {procesandoPedidosAdmin ? 'Procesando...' : 'Confirmar reinicio'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {mostrandoPreviewCorreo && (
         <div className="modal tiendaModalTop" style={{ display: 'flex' }} onClick={() => setMostrandoPreviewCorreo(false)}>
           <div className="contenidoModal tiendaAuthModal tiendaPreviewCorreoModal" onClick={(e) => e.stopPropagation()}>
@@ -5981,6 +6526,21 @@ export default function Tienda({
                 />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {procesandoPagoMp && (
+        <div className="modal tiendaModalTop" style={{ display: 'flex' }} onClick={(e) => e.stopPropagation()}>
+          <div className="contenidoModal tiendaPagoProcesoModal" onClick={(e) => e.stopPropagation()}>
+            <div className="encabezadoModal">
+              <h3>Procesando pago</h3>
+            </div>
+            <div className="tiendaPagoProcesoContenido">
+              <div className="tiendaPagoProcesoSpinner" aria-hidden="true" />
+              <p>Confirmando el pago en Mercado Pago y generando tu pedido...</p>
+              <small>No cierres esta ventana.</small>
+            </div>
           </div>
         </div>
       )}

@@ -2400,8 +2400,14 @@
 
 .tiendaAdminOrdenGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+@media (max-width: 1500px) {
+  .tiendaAdminOrdenGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .tiendaAdminClienteCard,
@@ -2460,6 +2466,12 @@
   gap: 8px;
   font-size: 13px;
   color: #31433b;
+}
+
+.tiendaAdminPedidosDangerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .tiendaAdminServicioDomicilioAlert {
@@ -2538,11 +2550,24 @@
   box-shadow: none;
 }
 
-.tiendaAdminResumenPedidos span {
+.tiendaAdminResumenPedidos button {
   border: 1px solid #d6e1db;
   border-radius: 999px;
   padding: 6px 10px;
   background: #f7faf8;
+  color: #31433b;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tiendaAdminResumenPedidos button:hover {
+  background: #eef6f2;
+}
+
+.tiendaAdminResumenPedidos button.activo {
+  border-color: #2e7d32;
+  background: #e9f6ee;
+  color: #1f5d31;
 }
 
 .tiendaAdminOrdenAcciones {
@@ -3112,8 +3137,77 @@
   max-width: min(560px, 96vw);
 }
 
+.tiendaAdminResetModal {
+  width: min(520px, 96vw);
+  max-width: min(520px, 96vw);
+}
+
 .tiendaModalTop {
   z-index: 4200;
+}
+
+.tiendaAdminResetModalBody {
+  display: grid;
+  gap: 12px;
+}
+
+.tiendaAdminResetAviso {
+  margin: 0;
+  color: #33463d;
+  line-height: 1.45;
+  background: #f4f8f4;
+  border: 1px solid #d8e4db;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.tiendaAdminResetPasswordRow {
+  display: grid;
+  gap: 6px;
+}
+
+.tiendaAdminResetPasswordRow .passwordInputWrap {
+  width: 100%;
+}
+
+.tiendaAdminResetPasswordInput {
+  width: 100%;
+  border: 1px solid #cfd9d3;
+  border-radius: 10px;
+  padding: 11px 42px 11px 12px;
+  font-size: 15px;
+  color: #2f2f2f;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.tiendaAdminResetPasswordInput:focus {
+  outline: none;
+  border-color: #6fa57a;
+  box-shadow: 0 0 0 3px rgba(111, 165, 122, 0.18);
+}
+
+.tiendaAdminResetAcciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaAdminResetAcciones .boton {
+  min-width: 148px;
+}
+
+@media (max-width: 640px) {
+  .tiendaAdminResetAcciones {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminResetAcciones .boton {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .tiendaAdminPuntoModalForm {
@@ -3908,5 +4002,47 @@
 
   .tiendaWhatsPanel {
     bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.tiendaPagoProcesoModal {
+  max-width: 460px;
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+.tiendaPagoProcesoContenido {
+  padding: 22px 18px 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.tiendaPagoProcesoContenido p {
+  margin: 0;
+  font-weight: 700;
+  color: #2a2a2a;
+}
+
+.tiendaPagoProcesoContenido small {
+  color: #4f4f4f;
+  font-size: 12px;
+}
+
+.tiendaPagoProcesoSpinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 4px solid rgba(46, 125, 50, 0.2);
+  border-top-color: #2e7d32;
+  animation: tiendaPagoProcesoSpin 0.9s linear infinite;
+}
+
+@keyframes tiendaPagoProcesoSpin {
+  to {
+    transform: rotate(360deg);
   }
 }

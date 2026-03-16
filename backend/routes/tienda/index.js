@@ -5,8 +5,10 @@ import { convertirCantidadDetallada } from "../../utils/index.js";
 import { transmitir } from "../../utils/index.js";
 
 const TIENDA_JWT_SECRET = process.env.TIENDA_JWT_SECRET || process.env.JWT_SECRET || "chipactli_tienda_jwt_secret";
-const PREFIJO_FOLIO_TIENDA = 'CHV';
-const LONGITUD_CONSECUTIVO_TIENDA = 7;
+const PREFIJO_FOLIO_TIENDA_WEB = 'CHIVT';
+const PREFIJO_FOLIO_TIENDA_APP = 'CHIAPP';
+const LONGITUD_CONSECUTIVO_TIENDA = 6;
+const ESTADOS_PAGO_PERMITIDOS = new Set(['pendiente', 'pendiente_manual', 'pagado', 'rechazado', 'reembolsado']);
 
 let mailTransporter = null;
 
@@ -64,10 +66,31 @@ function escaparHtml(valor = '') {
     .replace(/'/g, '&#039;');
 }
 
+function resolverUrlLogoCorreo() {
+  const logoConfigRaw = String(process.env.MAIL_LOGO_URL || '').trim();
+  const basePublica = String(
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.WEB_BASE_URL
+    || process.env.RENDER_EXTERNAL_URL
+    || ''
+  ).trim().replace(/\/+$/, '');
+
+  if (logoConfigRaw) {
+    if (/^https?:\/\//i.test(logoConfigRaw)) return logoConfigRaw;
+    if (/^cid:/i.test(logoConfigRaw) || /^data:/i.test(logoConfigRaw)) return logoConfigRaw;
+    if (logoConfigRaw.startsWith('/')) {
+      return basePublica ? `${basePublica}${logoConfigRaw}` : '';
+    }
+    return '';
+  }
+
+  if (basePublica) return `${basePublica}/images/logo.png`;
+  return '';
+}
+
 function layoutCorreoChipactli({ titulo = '', saludo = '', intro = '', bloquesHtml = '', cierre = '' }) {
-  const logoConfig = String(process.env.MAIL_LOGO_URL || '').trim();
-  const basePublica = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/+$/, '');
-  const logoUrl = logoConfig || (basePublica ? `${basePublica}/images/logo.png` : '');
+  const logoUrl = resolverUrlLogoCorreo();
   const anio = new Date().getFullYear();
   return `
     <div style="margin:0;padding:0;background:#f5f7f2;">
@@ -121,12 +144,14 @@ function obtenerPlantillasCorreoDesdeConfig(config = {}) {
     bienvenida_cuerpo: String(config?.correo_bienvenida_cuerpo || CONFIG_DEFAULT.correo_bienvenida_cuerpo),
     confirmacion_asunto: String(config?.correo_confirmacion_asunto || CONFIG_DEFAULT.correo_confirmacion_asunto),
     confirmacion_cuerpo: String(config?.correo_confirmacion_cuerpo || CONFIG_DEFAULT.correo_confirmacion_cuerpo),
+    confirmacion_cuerpo_contraentrega: String(config?.correo_confirmacion_cuerpo_contraentrega || CONFIG_DEFAULT.correo_confirmacion_cuerpo_contraentrega),
     estado_asunto: String(config?.correo_estado_asunto || CONFIG_DEFAULT.correo_estado_asunto),
     estado_cuerpo: String(config?.correo_estado_cuerpo || CONFIG_DEFAULT.correo_estado_cuerpo),
     diagnostico_asunto: String(config?.correo_diagnostico_asunto || CONFIG_DEFAULT.correo_diagnostico_asunto),
     diagnostico_cuerpo: String(config?.correo_diagnostico_cuerpo || CONFIG_DEFAULT.correo_diagnostico_cuerpo),
     campana_asunto: String(config?.correo_campana_asunto || CONFIG_DEFAULT.correo_campana_asunto),
-    campana_cuerpo: String(config?.correo_campana_cuerpo || CONFIG_DEFAULT.correo_campana_cuerpo)
+    campana_cuerpo: String(config?.correo_campana_cuerpo || CONFIG_DEFAULT.correo_campana_cuerpo),
+    transferencia_clabe: String(config?.transferencia_clabe || CONFIG_DEFAULT.transferencia_clabe)
   };
 }
 
@@ -181,13 +206,29 @@ function construirCorreoConfirmacionPedido({ cliente, folio, total, metodoPago, 
     folio: folioTxt || 'Generado',
     total: formatearMonedaMXN(total),
     metodo_pago: String(metodoPago || 'No especificado'),
+    clabe_transferencia: '',
+    clabe_transferencia_linea: '',
+    estado_preparacion_linea: '',
     punto_entrega: String(puntoEntrega || '').trim() || 'No especificado',
     direccion_entrega: direccionEntrega ? `Direccion/horario: ${String(direccionEntrega || '').trim()}` : '',
     detalle_items: resumenItemsTexto || '- Sin productos'
   };
 
+  const metodoPagoNormalizado = String(metodoPago || '').trim().toLowerCase();
+  const clabeTransferencia = String(plantillas?.transferencia_clabe || '').trim();
+  const esTransferencia = metodoPagoNormalizado.includes('transfer') || metodoPagoNormalizado.includes('spei');
+  if (esTransferencia && clabeTransferencia) {
+    vars.clabe_transferencia = clabeTransferencia;
+    vars.clabe_transferencia_linea = `CLABE para transferencia: ${clabeTransferencia}`;
+  } else {
+    vars.estado_preparacion_linea = 'Tu pedido ya se está poniendo en preparación.';
+  }
+
   const asunto = renderTemplate(plantillas?.confirmacion_asunto || CONFIG_DEFAULT.correo_confirmacion_asunto, vars).trim() || 'Confirmacion de pedido';
-  const texto = renderTemplate(plantillas?.confirmacion_cuerpo || CONFIG_DEFAULT.correo_confirmacion_cuerpo, vars).trim();
+  const plantillaConfirmacion = esTransferencia
+    ? (plantillas?.confirmacion_cuerpo || CONFIG_DEFAULT.correo_confirmacion_cuerpo)
+    : (plantillas?.confirmacion_cuerpo_contraentrega || CONFIG_DEFAULT.correo_confirmacion_cuerpo_contraentrega);
+  const texto = renderTemplate(plantillaConfirmacion, vars).trim();
 
   const resumenItemsHtml = (Array.isArray(items) ? items : [])
     .map((item) => {
@@ -204,6 +245,7 @@ function construirCorreoConfirmacionPedido({ cliente, folio, total, metodoPago, 
       <div><strong>Pedido:</strong> ${escaparHtml(folioTxt || 'Generado')}</div>
       <div><strong>Total:</strong> ${escaparHtml(formatearMonedaMXN(total))}</div>
       <div><strong>Metodo de pago:</strong> ${escaparHtml(String(metodoPago || 'No especificado'))}</div>
+      ${esTransferencia && clabeTransferencia ? `<div><strong>CLABE transferencia:</strong> ${escaparHtml(clabeTransferencia)}</div>` : ''}
       <div><strong>Punto de entrega:</strong> ${escaparHtml(String(puntoEntrega || '').trim() || 'No especificado')}</div>
       ${direccionEntrega ? `<div><strong>Direccion/horario:</strong> ${escaparHtml(String(direccionEntrega || '').trim())}</div>` : ''}
     </div>
@@ -214,8 +256,10 @@ function construirCorreoConfirmacionPedido({ cliente, folio, total, metodoPago, 
   const html = layoutCorreoChipactli({
     titulo: 'Pedido confirmado',
     saludo: `Hola ${nombreCliente},`,
-    intro: folioTxt ? `Recibimos tu pedido ${folioTxt}.` : 'Recibimos tu pedido correctamente.',
-    bloquesHtml: `${bloquesHtml}<div style="margin-top:12px;padding:10px 12px;border:1px dashed #dce8dc;border-radius:10px;background:#fcfefb;">${textoPlanoAHtmlLineas(texto)}</div>`,
+    intro: esTransferencia
+      ? (folioTxt ? `Recibimos tu pedido ${folioTxt}.` : 'Recibimos tu pedido correctamente.')
+      : (folioTxt ? `Tu pedido ${folioTxt} ya se está poniendo en preparación.` : 'Tu pedido ya se está poniendo en preparación.'),
+    bloquesHtml,
     cierre: 'Gracias por tu compra en CHIPACTLI.'
   });
 
@@ -426,6 +470,36 @@ function tieneClave(obj, clave) {
   return Object.prototype.hasOwnProperty.call(obj || {}, clave);
 }
 
+async function resolverSlugCatalogoUnico(bdVentas, slugDeseado, recetaNombreActual) {
+  const nombreActualNorm = String(recetaNombreActual || '').trim().toLowerCase();
+  let base = slugify(slugDeseado || recetaNombreActual || '');
+  if (!base) {
+    base = `receta-${Date.now()}`;
+  }
+
+  let intento = 1;
+  while (intento <= 200) {
+    const candidato = intento === 1 ? base : `${base}-${intento}`;
+    const existente = await dbGet(
+      bdVentas,
+      `SELECT receta_nombre
+       FROM tienda_catalogo
+       WHERE LOWER(TRIM(slug)) = LOWER(TRIM(?))
+       LIMIT 1`,
+      [candidato]
+    );
+
+    const nombreExistenteNorm = String(existente?.receta_nombre || '').trim().toLowerCase();
+    if (!existente || (nombreExistenteNorm && nombreExistenteNorm === nombreActualNorm)) {
+      return candidato;
+    }
+
+    intento += 1;
+  }
+
+  return `${base}-${Date.now()}`;
+}
+
 function boolToInt(valor) {
   return valor === true || Number(valor) === 1 ? 1 : 0;
 }
@@ -554,6 +628,7 @@ const CONFIG_DEFAULT = {
   atencion_horario_lunes_sabado: '09:00 a.m. - 09:00 p.m.',
   atencion_horario_domingo: '08:00 a.m. - 12:00 p.m.',
   atencion_correo: 'atc@chipactli.mx',
+  transferencia_clabe: '',
   whatsapp_numero: '',
   social_facebook_url: '',
   social_facebook_activo: '0',
@@ -577,7 +652,8 @@ const CONFIG_DEFAULT = {
   correo_bienvenida_asunto: 'Bienvenido a CHIPACTLI, {{nombre_cliente}}',
   correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra tienda.\n\nIr a la tienda: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
   correo_confirmacion_asunto: 'Confirmacion de pedido {{folio}}',
-  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
+  correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}} correctamente.\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\n{{clabe_transferencia_linea}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nImportante:\nRealiza tu transferencia usando la CLABE indicada y guarda tu comprobante.\nEn cuanto se confirme el pago, te notificaremos el siguiente avance de tu pedido.\n\nGracias por tu compra en CHIPACTLI.',
+  correo_confirmacion_cuerpo_contraentrega: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\n{{estado_preparacion_linea}}\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
   correo_estado_asunto: 'Actualizacion de pedido {{folio}}: {{estado_titulo}}',
   correo_estado_cuerpo: 'Hola {{nombre_cliente}},\n\nTu pedido {{folio}} cambio de estado.\nEstado actual: {{estado_titulo}}\n{{mensaje_estado}}\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{paqueteria_linea}}\n{{guia_linea}}\n\nGracias por comprar en CHIPACTLI.',
   correo_diagnostico_asunto: 'Diagnostico correo CHIPACTLI{{etiqueta_sufijo}}',
@@ -1183,7 +1259,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
   return aplicarDescuentosProductos(todo, bdVentas);
 }
 
-async function crearPreferenciaMercadoPago({ orden, items }) {
+async function crearPreferenciaMercadoPago({ orden, items, returnUrls = {} }) {
   const accessToken = String(process.env.MP_ACCESS_TOKEN || "").trim();
   if (!accessToken) {
     return { ok: false, mensaje: "Mercado Pago no configurado (falta MP_ACCESS_TOKEN)" };
@@ -1201,16 +1277,17 @@ async function crearPreferenciaMercadoPago({ orden, items }) {
     }
   };
 
-  const successUrl = normalizarUrl(process.env.MP_SUCCESS_URL, 'https://www.mercadopago.com.mx');
-  const pendingUrl = normalizarUrl(process.env.MP_PENDING_URL, 'https://www.mercadopago.com.mx');
-  const failureUrl = normalizarUrl(process.env.MP_FAILURE_URL, 'https://www.mercadopago.com.mx');
+  const successUrl = normalizarUrl(returnUrls?.success, normalizarUrl(process.env.MP_SUCCESS_URL, 'https://www.mercadopago.com.mx'));
+  const pendingUrl = normalizarUrl(returnUrls?.pending, normalizarUrl(process.env.MP_PENDING_URL, 'https://www.mercadopago.com.mx'));
+  const failureUrl = normalizarUrl(returnUrls?.failure, normalizarUrl(process.env.MP_FAILURE_URL, 'https://www.mercadopago.com.mx'));
 
   const puedeAutoReturn = (() => {
     try {
       const parsed = new URL(successUrl);
       const host = String(parsed.hostname || '').toLowerCase();
       const esLocal = host === 'localhost' || host === '127.0.0.1';
-      return parsed.protocol === 'https:' && !esLocal;
+      const tieneHash = String(parsed.hash || '').trim().length > 0;
+      return parsed.protocol === 'https:' && !esLocal && !tieneHash;
     } catch {
       return false;
     }
@@ -1257,6 +1334,135 @@ async function crearPreferenciaMercadoPago({ orden, items }) {
     init_point: data?.init_point || "",
     sandbox_init_point: data?.sandbox_init_point || ""
   };
+}
+
+async function consultarPagoMercadoPagoPorId(paymentId = '') {
+  const accessToken = String(process.env.MP_ACCESS_TOKEN || '').trim();
+  const pagoId = String(paymentId || '').trim();
+  if (!accessToken || !pagoId) return null;
+
+  const endpoint = `https://api.mercadopago.com/v1/payments/${encodeURIComponent(pagoId)}`;
+  const respuesta = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!respuesta.ok) return null;
+
+  const pago = await respuesta.json();
+  return {
+    estado_pago: mapearEstadoPagoDesdeMercadoPago(pago?.status),
+    mp_status: String(pago?.status || '').trim(),
+    mp_status_detail: String(pago?.status_detail || '').trim(),
+    mp_payment_id: String(pago?.id || '').trim(),
+    mp_preference_id: String(pago?.order?.id || pago?.metadata?.preference_id || '').trim(),
+    mp_external_reference: String(pago?.external_reference || '').trim(),
+    mp_date_approved: String(pago?.date_approved || '').trim()
+  };
+}
+
+function normalizarEstadoPago(valor, fallback = 'pendiente') {
+  const clave = String(valor || '').trim().toLowerCase();
+  return ESTADOS_PAGO_PERMITIDOS.has(clave) ? clave : fallback;
+}
+
+function normalizarOrigenPedido(valor, fallback = 'web') {
+  const origen = String(valor || '').trim().toLowerCase();
+  return (origen === 'app' || origen === 'web') ? origen : fallback;
+}
+
+function mapearEstadoPagoDesdeMercadoPago(statusRaw = '') {
+  const status = String(statusRaw || '').trim().toLowerCase();
+  if (status === 'approved' || status === 'authorized') return 'pagado';
+  if (status === 'rejected' || status === 'cancelled' || status === 'charged_back') return 'rechazado';
+  if (status === 'refunded') return 'reembolsado';
+  return 'pendiente';
+}
+
+async function consultarPagoMercadoPagoPorFolio(folio = '') {
+  const accessToken = String(process.env.MP_ACCESS_TOKEN || '').trim();
+  const folioTxt = String(folio || '').trim();
+  if (!accessToken || !folioTxt) return null;
+
+  const endpoint = `https://api.mercadopago.com/v1/payments/search?sort=date_created&criteria=desc&limit=1&external_reference=${encodeURIComponent(folioTxt)}`;
+  const respuesta = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!respuesta.ok) return null;
+
+  const data = await respuesta.json();
+  const pago = Array.isArray(data?.results) ? data.results[0] : null;
+  if (!pago) return null;
+
+  return {
+    estado_pago: mapearEstadoPagoDesdeMercadoPago(pago?.status),
+    mp_status: String(pago?.status || '').trim(),
+    mp_status_detail: String(pago?.status_detail || '').trim(),
+    mp_payment_id: String(pago?.id || '').trim(),
+    mp_date_approved: String(pago?.date_approved || '').trim()
+  };
+}
+
+async function refrescarEstadoPagoOrdenSiAplica(bdVentas, orden = {}) {
+  const metodoPago = String(orden?.metodo_pago || '').trim().toLowerCase();
+  if (metodoPago !== 'mercado_pago') {
+    return orden;
+  }
+
+  try {
+    const pagoMp = await consultarPagoMercadoPagoPorFolio(orden?.folio);
+    if (!pagoMp?.estado_pago) return orden;
+
+    const estadoPagoActual = normalizarEstadoPago(orden?.estado_pago, 'pendiente');
+    const estadoPagoNuevo = normalizarEstadoPago(pagoMp.estado_pago, estadoPagoActual);
+    if (estadoPagoNuevo === estadoPagoActual) return { ...orden, estado_pago: estadoPagoActual };
+
+    let detallePago = {};
+    try {
+      detallePago = JSON.parse(String(orden?.detalle_pago || '{}')) || {};
+    } catch {
+      detallePago = {};
+    }
+
+    detallePago = {
+      ...detallePago,
+      proveedor: 'mercado_pago',
+      estado_pago: estadoPagoNuevo,
+      mp_status: pagoMp.mp_status,
+      mp_status_detail: pagoMp.mp_status_detail,
+      mp_payment_id: pagoMp.mp_payment_id,
+      mp_date_approved: pagoMp.mp_date_approved,
+      actualizado_en: new Date().toISOString()
+    };
+
+    const estadoOrdenActual = String(orden?.estado || 'pendiente').trim().toLowerCase();
+    const estadoOrdenNuevo = (estadoPagoNuevo === 'pagado' && (estadoOrdenActual === 'pendiente' || !estadoOrdenActual))
+      ? 'confirmado'
+      : estadoOrdenActual;
+
+    await dbRun(
+      bdVentas,
+      `UPDATE tienda_ordenes
+       SET estado_pago = ?, detalle_pago = ?, estado = ?, estado_pago_actualizado_en = CURRENT_TIMESTAMP, actualizado_en = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [estadoPagoNuevo, JSON.stringify(detallePago), estadoOrdenNuevo, Number(orden?.id) || 0]
+    );
+
+    return {
+      ...orden,
+      estado_pago: estadoPagoNuevo,
+      estado: estadoOrdenNuevo,
+      detalle_pago: JSON.stringify(detallePago)
+    };
+  } catch {
+    return orden;
+  }
 }
 
 async function registrarRecuperacionVenta(bdInventario, { fechaVenta, importeCobrado, ganancia }) {
@@ -1361,23 +1567,204 @@ async function pasarProduccionAVentasPorPedido(bdProduccion, bdVentas, bdInventa
   };
 }
 
-async function generarFolioOrdenTienda(bdVentas) {
+async function generarFolioOrdenTienda(bdVentas, origenPedido = 'web') {
+  const origen = normalizarOrigenPedido(origenPedido, 'web');
+  const prefijo = origen === 'app' ? PREFIJO_FOLIO_TIENDA_APP : PREFIJO_FOLIO_TIENDA_WEB;
   const row = await dbGet(
     bdVentas,
     `SELECT folio
-     FROM tienda_ordenes
-     WHERE folio LIKE ?
+     FROM (
+       SELECT folio, id FROM tienda_ordenes WHERE folio LIKE ?
+       UNION ALL
+       SELECT folio, id FROM tienda_checkout_intentos WHERE folio LIKE ?
+     ) AS folios
      ORDER BY folio DESC, id DESC
      LIMIT 1`,
-    [`${PREFIJO_FOLIO_TIENDA}%`]
+    [`${prefijo}%`, `${prefijo}%`]
   );
   const actual = String(row?.folio || '').trim();
-  const match = actual.match(/^CHV(\d+)$/);
+  const match = actual.match(new RegExp(`^${prefijo}(\\d+)$`));
   const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
-  return `${PREFIJO_FOLIO_TIENDA}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_TIENDA, '0')}`;
+  return `${prefijo}${String(consecutivo).padStart(LONGITUD_CONSECUTIVO_TIENDA, '0')}`;
+}
+
+async function crearOrdenTiendaDesdeItems({
+  bdProduccion,
+  bdVentas,
+  bdInventario,
+  cliente,
+  itemsFinales,
+  metodoPago,
+  origenPedido,
+  puntoEntrega,
+  direccionEntrega,
+  notas,
+  folio,
+  checkout = null
+}) {
+  const total = (itemsFinales || []).reduce((sum, item) => sum + (Number(item?.subtotal) || 0), 0);
+  const estadoPagoInicial = metodoPago.toLowerCase() === 'mercado_pago' ? 'pendiente' : 'pendiente_manual';
+
+  const insertOrden = await dbRun(
+    bdVentas,
+    `INSERT INTO tienda_ordenes
+     (folio, origen_pedido, id_cliente, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago, total, moneda, referencia_externa, detalle_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, creado_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, 'MXN', '', '', ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+    [
+      folio,
+      origenPedido,
+      cliente.id,
+      cliente.nombre,
+      cliente.email,
+      cliente.telefono || '',
+      metodoPago,
+      estadoPagoInicial,
+      total,
+      puntoEntrega.id,
+      String(puntoEntrega.nombre || ''),
+      direccionEntrega,
+      notas
+    ]
+  );
+
+  for (const item of (itemsFinales || [])) {
+    await dbRun(
+      bdVentas,
+      `INSERT INTO tienda_orden_items (id_orden, receta_nombre, cantidad, precio_unitario, subtotal, variante)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [insertOrden.lastID, item.nombre_receta, item.cantidad, item.precio_unitario, item.subtotal, item.variante]
+    );
+  }
+
+  let cantidadAutoVendida = 0;
+  for (const item of (itemsFinales || [])) {
+    const cantidadSolicitada = Number(item?.cantidad_auto_venta) || 0;
+    if (cantidadSolicitada <= 0) continue;
+
+    const mov = await pasarProduccionAVentasPorPedido(
+      bdProduccion,
+      bdVentas,
+      bdInventario,
+      {
+        nombreReceta: item.nombre_receta,
+        cantidadSolicitada,
+        numeroPedido: folio,
+        precioVentaPreferente: Number(item?.precio_unitario || 0)
+      }
+    );
+    cantidadAutoVendida += Number(mov?.cantidadVendida) || 0;
+  }
+
+  if (checkout?.preference_id) {
+    await dbRun(
+      bdVentas,
+      "UPDATE tienda_ordenes SET referencia_externa = ?, detalle_pago = ? WHERE id = ?",
+      [checkout.preference_id || '', JSON.stringify(checkout), insertOrden.lastID]
+    );
+  }
+
+  transmitir({
+    tipo: 'tienda_orden_nueva',
+    id_orden: insertOrden.lastID,
+    id_cliente: Number(cliente.id) || 0,
+    folio,
+    total,
+    cliente: cliente.nombre,
+    metodo_pago: metodoPago
+  });
+
+  const mensajePedidoNuevo = folio
+    ? `Tu pedido ${folio} fue realizado correctamente.`
+    : 'Tu pedido fue realizado correctamente.';
+  await dbRun(
+    bdVentas,
+    `INSERT INTO tienda_notificaciones_cliente
+     (id_cliente, id_orden, tipo, titulo, mensaje, leida, creado_en)
+     VALUES (?, ?, 'pedido_nuevo', 'Pedido realizado', ?, 0, CURRENT_TIMESTAMP)`,
+    [Number(cliente.id) || 0, insertOrden.lastID, mensajePedidoNuevo]
+  );
+
+  const correoCliente = String(cliente?.email || '').trim();
+  if (correoCliente) {
+    const configTienda = await obtenerConfigTienda(bdVentas);
+    const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
+    const correo = construirCorreoConfirmacionPedido({
+      cliente: String(cliente?.nombre || 'cliente').trim(),
+      folio,
+      total,
+      metodoPago,
+      puntoEntrega: String(puntoEntrega?.nombre || '').trim(),
+      direccionEntrega,
+      items: itemsFinales,
+      plantillas
+    });
+    await enviarCorreoCliente({
+      to: correoCliente,
+      subject: correo.subject,
+      text: correo.text,
+      html: correo.html
+    });
+  }
+
+  if (cantidadAutoVendida > 0) {
+    transmitir({ tipo: 'produccion_actualizado' });
+  }
+  transmitir({ tipo: 'ventas_actualizado' });
+
+  return {
+    id: insertOrden.lastID,
+    folio,
+    origen_pedido: origenPedido,
+    total,
+    metodo_pago: metodoPago,
+    estado_pago: estadoPagoInicial,
+    estado: 'pendiente'
+  };
 }
 
 export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario, bdAdmin = null) {
+  async function validarContrasenaAdminActual(passwordPlano = '', usuarioActual = null) {
+    if (!bdAdmin) {
+      return { ok: false, status: 500, error: 'Base administrativa no disponible' };
+    }
+
+    const password = String(passwordPlano || '');
+    if (!password) {
+      return { ok: false, status: 400, error: 'Debes capturar la contraseña del admin' };
+    }
+
+    const usernameActual = String(usuarioActual?.username || '').trim().toLowerCase();
+    const idActual = Number(usuarioActual?.id || 0);
+
+    let admin = null;
+    if (idActual > 0) {
+      admin = await dbGet(
+        bdAdmin,
+        'SELECT id, username, password_hash, rol FROM usuarios WHERE id = ? LIMIT 1',
+        [idActual]
+      );
+    }
+
+    if (!admin && usernameActual) {
+      admin = await dbGet(
+        bdAdmin,
+        'SELECT id, username, password_hash, rol FROM usuarios WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) LIMIT 1',
+        [usernameActual]
+      );
+    }
+
+    if (!admin) {
+      return { ok: false, status: 404, error: 'Usuario admin no encontrado' };
+    }
+
+    const passOk = await bcrypt.compare(password, String(admin.password_hash || ''));
+    if (!passOk) {
+      return { ok: false, status: 401, error: 'Contraseña admin inválida' };
+    }
+
+    return { ok: true, admin };
+  }
+
   app.get('/tienda/config', async (req, res) => {
     try {
       const config = await obtenerConfigTienda(bdVentas);
@@ -1608,17 +1995,126 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
   app.get("/tienda/admin/ordenes", authInterno, async (req, res) => {
     try {
-      const ordenes = await dbAll(
+      const ordenesRaw = await dbAll(
         bdVentas,
-        `SELECT id, folio, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, total, moneda,
+        `SELECT id, folio, origen_pedido, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago, total, moneda,
                 id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas,
                 paqueteria, numero_guia, creado_en
          FROM tienda_ordenes
          ORDER BY id DESC`
       );
-      res.json(ordenes || []);
+      const ordenes = [];
+      for (const orden of (ordenesRaw || [])) {
+        ordenes.push(await refrescarEstadoPagoOrdenSiAplica(bdVentas, orden));
+      }
+      res.json(ordenes);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar órdenes" });
+    }
+  });
+
+  async function eliminarOrdenesAdminPorIds(ids = []) {
+    const idsValidos = Array.from(new Set((Array.isArray(ids) ? ids : [])
+      .map((id) => Number(id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0)));
+
+    if (!idsValidos.length) {
+      return { eliminadas: 0 };
+    }
+
+    const placeholders = idsValidos.map(() => '?').join(', ');
+
+    await dbRun(
+      bdVentas,
+      `DELETE FROM tienda_notificaciones_cliente WHERE id_orden IN (${placeholders})`,
+      idsValidos
+    );
+    await dbRun(
+      bdVentas,
+      `DELETE FROM tienda_orden_items WHERE id_orden IN (${placeholders})`,
+      idsValidos
+    );
+    const resultado = await dbRun(
+      bdVentas,
+      `DELETE FROM tienda_ordenes WHERE id IN (${placeholders})`,
+      idsValidos
+    );
+
+    return { eliminadas: Number(resultado?.changes || 0) };
+  }
+
+  app.delete('/tienda/admin/ordenes/:id', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Orden inválida' });
+
+      const resultado = await eliminarOrdenesAdminPorIds([id]);
+      if (!resultado.eliminadas) return res.status(404).json({ error: 'Orden no encontrada' });
+
+      transmitir({ tipo: 'ventas_actualizado' });
+      res.json({ ok: true, eliminadas: resultado.eliminadas });
+    } catch {
+      res.status(500).json({ error: 'No se pudo eliminar la orden' });
+    }
+  });
+
+  app.post('/tienda/admin/ordenes/bulk-delete', authInterno, async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+      const resultado = await eliminarOrdenesAdminPorIds(ids);
+      transmitir({ tipo: 'ventas_actualizado' });
+      res.json({ ok: true, eliminadas: resultado.eliminadas });
+    } catch {
+      res.status(500).json({ error: 'No se pudieron eliminar las órdenes' });
+    }
+  });
+
+  app.post('/tienda/admin/ordenes/reset-contadores', authInterno, async (req, res) => {
+    try {
+      const passwordAdmin = String(
+        req.body?.password_admin
+        || req.body?.password_ceo
+        || req.body?.password
+        || ''
+      ).trim();
+      const validacion = await validarContrasenaAdminActual(passwordAdmin, req.usuario);
+      if (!validacion.ok) {
+        return res.status(validacion.status || 401).json({ error: validacion.error || 'No autorizado' });
+      }
+
+      await dbRun(bdVentas, 'BEGIN');
+      try {
+        const totalAntes = await dbGet(bdVentas, 'SELECT COUNT(*) AS total FROM tienda_ordenes');
+        const eliminadas = Number(totalAntes?.total || 0);
+
+        await dbRun(bdVentas, 'DELETE FROM tienda_notificaciones_cliente WHERE id_orden IS NOT NULL');
+        await dbRun(bdVentas, 'DELETE FROM tienda_orden_items');
+        await dbRun(bdVentas, 'DELETE FROM tienda_ordenes');
+        await dbRun(bdVentas, 'DELETE FROM tienda_checkout_intentos');
+
+        // SQLite: limpia contadores AUTOINCREMENT si existen.
+        try {
+          await dbRun(
+            bdVentas,
+            "DELETE FROM sqlite_sequence WHERE name IN ('tienda_ordenes', 'tienda_orden_items', 'tienda_checkout_intentos')"
+          );
+        } catch {
+          // En Postgres no existe sqlite_sequence.
+        }
+
+        await dbRun(bdVentas, 'COMMIT');
+        transmitir({ tipo: 'ventas_actualizado' });
+        return res.json({ ok: true, eliminadas });
+      } catch (errorInterno) {
+        try {
+          await dbRun(bdVentas, 'ROLLBACK');
+        } catch {
+          // Ignorado.
+        }
+        throw errorInterno;
+      }
+    } catch {
+      res.status(500).json({ error: 'No se pudieron reiniciar los contadores de pedidos' });
     }
   });
 
@@ -1851,6 +2347,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const id = Number(req.params.id);
       const estado = String(req.body?.estado || "").trim().toLowerCase();
+      const estadoPagoBody = String(req.body?.estado_pago || '').trim().toLowerCase();
       const paqueteria = String(req.body?.paqueteria || "").trim();
       const numeroGuia = String(req.body?.numero_guia || "").trim();
       const permitidos = new Set([
@@ -1872,10 +2369,15 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         return res.status(400).json({ error: "Para envío por paquetería debes capturar paquetería y número de guía" });
       }
 
+      const ordenPrev = await dbGet(bdVentas, 'SELECT estado_pago FROM tienda_ordenes WHERE id = ? LIMIT 1', [id]);
+      const estadoPagoFinal = estadoPagoBody
+        ? normalizarEstadoPago(estadoPagoBody, normalizarEstadoPago(ordenPrev?.estado_pago, 'pendiente_manual'))
+        : normalizarEstadoPago(ordenPrev?.estado_pago, 'pendiente_manual');
+
       const resultado = await dbRun(
         bdVentas,
-        "UPDATE tienda_ordenes SET estado = ?, paqueteria = ?, numero_guia = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
-        [estado, paqueteria, numeroGuia, id]
+        "UPDATE tienda_ordenes SET estado = ?, estado_pago = ?, paqueteria = ?, numero_guia = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
+        [estado, estadoPagoFinal, paqueteria, numeroGuia, id]
       );
 
       if (!resultado.changes) return res.status(404).json({ error: "Orden no encontrada" });
@@ -1944,6 +2446,49 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       res.json({ ok: true });
     } catch {
       res.status(500).json({ error: "No se pudo actualizar estado" });
+    }
+  });
+
+  app.patch('/tienda/admin/ordenes/:id/pago', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      const estadoPago = normalizarEstadoPago(req.body?.estado_pago, 'pendiente_manual');
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Orden inválida' });
+
+      const orden = await dbGet(
+        bdVentas,
+        `SELECT id, id_cliente, folio, estado, estado_pago
+         FROM tienda_ordenes
+         WHERE id = ?
+         LIMIT 1`,
+        [id]
+      );
+      if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+
+      const estadoOrdenNuevo = (estadoPago === 'pagado' && String(orden.estado || '').trim().toLowerCase() === 'pendiente')
+        ? 'confirmado'
+        : String(orden.estado || 'pendiente').trim().toLowerCase();
+
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_ordenes
+         SET estado_pago = ?, estado = ?, estado_pago_actualizado_en = CURRENT_TIMESTAMP, actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [estadoPago, estadoOrdenNuevo, id]
+      );
+
+      transmitir({
+        tipo: 'tienda_orden_actualizada',
+        id_orden: id,
+        id_cliente: Number(orden?.id_cliente) || 0,
+        folio: String(orden?.folio || ''),
+        estado: estadoOrdenNuevo,
+        estado_pago: estadoPago
+      });
+
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo actualizar estado de pago' });
     }
   });
 
@@ -2690,9 +3235,10 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const recetaNombreGuardar = String(previo?.receta_nombre || recetaNombre).trim();
 
       const body = req.body && typeof req.body === 'object' ? req.body : {};
-      const slug = tieneClave(body, 'slug')
+      const slugSolicitado = tieneClave(body, 'slug')
         ? slugify(body.slug || recetaNombre)
         : slugify(previo?.slug || recetaNombre);
+      const slug = await resolverSlugCatalogoUnico(bdVentas, slugSolicitado, recetaNombreGuardar);
       const descripcion = tieneClave(body, 'descripcion')
         ? String(body.descripcion || '').trim()
         : String(previo?.descripcion || '').trim();
@@ -2741,8 +3287,410 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       });
 
       res.json({ ok: true, slug, receta_nombre: recetaNombreGuardar });
+    } catch (error) {
+      res.status(500).json({
+        error: "No se pudo guardar el catálogo",
+        detalle: String(error?.message || '').trim() || 'error_desconocido'
+      });
+    }
+  });
+
+  app.post('/tienda/checkout/mercado-pago/preferencia', authCliente, async (req, res) => {
+    try {
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const origenPedido = normalizarOrigenPedido(req.body?.origen_pedido, 'web');
+      const idPuntoEntrega = Number(req.body?.id_punto_entrega);
+      const notas = String(req.body?.notas || "").trim();
+      const urlRetornoBase = String(req.body?.url_retorno_base || '').trim();
+
+      if (!items.length) return res.status(400).json({ error: 'El carrito está vacío' });
+
+      const normalizarRetorno = (base, estado) => {
+        try {
+          const parsed = new URL(base);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+          parsed.searchParams.set('mp_status', estado);
+          return parsed.toString();
+        } catch {
+          return '';
+        }
+      };
+
+      const successUrl = normalizarRetorno(urlRetornoBase, 'success');
+      const pendingUrl = normalizarRetorno(urlRetornoBase, 'pending');
+      const failureUrl = normalizarRetorno(urlRetornoBase, 'failure');
+
+      const disponibles = await obtenerProductosDisponibles(
+        bdProduccion,
+        bdRecetas,
+        bdVentas,
+        { agruparVariantes: false, incluirOcultos: true, bdInventario }
+      );
+      const mapa = new Map(disponibles.map((p) => [String(p?.nombre_receta || '').trim().toLowerCase(), p]));
+
+      const itemsFinales = [];
+      let total = 0;
+      const mapaStockTemporal = new Map();
+
+      for (const item of items) {
+        const nombreReceta = String(item?.nombre_receta || '').trim();
+        const nombreRecetaKey = nombreReceta.toLowerCase();
+        const cantidad = Math.max(1, Number(item?.cantidad) || 1);
+        const variante = String(item?.variante || '').trim();
+        let producto = mapa.get(nombreRecetaKey);
+        if (!producto) {
+          const baseBuscada = nombreBaseProducto(nombreReceta, 0);
+          producto = (disponibles || []).find((p) => nombreBaseProducto(String(p?.nombre_receta || '').trim(), 0) === baseBuscada) || null;
+        }
+
+        if (!producto) {
+          return res.status(400).json({ error: `Producto no disponible: ${nombreReceta}` });
+        }
+
+        const stockDisponibleInicial = Number(producto.stock) || 0;
+        const stockDisponibleTemporal = mapaStockTemporal.has(nombreReceta)
+          ? Number(mapaStockTemporal.get(nombreReceta)) || 0
+          : stockDisponibleInicial;
+        const cantidadAutoVenta = Math.max(0, Math.min(stockDisponibleTemporal, cantidad));
+        mapaStockTemporal.set(nombreReceta, Math.max(0, stockDisponibleTemporal - cantidadAutoVenta));
+
+        const precioUnitario = Number(producto.precio_venta) || 0;
+        const subtotal = precioUnitario * cantidad;
+        total += subtotal;
+
+        itemsFinales.push({
+          nombre_receta: nombreReceta,
+          categoria_nombre: String(producto?.categoria_nombre || item?.categoria_nombre || '').trim(),
+          descripcion_mp: String(item?.descripcion_mp || '').trim(),
+          cantidad,
+          cantidad_auto_venta: cantidadAutoVenta,
+          precio_unitario: precioUnitario,
+          subtotal,
+          variante
+        });
+      }
+
+      const cliente = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, email, telefono FROM tienda_clientes WHERE id = ?',
+        [req.cliente.id]
+      );
+      if (!cliente) return res.status(401).json({ error: 'Cliente inválido' });
+
+      const puntoEntrega = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, direccion, horario, activo FROM tienda_puntos_entrega WHERE id = ?',
+        [idPuntoEntrega]
+      );
+      if (!puntoEntrega || Number(puntoEntrega.activo) !== 1) {
+        return res.status(400).json({ error: 'Selecciona un punto de entrega válido' });
+      }
+
+      const direccionEntrega = [
+        String(puntoEntrega.nombre || '').trim(),
+        String(puntoEntrega.direccion || '').trim(),
+        String(puntoEntrega.horario || '').trim()
+      ].filter(Boolean).join(' · ');
+
+      const folio = await generarFolioOrdenTienda(bdVentas, origenPedido);
+      const preferenciaMercadoPago = await crearPreferenciaMercadoPago({
+        orden: { folio, id: 0 },
+        items: itemsFinales,
+        returnUrls: {
+          success: successUrl,
+          pending: pendingUrl,
+          failure: failureUrl
+        }
+      });
+      if (!preferenciaMercadoPago?.ok || !String(preferenciaMercadoPago?.init_point || '').trim()) {
+        return res.status(400).json({ error: preferenciaMercadoPago?.mensaje || 'No se pudo iniciar pago con Mercado Pago' });
+      }
+
+      const checkout = {
+        proveedor: 'mercado_pago',
+        preference_id: preferenciaMercadoPago.id,
+        init_point: preferenciaMercadoPago.init_point,
+        sandbox_init_point: preferenciaMercadoPago.sandbox_init_point
+      };
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_checkout_intentos
+         (folio, id_cliente, origen_pedido, metodo_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, total, items_json, preference_id, payment_status, detalle_pago, creado_en, actualizado_en)
+         VALUES (?, ?, ?, 'mercado_pago', ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          folio,
+          Number(cliente.id) || 0,
+          origenPedido,
+          Number(puntoEntrega.id) || 0,
+          String(puntoEntrega.nombre || ''),
+          direccionEntrega,
+          notas,
+          total,
+          JSON.stringify(itemsFinales),
+          String(preferenciaMercadoPago.id || ''),
+          JSON.stringify(checkout)
+        ]
+      );
+
+      res.json({
+        ok: true,
+        folio,
+        checkout
+      });
     } catch {
-      res.status(500).json({ error: "No se pudo guardar el catálogo" });
+      res.status(500).json({ error: 'No se pudo preparar checkout con Mercado Pago' });
+    }
+  });
+
+  async function confirmarCheckoutMercadoPagoCliente({ idCliente, paymentId = '', preferenceId = '', intentoInicial = null, modoSilencioso = false }) {
+    let intento = intentoInicial || null;
+    const paymentIdTxt = String(paymentId || '').trim();
+    const preferenceIdTxt = String(preferenceId || '').trim();
+
+    if (!intento && preferenceIdTxt) {
+      intento = await dbGet(
+        bdVentas,
+        `SELECT *
+         FROM tienda_checkout_intentos
+         WHERE id_cliente = ? AND preference_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [idCliente, preferenceIdTxt]
+      );
+    }
+
+    let pagoMp = null;
+    if (paymentIdTxt) {
+      pagoMp = await consultarPagoMercadoPagoPorId(paymentIdTxt);
+    }
+
+    if (!intento && pagoMp?.mp_preference_id) {
+      intento = await dbGet(
+        bdVentas,
+        `SELECT *
+         FROM tienda_checkout_intentos
+         WHERE id_cliente = ? AND preference_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [idCliente, pagoMp.mp_preference_id]
+      );
+    }
+
+    if (!intento) {
+      return { status: 404, payload: { error: 'No se encontró el checkout pendiente de Mercado Pago' } };
+    }
+
+    if (Number(intento.id_orden_generada) > 0) {
+      const ordenExistente = await dbGet(
+        bdVentas,
+        `SELECT id, folio, origen_pedido, total, metodo_pago, estado_pago, estado
+         FROM tienda_ordenes
+         WHERE id = ?
+         LIMIT 1`,
+        [Number(intento.id_orden_generada) || 0]
+      );
+      if (ordenExistente) {
+        return { status: 200, payload: { ok: true, orden: ordenExistente, ya_existia: true } };
+      }
+    }
+
+    if (!pagoMp && String(intento?.payment_id || '').trim()) {
+      pagoMp = await consultarPagoMercadoPagoPorId(String(intento.payment_id || '').trim());
+    }
+
+    if (!pagoMp && String(intento?.folio || '').trim()) {
+      pagoMp = await consultarPagoMercadoPagoPorFolio(intento.folio);
+    }
+
+    const estadoPago = normalizarEstadoPago(pagoMp?.estado_pago, 'pendiente');
+    if (estadoPago !== 'pagado') {
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_checkout_intentos
+         SET payment_id = ?, payment_status = ?, payment_status_detail = ?, detalle_pago = ?, actualizado_en = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [
+          String(pagoMp?.mp_payment_id || paymentIdTxt || ''),
+          String(pagoMp?.mp_status || estadoPago || 'pendiente'),
+          String(pagoMp?.mp_status_detail || ''),
+          JSON.stringify(pagoMp || {}),
+          Number(intento.id) || 0
+        ]
+      );
+      if (modoSilencioso) {
+        return { status: 200, payload: { ok: false, pendiente: estadoPago !== 'rechazado', estado_pago: estadoPago } };
+      }
+      return {
+        status: 400,
+        payload: {
+          error: estadoPago === 'rechazado'
+            ? 'Mercado Pago rechazó el pago. Intenta con otro método.'
+            : 'El pago aún no está confirmado por Mercado Pago.',
+          estado_pago: estadoPago
+        }
+      };
+    }
+
+    const cliente = await dbGet(
+      bdVentas,
+      'SELECT id, nombre, email, telefono FROM tienda_clientes WHERE id = ?',
+      [idCliente]
+    );
+    if (!cliente) return { status: 401, payload: { error: 'Cliente inválido' } };
+
+    const puntoEntrega = {
+      id: Number(intento.id_punto_entrega) || 0,
+      nombre: String(intento.nombre_punto_entrega || ''),
+      direccion: '',
+      horario: ''
+    };
+    const direccionEntrega = String(intento.direccion_entrega || '').trim();
+
+    let itemsFinales = [];
+    try {
+      itemsFinales = JSON.parse(String(intento.items_json || '[]')) || [];
+    } catch {
+      itemsFinales = [];
+    }
+    if (!Array.isArray(itemsFinales) || !itemsFinales.length) {
+      return { status: 400, payload: { error: 'No se pudo reconstruir el carrito pagado' } };
+    }
+
+    const checkout = {
+      proveedor: 'mercado_pago',
+      preference_id: String(intento.preference_id || pagoMp?.mp_preference_id || preferenceIdTxt || ''),
+      payment_id: String(pagoMp?.mp_payment_id || paymentIdTxt || ''),
+      mp_status: String(pagoMp?.mp_status || 'approved'),
+      mp_status_detail: String(pagoMp?.mp_status_detail || ''),
+      estado_pago: 'pagado',
+      confirmado_en: new Date().toISOString()
+    };
+
+    const orden = await crearOrdenTiendaDesdeItems({
+      bdProduccion,
+      bdVentas,
+      bdInventario,
+      cliente,
+      itemsFinales,
+      metodoPago: 'mercado_pago',
+      origenPedido: normalizarOrigenPedido(intento.origen_pedido, 'web'),
+      puntoEntrega,
+      direccionEntrega,
+      notas: String(intento.notas || '').trim(),
+      folio: String(intento.folio || '').trim(),
+      checkout
+    });
+
+    await dbRun(
+      bdVentas,
+      `UPDATE tienda_ordenes
+       SET estado_pago = 'pagado', estado_pago_actualizado_en = CURRENT_TIMESTAMP, estado = CASE WHEN COALESCE(TRIM(estado), '') = '' OR LOWER(estado) = 'pendiente' THEN 'confirmado' ELSE estado END,
+           detalle_pago = ?, actualizado_en = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [JSON.stringify(checkout), Number(orden.id) || 0]
+    );
+
+    await dbRun(
+      bdVentas,
+      `UPDATE tienda_checkout_intentos
+       SET id_orden_generada = ?, payment_id = ?, payment_status = ?, payment_status_detail = ?, detalle_pago = ?, actualizado_en = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        Number(orden.id) || 0,
+        String(checkout.payment_id || ''),
+        String(checkout.mp_status || 'approved'),
+        String(checkout.mp_status_detail || ''),
+        JSON.stringify(checkout),
+        Number(intento.id) || 0
+      ]
+    );
+
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        orden: {
+          ...orden,
+          estado_pago: 'pagado',
+          estado: 'confirmado'
+        }
+      }
+    };
+  }
+
+  app.post('/tienda/checkout/mercado-pago/reconciliar', authCliente, async (req, res) => {
+    try {
+      const preferenceId = String(req.body?.preference_id || '').trim();
+      const intentos = [];
+
+      if (preferenceId) {
+        const intentoPreferencia = await dbGet(
+          bdVentas,
+          `SELECT *
+           FROM tienda_checkout_intentos
+           WHERE id_cliente = ? AND preference_id = ?
+           ORDER BY id DESC
+           LIMIT 1`,
+          [req.cliente.id, preferenceId]
+        );
+        if (intentoPreferencia) intentos.push(intentoPreferencia);
+      }
+
+      const pendientes = await dbAll(
+        bdVentas,
+        `SELECT *
+         FROM tienda_checkout_intentos
+         WHERE id_cliente = ?
+           AND metodo_pago = 'mercado_pago'
+           AND COALESCE(id_orden_generada, 0) = 0
+         ORDER BY id DESC
+         LIMIT 10`,
+        [req.cliente.id]
+      );
+
+      for (const intento of (pendientes || [])) {
+        const existe = intentos.some((it) => Number(it?.id || 0) === Number(intento?.id || 0));
+        if (!existe) intentos.push(intento);
+      }
+
+      if (!intentos.length) return res.json({ ok: false, pendiente: false });
+
+      let hayPendientes = false;
+      for (const intento of intentos) {
+        const resultado = await confirmarCheckoutMercadoPagoCliente({
+          idCliente: req.cliente.id,
+          preferenceId: String(intento.preference_id || preferenceId || ''),
+          intentoInicial: intento,
+          modoSilencioso: true
+        });
+
+        if (resultado?.status === 200 && resultado?.payload?.ok && resultado?.payload?.orden) {
+          return res.status(200).json(resultado.payload);
+        }
+
+        if (resultado?.payload?.pendiente || resultado?.payload?.estado_pago === 'pendiente') {
+          hayPendientes = true;
+        }
+      }
+
+      return res.json({ ok: false, pendiente: hayPendientes });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo reconciliar checkout de Mercado Pago' });
+    }
+  });
+
+  app.post('/tienda/checkout/mercado-pago/confirmar', authCliente, async (req, res) => {
+    try {
+      const resultado = await confirmarCheckoutMercadoPagoCliente({
+        idCliente: req.cliente.id,
+        paymentId: String(req.body?.payment_id || req.body?.collection_id || '').trim(),
+        preferenceId: String(req.body?.preference_id || '').trim(),
+        modoSilencioso: false
+      });
+      return res.status(resultado.status).json(resultado.payload);
+    } catch {
+      return res.status(500).json({ error: 'No se pudo confirmar el pago de Mercado Pago' });
     }
   });
 
@@ -2750,13 +3698,23 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const metodoPago = String(req.body?.metodo_pago || "").trim() || "efectivo";
+      const origenPedido = normalizarOrigenPedido(req.body?.origen_pedido, 'web');
       const idPuntoEntrega = Number(req.body?.id_punto_entrega);
       const notas = String(req.body?.notas || "").trim();
 
       if (!items.length) return res.status(400).json({ error: "El carrito está vacío" });
 
-      const disponibles = await obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, { agruparVariantes: false, bdInventario });
-      const mapa = new Map(disponibles.map((p) => [String(p.nombre_receta), p]));
+      if (metodoPago.toLowerCase() === 'mercado_pago') {
+        return res.status(400).json({ error: 'Para Mercado Pago primero inicia checkout y confirma el pago', code: 'mp_preconfirm_required' });
+      }
+
+      const disponibles = await obtenerProductosDisponibles(
+        bdProduccion,
+        bdRecetas,
+        bdVentas,
+        { agruparVariantes: false, incluirOcultos: true, bdInventario }
+      );
+      const mapa = new Map(disponibles.map((p) => [String(p?.nombre_receta || '').trim().toLowerCase(), p]));
 
       const itemsFinales = [];
       let total = 0;
@@ -2764,9 +3722,14 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
       for (const item of items) {
         const nombreReceta = String(item?.nombre_receta || "").trim();
+        const nombreRecetaKey = nombreReceta.toLowerCase();
         const cantidad = Math.max(1, Number(item?.cantidad) || 1);
         const variante = String(item?.variante || "").trim();
-        const producto = mapa.get(nombreReceta);
+        let producto = mapa.get(nombreRecetaKey);
+        if (!producto) {
+          const baseBuscada = nombreBaseProducto(nombreReceta, 0);
+          producto = (disponibles || []).find((p) => nombreBaseProducto(String(p?.nombre_receta || '').trim(), 0) === baseBuscada) || null;
+        }
 
         if (!producto) {
           return res.status(400).json({ error: `Producto no disponible: ${nombreReceta}` });
@@ -2817,134 +3780,25 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         String(puntoEntrega.horario || '').trim()
       ].filter(Boolean).join(' · ');
 
-      const folio = await generarFolioOrdenTienda(bdVentas);
-      const insertOrden = await dbRun(
+      const folio = await generarFolioOrdenTienda(bdVentas, origenPedido);
+      const orden = await crearOrdenTiendaDesdeItems({
+        bdProduccion,
         bdVentas,
-        `INSERT INTO tienda_ordenes
-         (folio, id_cliente, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, total, moneda, referencia_externa, detalle_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, creado_en)
-         VALUES (?, ?, ?, ?, ?, ?, 'pendiente', ?, 'MXN', '', '', ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [
-          folio,
-          cliente.id,
-          cliente.nombre,
-          cliente.email,
-          cliente.telefono || '',
-          metodoPago,
-          total,
-          puntoEntrega.id,
-          String(puntoEntrega.nombre || ''),
-          direccionEntrega,
-          notas
-        ]
-      );
-
-      for (const item of itemsFinales) {
-        await dbRun(
-          bdVentas,
-          `INSERT INTO tienda_orden_items (id_orden, receta_nombre, cantidad, precio_unitario, subtotal, variante)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [insertOrden.lastID, item.nombre_receta, item.cantidad, item.precio_unitario, item.subtotal, item.variante]
-        );
-      }
-
-      let cantidadAutoVendida = 0;
-      for (const item of itemsFinales) {
-        const cantidadSolicitada = Number(item?.cantidad_auto_venta) || 0;
-        if (cantidadSolicitada <= 0) continue;
-
-        const mov = await pasarProduccionAVentasPorPedido(
-          bdProduccion,
-          bdVentas,
-          bdInventario,
-          {
-            nombreReceta: item.nombre_receta,
-            cantidadSolicitada,
-            numeroPedido: folio,
-            precioVentaPreferente: Number(item?.precio_unitario || 0)
-          }
-        );
-
-        cantidadAutoVendida += Number(mov?.cantidadVendida) || 0;
-      }
-
-      let checkout = null;
-      if (metodoPago.toLowerCase() === "mercado_pago") {
-        const preferencia = await crearPreferenciaMercadoPago({ orden: { folio, id: insertOrden.lastID }, items: itemsFinales });
-        if (preferencia.ok) {
-          checkout = {
-            proveedor: "mercado_pago",
-            preference_id: preferencia.id,
-            init_point: preferencia.init_point,
-            sandbox_init_point: preferencia.sandbox_init_point
-          };
-          await dbRun(
-            bdVentas,
-            "UPDATE tienda_ordenes SET referencia_externa = ?, detalle_pago = ? WHERE id = ?",
-            [preferencia.id || '', JSON.stringify(checkout), insertOrden.lastID]
-          );
-        } else {
-          checkout = { proveedor: "mercado_pago", error: preferencia.mensaje || "No disponible" };
-        }
-      }
-
-      transmitir({
-        tipo: 'tienda_orden_nueva',
-        id_orden: insertOrden.lastID,
-        id_cliente: Number(cliente.id) || 0,
+        bdInventario,
+        cliente,
+        itemsFinales,
+        metodoPago,
+        origenPedido,
+        puntoEntrega,
+        direccionEntrega,
+        notas,
         folio,
-        total,
-        cliente: cliente.nombre,
-        metodo_pago: metodoPago
+        checkout: null
       });
-
-      const mensajePedidoNuevo = folio
-        ? `Tu pedido ${folio} fue realizado correctamente.`
-        : 'Tu pedido fue realizado correctamente.';
-      await dbRun(
-        bdVentas,
-        `INSERT INTO tienda_notificaciones_cliente
-         (id_cliente, id_orden, tipo, titulo, mensaje, leida, creado_en)
-         VALUES (?, ?, 'pedido_nuevo', 'Pedido realizado', ?, 0, CURRENT_TIMESTAMP)`,
-        [Number(cliente.id) || 0, insertOrden.lastID, mensajePedidoNuevo]
-      );
-
-      const correoCliente = String(cliente?.email || '').trim();
-      if (correoCliente) {
-        const configTienda = await obtenerConfigTienda(bdVentas);
-        const plantillas = obtenerPlantillasCorreoDesdeConfig(configTienda);
-        const correo = construirCorreoConfirmacionPedido({
-          cliente: String(cliente?.nombre || 'cliente').trim(),
-          folio,
-          total,
-          metodoPago,
-          puntoEntrega: String(puntoEntrega?.nombre || '').trim(),
-          direccionEntrega,
-          items: itemsFinales,
-          plantillas
-        });
-        await enviarCorreoCliente({
-          to: correoCliente,
-          subject: correo.subject,
-          text: correo.text,
-          html: correo.html
-        });
-      }
-
-      if (cantidadAutoVendida > 0) {
-        transmitir({ tipo: 'produccion_actualizado' });
-      }
-      transmitir({ tipo: 'ventas_actualizado' });
 
       res.json({
         ok: true,
-        orden: {
-          id: insertOrden.lastID,
-          folio,
-          total,
-          metodo_pago: metodoPago,
-          estado: "pendiente"
-        },
-        checkout
+        orden
       });
     } catch {
       res.status(500).json({ error: "No se pudo crear la orden" });
@@ -2953,15 +3807,19 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
   app.get("/tienda/ordenes/mis", authCliente, async (req, res) => {
     try {
-      const ordenes = await dbAll(
+      const ordenesRaw = await dbAll(
         bdVentas,
-        `SELECT id, folio, metodo_pago, estado, total, moneda, referencia_externa, detalle_pago,
+        `SELECT id, folio, origen_pedido, metodo_pago, estado, estado_pago, total, moneda, referencia_externa, detalle_pago,
           paqueteria, numero_guia, creado_en, actualizado_en
          FROM tienda_ordenes
          WHERE id_cliente = ?
          ORDER BY id DESC`,
         [req.cliente.id]
       );
+      const ordenes = [];
+      for (const orden of (ordenesRaw || [])) {
+        ordenes.push(await refrescarEstadoPagoOrdenSiAplica(bdVentas, orden));
+      }
       res.json(ordenes);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar las órdenes" });

@@ -2149,9 +2149,18 @@ export default function Tienda({
 
     if (!silencioso) setCargando(true);
     try {
-      const data = tokenInterno
-        ? await fetchAdmin('/tienda/admin/productos')
-        : await fetchJson('/tienda/productos');
+      const usarRutaAdmin = Boolean(tokenInterno) && (esVistaTrastienda || vistaActiva === 'trastienda');
+      let data = [];
+      if (usarRutaAdmin) {
+        try {
+          data = await fetchAdmin('/tienda/admin/productos');
+        } catch {
+          // Fallback defensivo: si el token interno expiró, no romper carga de productos.
+          data = await fetchJson('/tienda/productos');
+        }
+      } else {
+        data = await fetchJson('/tienda/productos');
+      }
       const lista = Array.isArray(data) ? data : [];
       setProductos(lista);
       const base = {};

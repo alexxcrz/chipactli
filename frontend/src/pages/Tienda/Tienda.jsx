@@ -389,6 +389,27 @@ function serializarMetodosPagoConfig(lista = []) {
   return JSON.stringify((Array.isArray(lista) ? lista : []).map((item, idx) => normalizarMetodoPagoItem(item, idx)));
 }
 
+function obtenerNombrePerfilRed(url, clave = '') {
+  const limpio = String(url || '').trim();
+  if (!limpio) return '';
+
+  try {
+    const parsed = new URL(limpio);
+    const segmentos = String(parsed.pathname || '').split('/').filter(Boolean);
+    const ultimo = String(segmentos[segmentos.length - 1] || '').trim();
+    if (ultimo && !/^(share|reel|p|watch|video|videos)$/i.test(ultimo)) {
+      return decodeURIComponent(ultimo).replace(/^@+/, '@');
+    }
+  } catch {
+    // Ignorar: continuar con fallback.
+  }
+
+  const red = String(clave || '').trim().toLowerCase();
+  if (!red) return '@perfil';
+  if (red === 'x') return '@perfil_x';
+  return `@${red}`;
+}
+
 function obtenerMetodosPagoConfig(valor, config = {}) {
   try {
     const parseado = JSON.parse(String(valor || '[]'));
@@ -774,6 +795,16 @@ export default function Tienda({
     porHora: [],
     actualizadoEn: ''
   });
+  const [historialVisitasAdmin, setHistorialVisitasAdmin] = useState({
+    cargando: false,
+    rangoDias: 14,
+    porDia: [],
+    topUbicaciones: [],
+    totalVisitas: 0,
+    totalEventos: 0,
+    promedioVisitasDia: 0,
+    diaConMasVisitas: { fecha: '', visitas: 0, eventos: 0 }
+  });
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
@@ -855,6 +886,11 @@ export default function Tienda({
         .join(' · ')
       : ''),
     [visitasActivas]
+  );
+
+  const maximoVisitasHistorial = useMemo(
+    () => (historialVisitasAdmin.porDia || []).reduce((max, item) => Math.max(max, Number(item?.visitas) || 0), 0),
+    [historialVisitasAdmin.porDia]
   );
 
   const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
@@ -974,12 +1010,14 @@ export default function Tienda({
     if (!esVistaTrastienda || !tokenInterno || adminVista !== 'metricas') return undefined;
 
     cargarResumenVisitasAdmin();
+    cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
     const intervalo = window.setInterval(() => {
       cargarResumenVisitasAdmin();
+      cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
     }, 30_000);
 
     return () => window.clearInterval(intervalo);
-  }, [esVistaTrastienda, tokenInterno, adminVista]);
+  }, [esVistaTrastienda, tokenInterno, adminVista, historialVisitasAdmin.rangoDias]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -1247,7 +1285,7 @@ export default function Tienda({
       leida: false,
       fecha: new Date().toISOString()
     };
-    setNotificacionesClientePedidos((prev) => [nueva, ...(Array.isArray(prev) ? prev : [])].slice(0, 40));
+    setNotificacionesClientePedidos((prev) => [nueva, ...(Array.isArray(prev) ? prev : [])]);
   }
 
   function marcarNotificacionesClienteComoLeidas() {
@@ -2602,6 +2640,13 @@ export default function Tienda({
     const contenedor = contenedorScrollRef.current;
     if (!contenedor) return undefined;
 
+    const esMovil = window.matchMedia('(max-width: 980px)').matches;
+    if (esMovil) {
+      contenedor.style.height = '';
+      contenedor.style.maxHeight = '';
+      return undefined;
+    }
+
     const ajustarAlto = () => {
       const top = Number(contenedor.getBoundingClientRect()?.top) || 0;
       const viewport = window.innerHeight || document.documentElement?.clientHeight || 0;
@@ -2622,6 +2667,9 @@ export default function Tienda({
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
+    const esMovil = window.matchMedia('(max-width: 980px)').matches;
+    if (esMovil) return undefined;
+
     const prevHtmlOverflow = html.style.overflow;
     const prevBodyOverflow = body.style.overflow;
 
@@ -3012,6 +3060,31 @@ export default function Tienda({
       });
     } catch {
       setResumenVisitasAdmin((prev) => ({ ...prev, cargando: false }));
+    }
+  }
+
+  async function cargarHistorialVisitasAdmin(rango = historialVisitasAdmin.rangoDias) {
+    if (!tokenInterno) return;
+    const dias = Math.max(7, Math.min(120, Number(rango) || 14));
+    setHistorialVisitasAdmin((prev) => ({ ...prev, cargando: true, rangoDias: dias }));
+    try {
+      const data = await fetchAdmin(`/visitas/historial?dias=${dias}`);
+      setHistorialVisitasAdmin({
+        cargando: false,
+        rangoDias: dias,
+        porDia: Array.isArray(data?.porDia) ? data.porDia : [],
+        topUbicaciones: Array.isArray(data?.topUbicaciones) ? data.topUbicaciones : [],
+        totalVisitas: Number(data?.totalVisitas) || 0,
+        totalEventos: Number(data?.totalEventos) || 0,
+        promedioVisitasDia: Number(data?.promedioVisitasDia) || 0,
+        diaConMasVisitas: {
+          fecha: String(data?.diaConMasVisitas?.fecha || '').trim(),
+          visitas: Number(data?.diaConMasVisitas?.visitas) || 0,
+          eventos: Number(data?.diaConMasVisitas?.eventos) || 0
+        }
+      });
+    } catch {
+      setHistorialVisitasAdmin((prev) => ({ ...prev, cargando: false }));
     }
   }
 
@@ -3905,12 +3978,12 @@ export default function Tienda({
       </div>
       )}
 
-      {visitasActivas.listo && (
+      {esVistaTrastienda && tokenInterno && visitasActivas.listo && (
         <div className={`tiendaVisitasActivas ${esVistaTrastienda ? 'admin' : ''}`}>
           <strong>
             {visitasActivas.totalActivos} {visitasActivas.totalActivos === 1 ? 'persona activa ahora' : 'personas activas ahora'}
           </strong>
-          {esVistaTrastienda && textoUbicacionesVisitas && (
+          {textoUbicacionesVisitas && (
             <span>Desde: {textoUbicacionesVisitas}</span>
           )}
         </div>
@@ -4306,14 +4379,28 @@ export default function Tienda({
               <div className="tiendaAdminForm tiendaMetricasWrap">
                 <div className="tiendaMetricasHeader">
                   <strong>Resumen de visitas del día {resumenVisitasAdmin.fecha ? `(${resumenVisitasAdmin.fecha})` : ''}</strong>
-                  <button
-                    type="button"
-                    className="boton"
-                    onClick={cargarResumenVisitasAdmin}
-                    disabled={resumenVisitasAdmin.cargando}
-                  >
-                    {resumenVisitasAdmin.cargando ? 'Actualizando...' : 'Actualizar'}
-                  </button>
+                  <div className="tiendaMetricasAcciones">
+                    <select
+                      value={historialVisitasAdmin.rangoDias}
+                      onChange={(event) => cargarHistorialVisitasAdmin(event.target.value)}
+                    >
+                      <option value={7}>Últimos 7 días</option>
+                      <option value={14}>Últimos 14 días</option>
+                      <option value={30}>Últimos 30 días</option>
+                      <option value={90}>Últimos 90 días</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="boton"
+                      onClick={() => {
+                        cargarResumenVisitasAdmin();
+                        cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
+                      }}
+                      disabled={resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando}
+                    >
+                      {(resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando) ? 'Actualizando...' : 'Actualizar'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="tiendaMetricasGrid">
@@ -4369,6 +4456,69 @@ export default function Tienda({
                           </li>
                         ))}
                       {!((resumenVisitasAdmin.porHora || []).some((item) => Number(item?.total) > 0)) && <li><span>Sin datos todavía</span></li>}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="tiendaMetricasBloques">
+                  <div className="tiendaMetricasBloque tiendaMetricasBloqueAncho">
+                    <h4>Historial de visitas por día</h4>
+                    <div className="tiendaHistorialVisitasChart">
+                      {(historialVisitasAdmin.porDia || []).map((item) => {
+                        const visitas = Number(item?.visitas) || 0;
+                        const ancho = maximoVisitasHistorial > 0
+                          ? Math.max(4, Math.round((visitas / maximoVisitasHistorial) * 100))
+                          : 0;
+                        return (
+                          <div className="tiendaHistorialVisitasFila" key={`hist-dia-${item?.fecha || 'sin-fecha'}`}>
+                            <span>{item?.fecha || 'Sin fecha'}</span>
+                            <div className="tiendaHistorialVisitasBarraWrap">
+                              <div className="tiendaHistorialVisitasBarra" style={{ width: `${ancho}%` }} />
+                            </div>
+                            <strong>{visitas}</strong>
+                          </div>
+                        );
+                      })}
+                      {!(historialVisitasAdmin.porDia || []).length && <div className="tiendaVacio">Sin historial todavía</div>}
+                    </div>
+                  </div>
+
+                  <div className="tiendaMetricasBloque">
+                    <h4>Resumen del rango</h4>
+                    <ul className="tiendaMetricasLista">
+                      <li>
+                        <span>Total visitas únicas</span>
+                        <strong>{historialVisitasAdmin.totalVisitas}</strong>
+                      </li>
+                      <li>
+                        <span>Total eventos</span>
+                        <strong>{historialVisitasAdmin.totalEventos}</strong>
+                      </li>
+                      <li>
+                        <span>Promedio diario</span>
+                        <strong>{historialVisitasAdmin.promedioVisitasDia}</strong>
+                      </li>
+                      <li>
+                        <span>Día más fuerte</span>
+                        <strong>
+                          {historialVisitasAdmin.diaConMasVisitas?.fecha || 'N/A'}
+                          {' '}
+                          ({Number(historialVisitasAdmin.diaConMasVisitas?.visitas) || 0})
+                        </strong>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="tiendaMetricasBloque">
+                    <h4>Ubicaciones top del rango</h4>
+                    <ul className="tiendaMetricasLista">
+                      {(historialVisitasAdmin.topUbicaciones || []).map((item, idx) => (
+                        <li key={`ubi-rango-${idx}-${item?.pais || 'sin-pais'}`}>
+                          <span>{item?.pais || 'Desconocido'}</span>
+                          <strong>{Number(item?.total) || 0}</strong>
+                        </li>
+                      ))}
+                      {!(historialVisitasAdmin.topUbicaciones || []).length && <li><span>Sin datos todavía</span></li>}
                     </ul>
                   </div>
                 </div>
@@ -6525,19 +6675,21 @@ export default function Tienda({
           {!!redesDisponibles.length && (
             <div className="tiendaFooterRedes">
               {redesDisponibles.map((red) => (
-                <a
-                  key={`red-footer-${red.clave}`}
-                  href={red.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tiendaRedSocialBtn"
-                  title={red.label}
-                  aria-label={red.label}
-                >
-                  {red.logo
-                    ? <img src={red.logo} alt={red.label} className="tiendaRedSocialImg" />
-                    : red.icono}
-                </a>
+                <div key={`red-footer-${red.clave}`} className="tiendaRedSocialItem">
+                  <a
+                    href={red.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tiendaRedSocialBtn"
+                    title={red.label}
+                    aria-label={red.label}
+                  >
+                    {red.logo
+                      ? <img src={red.logo} alt={red.label} className="tiendaRedSocialImg" />
+                      : red.icono}
+                  </a>
+                  <span className="tiendaRedSocialPerfil">{obtenerNombrePerfilRed(red.url, red.clave)}</span>
+                </div>
               ))}
             </div>
           )}
@@ -6592,16 +6744,25 @@ export default function Tienda({
         {mostrarWhatsForm && (
           <div className="tiendaWhatsPanel" role="dialog" aria-label="Enviar mensaje por WhatsApp">
             <div className="tiendaWhatsPanelHead">
-              <strong>Escríbenos por WhatsApp</strong>
-              <button type="button" className="botonPequeno" onClick={() => setMostrarWhatsForm(false)}>Cerrar</button>
+              <div>
+                <strong>Escríbenos por WhatsApp</strong>
+                <p className="tiendaWhatsPanelSub">Respuesta rápida en horario de atención</p>
+              </div>
+              <button type="button" className="tiendaWhatsCerrarBtn" onClick={() => setMostrarWhatsForm(false)}>Cerrar</button>
             </div>
+            <label className="tiendaWhatsLabel" htmlFor="tienda-whats-nombre">Tu nombre</label>
             <input
+              id="tienda-whats-nombre"
+              className="tiendaWhatsInput"
               type="text"
               placeholder="Tu nombre"
               value={whatsForm.nombre}
               onChange={(e) => setWhatsForm((prev) => ({ ...prev, nombre: e.target.value }))}
             />
+            <label className="tiendaWhatsLabel" htmlFor="tienda-whats-mensaje">Mensaje</label>
             <textarea
+              id="tienda-whats-mensaje"
+              className="tiendaWhatsTextarea"
               rows={3}
               placeholder="Escribe tu mensaje"
               value={whatsForm.mensaje}
@@ -6615,7 +6776,7 @@ export default function Tienda({
             <div className="tiendaWhatsPanelAcciones">
               <button
                 type="button"
-                className="boton botonExito"
+                className="boton botonExito tiendaWhatsEnviarBtn"
                 onClick={enviarMensajeWhatsDesdePagina}
                 disabled={whatsMensajeInvalido}
               >Enviar</button>
@@ -6625,8 +6786,8 @@ export default function Tienda({
         <button
           type="button"
           className="tiendaWhatsFab"
-          title="WhatsApp"
-          aria-label="WhatsApp"
+          title={mostrarWhatsForm ? 'Cerrar chat' : 'Abrir WhatsApp'}
+          aria-label={mostrarWhatsForm ? 'Cerrar chat' : 'Abrir WhatsApp'}
           onClick={() => setMostrarWhatsForm((prev) => !prev)}
         >
           <img src="/images/whatsapp.png" alt="WhatsApp" className="tiendaWhatsFabImg" />

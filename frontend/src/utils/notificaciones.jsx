@@ -3,7 +3,6 @@
 export const alertas = [];
 export const alertasPorClave = new Map();
 export const historialAlertas = [];
-export const MAX_HISTORIAL_ALERTAS = 200;
 const CLAVE_TAB_ALERTAS = 'chipactli:alertas:tab';
 let pestanaAlertasActual = 'activas';
 let audioCtx = null;
@@ -205,13 +204,31 @@ export function moverAlertaAHistorial(clave) {
   alertasPorClave.delete(clave);
   historialAlertas.unshift({
     mensaje: alerta.mensaje,
-    fecha: new Date().toISOString()
+    fecha: alerta.fecha || new Date().toISOString()
   });
-  if (historialAlertas.length > MAX_HISTORIAL_ALERTAS) {
-    historialAlertas.pop();
+  actualizarUIAlertas();
+  cambiarPestanaAlertas('historial');
+}
+
+export function marcarTodasAlertasComoLeidas() {
+  if (!alertas.length) return;
+  while (alertas.length) {
+    const alerta = alertas.shift();
+    if (!alerta?.clave) continue;
+    alertasPorClave.delete(alerta.clave);
+    historialAlertas.unshift({
+      mensaje: alerta.mensaje,
+      fecha: alerta.fecha || new Date().toISOString()
+    });
   }
   actualizarUIAlertas();
   cambiarPestanaAlertas('historial');
+}
+
+export function limpiarHistorialAlertas() {
+  if (!historialAlertas.length) return;
+  historialAlertas.splice(0, historialAlertas.length);
+  actualizarUIAlertas();
 }
 
 export function cambiarPestanaAlertas(pestana) {

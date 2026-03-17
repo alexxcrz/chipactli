@@ -8,7 +8,9 @@ import {
   agregarAlerta,
   removerAlertaPorClave,
   actualizarUIAlertas,
-  cambiarPestanaAlertas
+  cambiarPestanaAlertas,
+  marcarTodasAlertasComoLeidas,
+  limpiarHistorialAlertas
 } from '../../utils/notificaciones.jsx';
 import Inventario from '../Inventario/Inventario.jsx';
 import Recetas from '../Recetas/Recetas.jsx';
@@ -1456,6 +1458,10 @@ export default function App() {
               <div className="encabezadoDesplegable">
                 <button id="tabAlertasActivas" className="tabAlerta activa" onClick={() => cambiarPestanaAlertas('activas')}>Activas</button>
                 <button id="tabAlertasHistorial" className="tabAlerta" onClick={() => cambiarPestanaAlertas('historial')}>Historial</button>
+              </div>
+              <div className="accionesAlertasDesplegable">
+                <button type="button" className="botonPequeno" onClick={marcarTodasAlertasComoLeidas}>Marcar todas leídas</button>
+                <button type="button" className="botonPequeno" onClick={limpiarHistorialAlertas}>Borrar historial</button>
               </div>
               <div id="listaAlertas" className="listaAlertas"></div>
               <div id="listaAlertasHistorial" className="listaAlertas oculto"></div>

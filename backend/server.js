@@ -515,6 +515,72 @@ const VISITAS_TIMEOUT_MS = Math.max(30_000, Number(process.env.VISITAS_TIMEOUT_M
 const visitantesActivos = new Map();
 const estadisticasVisitasPorDia = new Map();
 const DIAS_RETENCION_VISITAS = Math.max(3, Number(process.env.VISITAS_DIAS_RETENCION) || 30);
+const DIAS_HISTORICO_VISITAS_MAX = Math.max(7, Number(process.env.VISITAS_HISTORICO_MAX_DIAS) || 120);
+
+const visitasDbReady = (async () => {
+  try {
+    await dbRunAsync(
+      bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_visitas_diarias (
+        dia_clave TEXT PRIMARY KEY,
+        total_eventos INTEGER DEFAULT 0,
+        sesiones_unicas INTEGER DEFAULT 0,
+        creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+        actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await dbRunAsync(
+      bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_visitas_diarias_horas (
+        dia_clave TEXT,
+        hora TEXT,
+        total INTEGER DEFAULT 0,
+        PRIMARY KEY (dia_clave, hora)
+      )`
+    );
+
+    await dbRunAsync(
+      bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_visitas_diarias_paises (
+        dia_clave TEXT,
+        pais TEXT,
+        total INTEGER DEFAULT 0,
+        PRIMARY KEY (dia_clave, pais)
+      )`
+    );
+
+    await dbRunAsync(
+      bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_visitas_sesiones_diarias (
+        dia_clave TEXT,
+        session_id TEXT,
+        pais TEXT,
+        primera_actividad_en TEXT DEFAULT CURRENT_TIMESTAMP,
+        ultima_actividad_en TEXT DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (dia_clave, session_id)
+      )`
+    );
+
+    await dbRunAsync(
+      bdVentas,
+      `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_actualizado
+       ON tienda_visitas_diarias (dia_clave DESC)`
+    );
+    await dbRunAsync(
+      bdVentas,
+      `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_horas
+       ON tienda_visitas_diarias_horas (dia_clave, hora)`
+    );
+    await dbRunAsync(
+      bdVentas,
+      `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_paises
+       ON tienda_visitas_diarias_paises (dia_clave, total DESC)`
+    );
+  } catch (error) {
+    console.warn('[VISITAS] No se pudo inicializar persistencia:', error?.message || error);
+  }
+})();
 
 function limpiarVisitantesInactivos(ahora = Date.now()) {
   for (const [clave, visita] of visitantesActivos.entries()) {
@@ -644,6 +710,135 @@ function resumenUbicacionesDia(statsDia) {
     .slice(0, 10);
 }
 
+async function registrarVisitaPersistente({ diaClave, horaClave, pais, sessionId, ahoraIso }) {
+  await visitasDbReady;
+  const paisSeguro = limpiarTextoCorto(pais || 'Desconocido', 48) || 'Desconocido';
+
+  await dbRunAsync(
+    bdVentas,
+    `INSERT INTO tienda_visitas_diarias (dia_clave, total_eventos, sesiones_unicas, actualizado_en)
+     VALUES (?, 1, 0, ?)
+     ON CONFLICT(dia_clave) DO UPDATE SET
+       total_eventos = total_eventos + 1,
+       actualizado_en = excluded.actualizado_en`,
+    [diaClave, ahoraIso]
+  );
+
+  await dbRunAsync(
+    bdVentas,
+    `INSERT INTO tienda_visitas_diarias_horas (dia_clave, hora, total)
+     VALUES (?, ?, 1)
+     ON CONFLICT(dia_clave, hora) DO UPDATE SET total = total + 1`,
+    [diaClave, horaClave]
+  );
+
+  await dbRunAsync(
+    bdVentas,
+    `INSERT INTO tienda_visitas_diarias_paises (dia_clave, pais, total)
+     VALUES (?, ?, 1)
+     ON CONFLICT(dia_clave, pais) DO UPDATE SET total = total + 1`,
+    [diaClave, paisSeguro]
+  );
+
+  if (!sessionId) return;
+
+  const sessionInsert = await dbRunAsync(
+    bdVentas,
+    `INSERT OR IGNORE INTO tienda_visitas_sesiones_diarias
+      (dia_clave, session_id, pais, primera_actividad_en, ultima_actividad_en)
+     VALUES (?, ?, ?, ?, ?)`,
+    [diaClave, sessionId, paisSeguro, ahoraIso, ahoraIso]
+  );
+
+  await dbRunAsync(
+    bdVentas,
+    `UPDATE tienda_visitas_sesiones_diarias
+     SET pais = ?, ultima_actividad_en = ?
+     WHERE dia_clave = ? AND session_id = ?`,
+    [paisSeguro, ahoraIso, diaClave, sessionId]
+  );
+
+  if (sessionInsert.changes > 0) {
+    await dbRunAsync(
+      bdVentas,
+      `UPDATE tienda_visitas_diarias
+       SET sesiones_unicas = sesiones_unicas + 1,
+           actualizado_en = ?
+       WHERE dia_clave = ?`,
+      [ahoraIso, diaClave]
+    );
+  }
+}
+
+function construirHorasDesdeFilas(filas = []) {
+  const mapa = new Map();
+  (filas || []).forEach((item) => {
+    const horaRaw = String(item?.hora || '').trim();
+    const horaClave = horaRaw.includes(':') ? horaRaw.slice(0, 2) : horaRaw.padStart(2, '0').slice(0, 2);
+    mapa.set(horaClave, Number(item?.total) || 0);
+  });
+  const salida = [];
+  for (let h = 0; h < 24; h += 1) {
+    const horaClave = String(h).padStart(2, '0');
+    salida.push({ hora: `${horaClave}:00`, total: Number(mapa.get(horaClave) || 0) });
+  }
+  return salida;
+}
+
+function obtenerHoraPicoDesdeHoras(horas = []) {
+  return (horas || []).reduce((max, cur) => (Number(cur?.total) > Number(max?.total) ? cur : max), { hora: '00:00', total: 0 });
+}
+
+async function obtenerResumenPersistenteDia(diaClave) {
+  await visitasDbReady;
+  const diario = await dbGetAsync(
+    bdVentas,
+    `SELECT dia_clave, total_eventos, sesiones_unicas, actualizado_en
+     FROM tienda_visitas_diarias
+     WHERE dia_clave = ?`,
+    [diaClave]
+  );
+  const filasHoras = await dbAllAsync(
+    bdVentas,
+    `SELECT hora, total
+     FROM tienda_visitas_diarias_horas
+     WHERE dia_clave = ?`,
+    [diaClave]
+  );
+  const ubicacionesTop = await dbAllAsync(
+    bdVentas,
+    `SELECT pais, total
+     FROM tienda_visitas_diarias_paises
+     WHERE dia_clave = ?
+     ORDER BY total DESC
+     LIMIT 10`,
+    [diaClave]
+  );
+  const porHora = construirHorasDesdeFilas(filasHoras);
+
+  return {
+    fecha: diaClave,
+    visitasDia: Number(diario?.sesiones_unicas) || 0,
+    eventosDia: Number(diario?.total_eventos) || 0,
+    horaPico: obtenerHoraPicoDesdeHoras(porHora),
+    ubicacionesTop: (ubicacionesTop || []).map((item) => ({
+      pais: limpiarTextoCorto(item?.pais || 'Desconocido', 48) || 'Desconocido',
+      total: Number(item?.total) || 0
+    })),
+    porHora,
+    actualizadoEn: String(diario?.actualizado_en || '').trim()
+  };
+}
+
+function restarDiasClave(clave, dias) {
+  const fecha = new Date(`${String(clave || '').trim()}T00:00:00`);
+  if (!Number.isFinite(fecha.getTime())) {
+    return claveDiaLocal(new Date());
+  }
+  fecha.setDate(fecha.getDate() - Math.max(0, Number(dias) || 0));
+  return claveDiaLocal(fecha);
+}
+
 app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
@@ -674,6 +869,16 @@ app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
 
   limpiarVisitantesInactivos(ahora);
   limpiarEstadisticasAntiguas(ahoraDate);
+
+  registrarVisitaPersistente({
+    diaClave,
+    horaClave,
+    pais: origen.pais,
+    sessionId,
+    ahoraIso: new Date(ahora).toISOString()
+  }).catch(() => {
+    // La respuesta al usuario no debe bloquearse por telemetría.
+  });
 
   const totalActivos = contarActivosReales();
   const horaPico = obtenerHoraPico(statsDia);
@@ -708,28 +913,99 @@ app.get(['/api/visitas/estado', '/visitas/estado'], (req, res) => {
   });
 });
 
-app.get(['/api/visitas/resumen', '/visitas/resumen'], (req, res) => {
+app.get(['/api/visitas/resumen', '/visitas/resumen'], async (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
   const hoyClave = claveDiaLocal(ahoraDate);
   limpiarVisitantesInactivos(ahora);
   limpiarEstadisticasAntiguas(ahoraDate);
 
-  const statsDia = obtenerStatsDia(hoyClave);
-  const porHora = construirHorasDia(statsDia);
+  try {
+    const resumenPersistente = await obtenerResumenPersistenteDia(hoyClave);
+    return res.json({
+      ok: true,
+      fecha: hoyClave,
+      activosAhora: contarActivosReales(),
+      visitasDia: Number(resumenPersistente?.visitasDia) || 0,
+      eventosDia: Number(resumenPersistente?.eventosDia) || 0,
+      horaPico: resumenPersistente?.horaPico || { hora: '00:00', total: 0 },
+      ubicacionesTop: Array.isArray(resumenPersistente?.ubicacionesTop) ? resumenPersistente.ubicacionesTop : [],
+      porHora: Array.isArray(resumenPersistente?.porHora) ? resumenPersistente.porHora : [],
+      actualizadoEn: resumenPersistente?.actualizadoEn || ahoraDate.toISOString(),
+      timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+    });
+  } catch {
+    const statsDia = obtenerStatsDia(hoyClave);
+    const porHora = construirHorasDia(statsDia);
+    return res.json({
+      ok: true,
+      fecha: hoyClave,
+      activosAhora: contarActivosReales(),
+      visitasDia: statsDia.sesionesUnicas.size,
+      eventosDia: statsDia.totalEventos,
+      horaPico: obtenerHoraPico(statsDia),
+      ubicacionesTop: resumenUbicacionesDia(statsDia),
+      porHora,
+      actualizadoEn: ahoraDate.toISOString(),
+      timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+    });
+  }
+});
 
-  return res.json({
-    ok: true,
-    fecha: hoyClave,
-    activosAhora: contarActivosReales(),
-    visitasDia: statsDia.sesionesUnicas.size,
-    eventosDia: statsDia.totalEventos,
-    horaPico: obtenerHoraPico(statsDia),
-    ubicacionesTop: resumenUbicacionesDia(statsDia),
-    porHora,
-    actualizadoEn: ahoraDate.toISOString(),
-    timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
-  });
+app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
+  const diasSolicitados = Number(req.query?.dias) || 14;
+  const dias = Math.max(7, Math.min(DIAS_HISTORICO_VISITAS_MAX, diasSolicitados));
+  const hoyClave = claveDiaLocal(new Date());
+  const desdeClave = restarDiasClave(hoyClave, dias - 1);
+
+  try {
+    await visitasDbReady;
+    const filas = await dbAllAsync(
+      bdVentas,
+      `SELECT dia_clave, total_eventos, sesiones_unicas
+       FROM tienda_visitas_diarias
+       WHERE dia_clave >= ?
+       ORDER BY dia_clave ASC`,
+      [desdeClave]
+    );
+    const paises = await dbAllAsync(
+      bdVentas,
+      `SELECT pais, SUM(total) AS total
+       FROM tienda_visitas_diarias_paises
+       WHERE dia_clave >= ?
+       GROUP BY pais
+       ORDER BY total DESC
+       LIMIT 10`,
+      [desdeClave]
+    );
+
+    const porDia = (filas || []).map((item) => ({
+      fecha: String(item?.dia_clave || '').trim(),
+      visitas: Number(item?.sesiones_unicas) || 0,
+      eventos: Number(item?.total_eventos) || 0
+    }));
+    const totalVisitas = porDia.reduce((acc, item) => acc + (Number(item?.visitas) || 0), 0);
+    const totalEventos = porDia.reduce((acc, item) => acc + (Number(item?.eventos) || 0), 0);
+    const maxDia = porDia.reduce((max, item) => (Number(item?.visitas) > Number(max?.visitas) ? item : max), { fecha: '', visitas: 0, eventos: 0 });
+
+    return res.json({
+      ok: true,
+      rangoDias: dias,
+      desde: desdeClave,
+      hasta: hoyClave,
+      porDia,
+      topUbicaciones: (paises || []).map((item) => ({
+        pais: limpiarTextoCorto(item?.pais || 'Desconocido', 48) || 'Desconocido',
+        total: Number(item?.total) || 0
+      })),
+      totalVisitas,
+      totalEventos,
+      promedioVisitasDia: porDia.length ? Number((totalVisitas / porDia.length).toFixed(2)) : 0,
+      diaConMasVisitas: maxDia
+    });
+  } catch {
+    return res.status(500).json({ ok: false, error: 'No se pudo cargar historial de visitas' });
+  }
 });
 
 setInterval(() => {

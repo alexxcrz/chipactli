@@ -3847,7 +3847,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
          FROM tienda_notificaciones_cliente
          WHERE id_cliente = ?
          ORDER BY id DESC
-         LIMIT 100`,
+         LIMIT 500`,
         [req.cliente.id]
       );
       res.json({ exito: true, notificaciones: rows || [] });

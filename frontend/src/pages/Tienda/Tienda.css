@@ -4323,17 +4323,6 @@
   .tiendaGridAdminFull .tiendaCatalogo {
     min-height: auto;
   }
-
-  .tiendaRootScrollTrastienda {
-    min-height: calc(100dvh - 104px) !important;
-    max-height: calc(100dvh - 104px) !important;
-    height: calc(100dvh - 104px) !important;
-    overflow-y: auto !important;
-    overflow-x: hidden;
-    overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
-  }
 }
 
 @media (max-width: 768px) {

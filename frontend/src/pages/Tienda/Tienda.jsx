@@ -822,6 +822,8 @@ export default function Tienda({
     topProductos: []
   });
   const bloqueoAperturaCarritoRef = useRef(0);
+  const ubicacionVisitanteRef = useRef(null);
+  const cargandoUbicacionVisitanteRef = useRef(false);
   const inputLogoPagoArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
   const metodoPagoUploadTargetRef = useRef('');
@@ -992,11 +994,65 @@ export default function Tienda({
 
     let cancelado = false;
 
+    const resolverUbicacionVisitante = async () => {
+      if (ubicacionVisitanteRef.current) return ubicacionVisitanteRef.current;
+      if (cargandoUbicacionVisitanteRef.current) return null;
+
+      try {
+        const cacheRaw = sessionStorage.getItem('chipactli:geo-visita');
+        if (cacheRaw) {
+          const cache = JSON.parse(cacheRaw);
+          const expiracion = Number(cache?.expiracion || 0);
+          if (expiracion > Date.now()) {
+            const ubicacion = {
+              pais: String(cache?.pais || '').trim(),
+              region: String(cache?.region || '').trim(),
+              ciudad: String(cache?.ciudad || '').trim()
+            };
+            ubicacionVisitanteRef.current = ubicacion;
+            return ubicacion;
+          }
+        }
+      } catch {
+        // Ignorar cache inválido.
+      }
+
+      cargandoUbicacionVisitanteRef.current = true;
+      try {
+        const resp = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const ubicacion = {
+          pais: String(data?.country_name || data?.country || '').trim(),
+          region: String(data?.region || data?.region_code || '').trim(),
+          ciudad: String(data?.city || '').trim()
+        };
+        if (ubicacion.pais || ubicacion.region || ubicacion.ciudad) {
+          ubicacionVisitanteRef.current = ubicacion;
+          try {
+            sessionStorage.setItem('chipactli:geo-visita', JSON.stringify({
+              ...ubicacion,
+              expiracion: Date.now() + (6 * 60 * 60 * 1000)
+            }));
+          } catch {
+            // Ignorar errores de almacenamiento.
+          }
+          return ubicacion;
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        cargandoUbicacionVisitanteRef.current = false;
+      }
+    };
+
     const enviarHeartbeatVisita = async () => {
       try {
         const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
         const idioma = String(window?.navigator?.language || '').trim();
         const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/tienda')).trim();
+        const geo = await resolverUbicacionVisitante();
         const data = await fetchJson('/visitas/ping', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1005,6 +1061,9 @@ export default function Tienda({
             ruta,
             zonaHoraria,
             idioma,
+            pais: String(geo?.pais || '').trim(),
+            region: String(geo?.region || '').trim(),
+            ciudad: String(geo?.ciudad || '').trim(),
             visible: document.visibilityState === 'visible'
           })
         });
@@ -1054,6 +1113,18 @@ export default function Tienda({
 
     return () => window.clearInterval(intervalo);
   }, [esVistaTrastienda, tokenInterno, adminVista, historialVisitasAdmin.rangoDias, fechaVisitaSeleccionada]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    if (vistaActiva !== 'tienda') return;
+    registrarEventoComportamiento('ver_tienda');
+  }, [esVistaTrastienda, vistaActiva]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    if (vistaActiva !== 'tienda') return;
+    registrarEventoComportamiento('ver_seccion', seccionActiva || 'todos');
+  }, [esVistaTrastienda, vistaActiva, seccionActiva]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -3151,12 +3222,14 @@ export default function Tienda({
     const sessionId = obtenerSesionVisitaId();
     if (!sessionId) return;
 
+    const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
     const payload = {
       sessionId,
       accion: String(accion || '').trim().slice(0, 64),
       producto: String(producto || '').trim().slice(0, 140),
       seccion: String(seccionActiva || '').trim().slice(0, 64),
-      ruta: String(window?.location?.hash || '#/tienda').trim().slice(0, 120)
+      ruta: String(window?.location?.hash || '#/tienda').trim().slice(0, 120),
+      zonaHoraria: String(zonaHoraria || '').trim().slice(0, 64)
     };
     if (!payload.accion) return;
 
@@ -4052,11 +4125,7 @@ export default function Tienda({
   const whatsMensajeInvalido = whatsMensajeTrimLen < 6 || whatsMensajeTrimLen > 420;
 
   return (
-    <div
-      ref={contenedorScrollRef}
-      className={esVistaTrastienda ? 'tiendaRootScroll tiendaRootScrollTrastienda' : 'tiendaRootScroll'}
-      tabIndex={0}
-    >
+    <div ref={contenedorScrollRef} className="tiendaRootScroll" tabIndex={0}>
       {!esVistaTrastienda && (
       <div className="tiendaPromoBar">
         {configTienda.promo_texto}

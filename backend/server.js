@@ -743,6 +743,25 @@ function construirEtiquetaUbicacion({ ciudad = '', region = '', pais = '' } = {}
   return partes.length ? partes.join(', ') : 'Desconocido';
 }
 
+function normalizarEtiquetaUbicacion(valor = '') {
+  const texto = limpiarTextoCorto(valor, 96);
+  if (!texto) return 'Desconocido';
+
+  const partes = texto
+    .split(',')
+    .map((item) => limpiarTextoCorto(item, 64))
+    .filter(Boolean);
+
+  if (!partes.length) return 'Desconocido';
+
+  const ultima = String(partes[partes.length - 1] || '').trim();
+  const pais = normalizarPais(ultima);
+  if (pais.nombre !== 'Desconocido') {
+    partes[partes.length - 1] = pais.nombre;
+  }
+  return partes.join(', ');
+}
+
 function obtenerOrigenAproximado(req, body) {
   const paisHeader = limpiarTextoCorto(
     req.headers['cf-ipcountry']
@@ -915,7 +934,7 @@ function resumenUbicacionesActivas() {
   const conteo = new Map();
   for (const visita of visitantesActivos.values()) {
     if (visita?.esBot) continue;
-    const clave = limpiarTextoCorto(visita?.ubicacion || visita?.pais || 'Desconocido', 96) || 'Desconocido';
+    const clave = normalizarEtiquetaUbicacion(visita?.ubicacion || visita?.pais || 'Desconocido');
     conteo.set(clave, (conteo.get(clave) || 0) + 1);
   }
   return Array.from(conteo.entries())
@@ -934,7 +953,7 @@ function resumenUbicacionesDia(statsDia) {
 
 async function registrarVisitaPersistente({ diaClave, horaClave, ubicacion, sessionId, ahoraIso }) {
   await visitasDbReady;
-  const ubicacionSegura = limpiarTextoCorto(ubicacion || 'Desconocido', 96) || 'Desconocido';
+  const ubicacionSegura = normalizarEtiquetaUbicacion(ubicacion || 'Desconocido');
 
   await dbRunAsync(
     bdVentas,
@@ -1044,8 +1063,8 @@ async function obtenerResumenPersistenteDia(diaClave) {
     eventosDia: Number(diario?.total_eventos) || 0,
     horaPico: obtenerHoraPicoDesdeHoras(porHora),
     ubicacionesTop: (ubicacionesTop || []).map((item) => ({
-      ubicacion: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
-      pais: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
+      ubicacion: normalizarEtiquetaUbicacion(item?.pais || 'Desconocido'),
+      pais: normalizarEtiquetaUbicacion(item?.pais || 'Desconocido'),
       total: Number(item?.total) || 0
     })),
     porHora,
@@ -1140,8 +1159,9 @@ app.post(['/api/visitas/ping', '/visitas/ping'], async (req, res) => {
 app.post(['/api/visitas/evento', '/visitas/evento'], async (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
-  const diaClave = claveDiaLocal(ahoraDate);
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const tiempoLocalEvento = obtenerDiaHoraPorZona(ahoraDate, body?.zonaHoraria || '');
+  const diaClave = tiempoLocalEvento.diaClave;
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
   const accion = limpiarTextoCorto(body.accion || '', 64);
   const producto = limpiarTextoCorto(body.producto || '', 140);
@@ -1288,8 +1308,8 @@ app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
       hasta: hoyClave,
       porDia,
       topUbicaciones: (paises || []).map((item) => ({
-        ubicacion: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
-        pais: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
+        ubicacion: normalizarEtiquetaUbicacion(item?.pais || 'Desconocido'),
+        pais: normalizarEtiquetaUbicacion(item?.pais || 'Desconocido'),
         total: Number(item?.total) || 0
       })),
       totalVisitas,

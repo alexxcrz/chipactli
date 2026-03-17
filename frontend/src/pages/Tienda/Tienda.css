@@ -32,6 +32,94 @@
   font-weight: 600;
 }
 
+.tiendaMetricasWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tiendaMetricasHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaMetricasGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.tiendaMetricaCard {
+  border: 1px solid #d4ddd8;
+  border-radius: 12px;
+  background: #fbfdfb;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaMetricaCard span {
+  font-size: 12px;
+  color: #476457;
+}
+
+.tiendaMetricaCard strong {
+  font-size: 20px;
+  color: #1f3f32;
+}
+
+.tiendaMetricasBloques {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.tiendaMetricasBloque {
+  border: 1px solid #d8e1dc;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.tiendaMetricasBloque h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #2d4f40;
+}
+
+.tiendaMetricasLista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaMetricasLista li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #edf2ef;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fafcfb;
+}
+
+.tiendaMetricasListaHoras li {
+  font-variant-numeric: tabular-nums;
+}
+
+.tiendaMetricasActualizado {
+  font-size: 12px;
+  color: #557264;
+}
+
 @media (max-width: 700px) {
   .tiendaVisitasActivas {
     flex-direction: column;

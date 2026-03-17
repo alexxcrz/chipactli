@@ -513,6 +513,8 @@ registrarRutasAuth(app, bdAdminAuth);
 
 const VISITAS_TIMEOUT_MS = Math.max(30_000, Number(process.env.VISITAS_TIMEOUT_MS) || 2 * 60 * 1000);
 const visitantesActivos = new Map();
+const estadisticasVisitasPorDia = new Map();
+const DIAS_RETENCION_VISITAS = Math.max(3, Number(process.env.VISITAS_DIAS_RETENCION) || 30);
 
 function limpiarVisitantesInactivos(ahora = Date.now()) {
   for (const [clave, visita] of visitantesActivos.entries()) {
@@ -559,9 +561,72 @@ function obtenerOrigenAproximado(req, body) {
   };
 }
 
+function esUserAgentBot(req) {
+  const ua = String(req.headers['user-agent'] || '').toLowerCase();
+  if (!ua) return false;
+  return /(bot|spider|crawler|lighthouse|headless|preview|facebookexternalhit|whatsapp|telegrambot|slackbot|discordbot)/i.test(ua);
+}
+
+function claveDiaLocal(fecha = new Date()) {
+  const yyyy = fecha.getFullYear();
+  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+  const dd = String(fecha.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function obtenerStatsDia(diaClave) {
+  const actual = estadisticasVisitasPorDia.get(diaClave);
+  if (actual) return actual;
+
+  const nuevo = {
+    diaClave,
+    totalEventos: 0,
+    sesionesUnicas: new Set(),
+    porHora: new Map(),
+    porPais: new Map()
+  };
+  estadisticasVisitasPorDia.set(diaClave, nuevo);
+  return nuevo;
+}
+
+function limpiarEstadisticasAntiguas(fechaRef = new Date()) {
+  const limite = new Date(fechaRef);
+  limite.setDate(limite.getDate() - DIAS_RETENCION_VISITAS);
+  const claveLimite = claveDiaLocal(limite);
+  for (const clave of estadisticasVisitasPorDia.keys()) {
+    if (String(clave) < claveLimite) {
+      estadisticasVisitasPorDia.delete(clave);
+    }
+  }
+}
+
+function contarActivosReales() {
+  let total = 0;
+  for (const visita of visitantesActivos.values()) {
+    if (visita?.esBot) continue;
+    total += 1;
+  }
+  return total;
+}
+
+function construirHorasDia(statsDia) {
+  const salida = [];
+  for (let h = 0; h < 24; h += 1) {
+    const hora = String(h).padStart(2, '0');
+    salida.push({ hora: `${hora}:00`, total: Number(statsDia?.porHora?.get?.(hora) || 0) });
+  }
+  return salida;
+}
+
+function obtenerHoraPico(statsDia) {
+  const horas = construirHorasDia(statsDia);
+  return horas.reduce((max, cur) => (cur.total > max.total ? cur : max), { hora: '00:00', total: 0 });
+}
+
 function resumenUbicacionesActivas() {
   const conteo = new Map();
   for (const visita of visitantesActivos.values()) {
+    if (visita?.esBot) continue;
     const clave = limpiarTextoCorto(visita?.pais || 'Desconocido', 48) || 'Desconocido';
     conteo.set(clave, (conteo.get(clave) || 0) + 1);
   }
@@ -571,46 +636,107 @@ function resumenUbicacionesActivas() {
     .slice(0, 10);
 }
 
-app.post('/api/visitas/ping', (req, res) => {
+function resumenUbicacionesDia(statsDia) {
+  const pares = Array.from(statsDia?.porPais?.entries?.() || []);
+  return pares
+    .map(([pais, total]) => ({ pais, total: Number(total) || 0 }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+}
+
+app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
   const ahora = Date.now();
+  const ahoraDate = new Date(ahora);
+  const diaClave = claveDiaLocal(ahoraDate);
+  const horaClave = String(ahoraDate.getHours()).padStart(2, '0');
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
   const origen = obtenerOrigenAproximado(req, body);
+  const esBot = esUserAgentBot(req);
+  const statsDia = obtenerStatsDia(diaClave);
+
+  statsDia.totalEventos += 1;
+  statsDia.porHora.set(horaClave, (statsDia.porHora.get(horaClave) || 0) + 1);
+  statsDia.porPais.set(origen.pais, (statsDia.porPais.get(origen.pais) || 0) + 1);
 
   if (sessionId) {
+    statsDia.sesionesUnicas.add(sessionId);
     visitantesActivos.set(sessionId, {
       sessionId,
       ip: obtenerIpCliente(req),
       ultimaActividad: ahora,
       ruta: limpiarTextoCorto(body.ruta || '', 120),
+      visible: body?.visible === false ? false : true,
+      esBot,
       ...origen
     });
   }
 
   limpiarVisitantesInactivos(ahora);
+  limpiarEstadisticasAntiguas(ahoraDate);
+
+  const totalActivos = contarActivosReales();
+  const horaPico = obtenerHoraPico(statsDia);
 
   return res.json({
     ok: true,
-    totalActivos: visitantesActivos.size,
+    totalActivos,
+    visitasDia: statsDia.sesionesUnicas.size,
+    eventosDia: statsDia.totalEventos,
+    horaPico,
     ubicaciones: resumenUbicacionesActivas(),
     actualizadoEn: new Date(ahora).toISOString(),
     timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
   });
 });
 
-app.get('/api/visitas/estado', (req, res) => {
+app.get(['/api/visitas/estado', '/visitas/estado'], (req, res) => {
   const ahora = Date.now();
+  const hoyClave = claveDiaLocal(new Date(ahora));
+  const statsDia = obtenerStatsDia(hoyClave);
   limpiarVisitantesInactivos(ahora);
+
   return res.json({
     ok: true,
-    totalActivos: visitantesActivos.size,
+    totalActivos: contarActivosReales(),
+    visitasDia: statsDia.sesionesUnicas.size,
+    eventosDia: statsDia.totalEventos,
+    horaPico: obtenerHoraPico(statsDia),
     ubicaciones: resumenUbicacionesActivas(),
     actualizadoEn: new Date(ahora).toISOString(),
     timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
   });
 });
 
-setInterval(() => limpiarVisitantesInactivos(Date.now()), 30_000).unref?.();
+app.get(['/api/visitas/resumen', '/visitas/resumen'], (req, res) => {
+  const ahora = Date.now();
+  const ahoraDate = new Date(ahora);
+  const hoyClave = claveDiaLocal(ahoraDate);
+  limpiarVisitantesInactivos(ahora);
+  limpiarEstadisticasAntiguas(ahoraDate);
+
+  const statsDia = obtenerStatsDia(hoyClave);
+  const porHora = construirHorasDia(statsDia);
+
+  return res.json({
+    ok: true,
+    fecha: hoyClave,
+    activosAhora: contarActivosReales(),
+    visitasDia: statsDia.sesionesUnicas.size,
+    eventosDia: statsDia.totalEventos,
+    horaPico: obtenerHoraPico(statsDia),
+    ubicacionesTop: resumenUbicacionesDia(statsDia),
+    porHora,
+    actualizadoEn: ahoraDate.toISOString(),
+    timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+  });
+});
+
+setInterval(() => {
+  const ahora = new Date();
+  limpiarVisitantesInactivos(ahora.getTime());
+  limpiarEstadisticasAntiguas(ahora);
+}, 30_000).unref?.();
 
 const reglasPermisos = [
   { metodos: ['GET'], exacto: '/inventario/estadisticas', pestana: 'inventario', accion: 'ver_estadisticas' },

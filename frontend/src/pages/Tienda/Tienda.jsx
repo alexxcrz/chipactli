@@ -707,7 +707,7 @@ export default function Tienda({
   const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
   const [procesandoPedidosAdmin, setProcesandoPedidosAdmin] = useState(false);
   const [modalResetContadoresAdmin, setModalResetContadoresAdmin] = useState({ visible: false, password: '' });
-  const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'config'], 'pedidos'));
+  const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'config', 'metricas'], 'pedidos'));
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
   const [busquedaAdmin, setBusquedaAdmin] = useState('');
   const [ordenObjetivoAdmin, setOrdenObjetivoAdmin] = useState({ id: '', folio: '' });
@@ -763,6 +763,17 @@ export default function Tienda({
   const [previewTipoCorreo, setPreviewTipoCorreo] = useState('campana');
   const [mpReconcileTick, setMpReconcileTick] = useState(0);
   const [visitasActivas, setVisitasActivas] = useState({ totalActivos: 0, ubicaciones: [], listo: false });
+  const [resumenVisitasAdmin, setResumenVisitasAdmin] = useState({
+    cargando: false,
+    fecha: '',
+    activosAhora: 0,
+    visitasDia: 0,
+    eventosDia: 0,
+    horaPico: { hora: '00:00', total: 0 },
+    ubicacionesTop: [],
+    porHora: [],
+    actualizadoEn: ''
+  });
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
@@ -916,14 +927,15 @@ export default function Tienda({
         const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
         const idioma = String(window?.navigator?.language || '').trim();
         const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/tienda')).trim();
-        const data = await fetchJson('/api/visitas/ping', {
+        const data = await fetchJson('/visitas/ping', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId,
             ruta,
             zonaHoraria,
-            idioma
+            idioma,
+            visible: document.visibilityState === 'visible'
           })
         });
 
@@ -957,6 +969,17 @@ export default function Tienda({
       document.removeEventListener('visibilitychange', alVolverVisible);
     };
   }, [esVistaTrastienda]);
+
+  useEffect(() => {
+    if (!esVistaTrastienda || !tokenInterno || adminVista !== 'metricas') return undefined;
+
+    cargarResumenVisitasAdmin();
+    const intervalo = window.setInterval(() => {
+      cargarResumenVisitasAdmin();
+    }, 30_000);
+
+    return () => window.clearInterval(intervalo);
+  }, [esVistaTrastienda, tokenInterno, adminVista]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -2968,6 +2991,30 @@ export default function Tienda({
     return fetchJson(path, { ...options, headers });
   }
 
+  async function cargarResumenVisitasAdmin() {
+    if (!tokenInterno) return;
+    setResumenVisitasAdmin((prev) => ({ ...prev, cargando: true }));
+    try {
+      const data = await fetchAdmin('/visitas/resumen');
+      setResumenVisitasAdmin({
+        cargando: false,
+        fecha: String(data?.fecha || '').trim(),
+        activosAhora: Number(data?.activosAhora) || 0,
+        visitasDia: Number(data?.visitasDia) || 0,
+        eventosDia: Number(data?.eventosDia) || 0,
+        horaPico: {
+          hora: String(data?.horaPico?.hora || '00:00').trim(),
+          total: Number(data?.horaPico?.total) || 0
+        },
+        ubicacionesTop: Array.isArray(data?.ubicacionesTop) ? data.ubicacionesTop : [],
+        porHora: Array.isArray(data?.porHora) ? data.porHora : [],
+        actualizadoEn: String(data?.actualizadoEn || '').trim()
+      });
+    } catch {
+      setResumenVisitasAdmin((prev) => ({ ...prev, cargando: false }));
+    }
+  }
+
   async function cargarPuntosEntrega() {
     try {
       const data = await fetchJson('/tienda/puntos-entrega');
@@ -4251,8 +4298,86 @@ export default function Tienda({
               <button type="button" className={adminVista === 'puntos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('puntos')}>Puntos de entrega</button>
               <button type="button" className={adminVista === 'catalogo' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('catalogo')}>Catálogo</button>
               <button type="button" className={adminVista === 'descuentos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('descuentos')}>Descuentos</button>
+              <button type="button" className={adminVista === 'metricas' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('metricas')}>Métricas</button>
               <button type="button" className={adminVista === 'config' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('config')}>Configuración</button>
             </div>
+
+            {adminVista === 'metricas' && (
+              <div className="tiendaAdminForm tiendaMetricasWrap">
+                <div className="tiendaMetricasHeader">
+                  <strong>Resumen de visitas del día {resumenVisitasAdmin.fecha ? `(${resumenVisitasAdmin.fecha})` : ''}</strong>
+                  <button
+                    type="button"
+                    className="boton"
+                    onClick={cargarResumenVisitasAdmin}
+                    disabled={resumenVisitasAdmin.cargando}
+                  >
+                    {resumenVisitasAdmin.cargando ? 'Actualizando...' : 'Actualizar'}
+                  </button>
+                </div>
+
+                <div className="tiendaMetricasGrid">
+                  <article className="tiendaMetricaCard">
+                    <span>Personas activas ahora</span>
+                    <strong>{resumenVisitasAdmin.activosAhora}</strong>
+                  </article>
+                  <article className="tiendaMetricaCard">
+                    <span>Visitas únicas de hoy</span>
+                    <strong>{resumenVisitasAdmin.visitasDia}</strong>
+                  </article>
+                  <article className="tiendaMetricaCard">
+                    <span>Eventos registrados hoy</span>
+                    <strong>{resumenVisitasAdmin.eventosDia}</strong>
+                  </article>
+                  <article className="tiendaMetricaCard">
+                    <span>Horario con más visitas</span>
+                    <strong>
+                      {resumenVisitasAdmin.horaPico?.hora || '00:00'}
+                      {' - '}
+                      {String(Math.min(23, (Number(String(resumenVisitasAdmin.horaPico?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59
+                      {' '}
+                      ({Number(resumenVisitasAdmin.horaPico?.total) || 0})
+                    </strong>
+                  </article>
+                </div>
+
+                <div className="tiendaMetricasBloques">
+                  <div className="tiendaMetricasBloque">
+                    <h4>Ubicaciones con más visitas hoy</h4>
+                    <ul className="tiendaMetricasLista">
+                      {(resumenVisitasAdmin.ubicacionesTop || []).map((item, idx) => (
+                        <li key={`ubi-top-${idx}-${item?.pais || 'sin-pais'}`}>
+                          <span>{item?.pais || 'Desconocido'}</span>
+                          <strong>{Number(item?.total) || 0}</strong>
+                        </li>
+                      ))}
+                      {!(resumenVisitasAdmin.ubicacionesTop || []).length && <li><span>Sin datos todavía</span></li>}
+                    </ul>
+                  </div>
+
+                  <div className="tiendaMetricasBloque">
+                    <h4>Visitas por horario (hoy)</h4>
+                    <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
+                      {(resumenVisitasAdmin.porHora || [])
+                        .filter((item) => Number(item?.total) > 0)
+                        .sort((a, b) => Number(b?.total) - Number(a?.total))
+                        .slice(0, 8)
+                        .map((item, idx) => (
+                          <li key={`hora-top-${idx}-${item?.hora || '00:00'}`}>
+                            <span>{item?.hora || '00:00'} - {String(Math.min(23, (Number(String(item?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59</span>
+                            <strong>{Number(item?.total) || 0}</strong>
+                          </li>
+                        ))}
+                      {!((resumenVisitasAdmin.porHora || []).some((item) => Number(item?.total) > 0)) && <li><span>Sin datos todavía</span></li>}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="tiendaMetricasActualizado">
+                  Última actualización: {resumenVisitasAdmin.actualizadoEn ? String(resumenVisitasAdmin.actualizadoEn).replace('T', ' ').slice(0, 19) : 'pendiente'}
+                </div>
+              </div>
+            )}
 
             {(adminVista === 'pedidos' || adminVista === 'clientes') && (
               <div className="tiendaAdminBuscadorWrap">

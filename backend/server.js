@@ -511,6 +511,107 @@ const { db: bdVentasRutas, usandoPg: usandoPgVentas } = conexionVentasRutas;
 // Registrar rutas de autenticación
 registrarRutasAuth(app, bdAdminAuth);
 
+const VISITAS_TIMEOUT_MS = Math.max(30_000, Number(process.env.VISITAS_TIMEOUT_MS) || 2 * 60 * 1000);
+const visitantesActivos = new Map();
+
+function limpiarVisitantesInactivos(ahora = Date.now()) {
+  for (const [clave, visita] of visitantesActivos.entries()) {
+    if (!visita || (ahora - Number(visita.ultimaActividad || 0)) > VISITAS_TIMEOUT_MS) {
+      visitantesActivos.delete(clave);
+    }
+  }
+}
+
+function limpiarTextoCorto(valor, max = 64) {
+  const limpio = String(valor || '').trim().slice(0, max);
+  return limpio.replace(/[\r\n\t]/g, ' ');
+}
+
+function obtenerIpCliente(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').trim();
+  if (xff) return xff.split(',')[0].trim();
+  return String(
+    req.headers['cf-connecting-ip']
+    || req.headers['x-real-ip']
+    || req.socket?.remoteAddress
+    || ''
+  ).trim();
+}
+
+function obtenerOrigenAproximado(req, body) {
+  const paisHeader = limpiarTextoCorto(
+    req.headers['cf-ipcountry']
+    || req.headers['x-vercel-ip-country']
+    || req.headers['x-country-code']
+    || ''
+  );
+  const ciudadHeader = limpiarTextoCorto(req.headers['x-vercel-ip-city'] || '');
+  const regionHeader = limpiarTextoCorto(req.headers['x-vercel-ip-country-region'] || '');
+  const paisBody = limpiarTextoCorto(body?.pais || '', 48);
+  const ciudadBody = limpiarTextoCorto(body?.ciudad || '', 64);
+
+  return {
+    pais: paisHeader || paisBody || 'Desconocido',
+    ciudad: ciudadHeader || ciudadBody || '',
+    region: regionHeader || '',
+    zonaHoraria: limpiarTextoCorto(body?.zonaHoraria || '', 64),
+    idioma: limpiarTextoCorto(body?.idioma || '', 32)
+  };
+}
+
+function resumenUbicacionesActivas() {
+  const conteo = new Map();
+  for (const visita of visitantesActivos.values()) {
+    const clave = limpiarTextoCorto(visita?.pais || 'Desconocido', 48) || 'Desconocido';
+    conteo.set(clave, (conteo.get(clave) || 0) + 1);
+  }
+  return Array.from(conteo.entries())
+    .map(([pais, total]) => ({ pais, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+}
+
+app.post('/api/visitas/ping', (req, res) => {
+  const ahora = Date.now();
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
+  const origen = obtenerOrigenAproximado(req, body);
+
+  if (sessionId) {
+    visitantesActivos.set(sessionId, {
+      sessionId,
+      ip: obtenerIpCliente(req),
+      ultimaActividad: ahora,
+      ruta: limpiarTextoCorto(body.ruta || '', 120),
+      ...origen
+    });
+  }
+
+  limpiarVisitantesInactivos(ahora);
+
+  return res.json({
+    ok: true,
+    totalActivos: visitantesActivos.size,
+    ubicaciones: resumenUbicacionesActivas(),
+    actualizadoEn: new Date(ahora).toISOString(),
+    timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+  });
+});
+
+app.get('/api/visitas/estado', (req, res) => {
+  const ahora = Date.now();
+  limpiarVisitantesInactivos(ahora);
+  return res.json({
+    ok: true,
+    totalActivos: visitantesActivos.size,
+    ubicaciones: resumenUbicacionesActivas(),
+    actualizadoEn: new Date(ahora).toISOString(),
+    timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+  });
+});
+
+setInterval(() => limpiarVisitantesInactivos(Date.now()), 30_000).unref?.();
+
 const reglasPermisos = [
   { metodos: ['GET'], exacto: '/inventario/estadisticas', pestana: 'inventario', accion: 'ver_estadisticas' },
   { metodos: ['GET'], prefijo: '/inventario', pestana: 'inventario', accion: 'ver' },

@@ -8,6 +8,37 @@
   font-weight: 700;
 }
 
+.tiendaVisitasActivas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #d5d5d5;
+  background: #ffffff;
+  color: #2a2a2a;
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.tiendaVisitasActivas.admin {
+  border-color: #4a7c59;
+  background: #f3f8f5;
+}
+
+.tiendaVisitasActivas span {
+  color: #365246;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .tiendaVisitasActivas {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .tiendaMainHeader {
   display: flex;
   align-items: center;

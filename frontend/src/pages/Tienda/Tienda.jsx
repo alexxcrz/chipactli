@@ -29,6 +29,7 @@ const CLAVE_TRASTIENDA_VISTA_ADMIN = 'chipactli:trastienda:adminVista';
 const CLAVE_TRASTIENDA_CONFIG_TAB = 'chipactli:trastienda:configAdminTab';
 const CLAVE_TRASTIENDA_DESCUENTOS_TAB = 'chipactli:trastienda:descuentoTabInterna';
 const CLAVE_MP_CHECKOUT_PENDIENTE = 'chipactli:tienda:mp-checkout-pendiente';
+const CLAVE_VISITA_SESION_ID = 'chipactli:visita:sesion-id';
 const OCULTAR_MERCADO_PAGO = true;
 const EXPIRACION_CARRITO_INVITADO_MS = 24 * 60 * 60 * 1000;
 const SECCIONES_INFO_LINKS = [
@@ -206,6 +207,20 @@ function guardarValorPersistido(clave, valor) {
   try {
     localStorage.setItem(clave, String(valor || ''));
   } catch {
+  }
+}
+
+function obtenerSesionVisitaId() {
+  try {
+    const actual = String(localStorage.getItem(CLAVE_VISITA_SESION_ID) || '').trim();
+    if (actual) return actual;
+    const generado = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `visita-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(CLAVE_VISITA_SESION_ID, generado);
+    return generado;
+  } catch {
+    return `visita-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 }
 
@@ -747,6 +762,7 @@ export default function Tienda({
   const [previewCorreoAsunto, setPreviewCorreoAsunto] = useState('');
   const [previewTipoCorreo, setPreviewTipoCorreo] = useState('campana');
   const [mpReconcileTick, setMpReconcileTick] = useState(0);
+  const [visitasActivas, setVisitasActivas] = useState({ totalActivos: 0, ubicaciones: [], listo: false });
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
@@ -820,6 +836,16 @@ export default function Tienda({
     [metodosPagoFooter]
   );
 
+  const textoUbicacionesVisitas = useMemo(
+    () => (Array.isArray(visitasActivas?.ubicaciones)
+      ? visitasActivas.ubicaciones
+        .slice(0, 3)
+        .map((item) => `${item?.pais || 'Desconocido'} (${Number(item?.total) || 0})`)
+        .join(' · ')
+      : ''),
+    [visitasActivas]
+  );
+
   const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
   const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
 
@@ -878,6 +904,59 @@ export default function Tienda({
       urlsTemporales.forEach((tmp) => URL.revokeObjectURL(tmp));
     };
   }, [metodosPagoFooterVisibles, removerFondoPngFooter]);
+
+  useEffect(() => {
+    const sessionId = obtenerSesionVisitaId();
+    if (!sessionId) return undefined;
+
+    let cancelado = false;
+
+    const enviarHeartbeatVisita = async () => {
+      try {
+        const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
+        const idioma = String(window?.navigator?.language || '').trim();
+        const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/tienda')).trim();
+        const data = await fetchJson('/api/visitas/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            ruta,
+            zonaHoraria,
+            idioma
+          })
+        });
+
+        if (!cancelado) {
+          setVisitasActivas({
+            totalActivos: Number(data?.totalActivos) || 0,
+            ubicaciones: Array.isArray(data?.ubicaciones) ? data.ubicaciones : [],
+            listo: true
+          });
+        }
+      } catch {
+        if (!cancelado) {
+          setVisitasActivas((prev) => ({ ...prev, listo: true }));
+        }
+      }
+    };
+
+    enviarHeartbeatVisita();
+    const intervalo = window.setInterval(enviarHeartbeatVisita, 30_000);
+    const alVolverVisible = () => {
+      if (document.visibilityState === 'visible') {
+        enviarHeartbeatVisita();
+      }
+    };
+
+    document.addEventListener('visibilitychange', alVolverVisible);
+
+    return () => {
+      cancelado = true;
+      window.clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolverVisible);
+    };
+  }, [esVistaTrastienda]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -3777,6 +3856,17 @@ export default function Tienda({
       <div className="tiendaPromoBar">
         {configTienda.promo_texto}
       </div>
+      )}
+
+      {visitasActivas.listo && (
+        <div className={`tiendaVisitasActivas ${esVistaTrastienda ? 'admin' : ''}`}>
+          <strong>
+            {visitasActivas.totalActivos} {visitasActivas.totalActivos === 1 ? 'persona activa ahora' : 'personas activas ahora'}
+          </strong>
+          {esVistaTrastienda && textoUbicacionesVisitas && (
+            <span>Desde: {textoUbicacionesVisitas}</span>
+          )}
+        </div>
       )}
 
       {!esVistaTrastienda && (

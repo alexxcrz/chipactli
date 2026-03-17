@@ -276,6 +276,37 @@ export default function App() {
   }, [page, isAuthenticated]);
 
   React.useEffect(() => {
+    const bloquearContexto = (event) => {
+      event.preventDefault();
+    };
+
+    const bloquearAtajosCaptura = (event) => {
+      const key = String(event.key || '').toLowerCase();
+      const ctrlMeta = event.ctrlKey || event.metaKey;
+
+      const atajoDevTools = (ctrlMeta && event.shiftKey && ['i', 'j', 'c'].includes(key)) || key === 'f12';
+      const atajoCaptura = key === 'printscreen' || (ctrlMeta && event.shiftKey && ['s', '3', '4', '5'].includes(key));
+      const atajoImpresion = ctrlMeta && key === 'p';
+
+      if (atajoDevTools || atajoCaptura || atajoImpresion) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (key === 'printscreen' && navigator?.clipboard?.writeText) {
+          navigator.clipboard.writeText('').catch(() => {});
+        }
+      }
+    };
+
+    document.addEventListener('contextmenu', bloquearContexto);
+    window.addEventListener('keydown', bloquearAtajosCaptura, true);
+
+    return () => {
+      document.removeEventListener('contextmenu', bloquearContexto);
+      window.removeEventListener('keydown', bloquearAtajosCaptura, true);
+    };
+  }, []);
+
+  React.useEffect(() => {
     asegurarAtributosFormulario(document);
 
     const observer = new MutationObserver((mutaciones) => {

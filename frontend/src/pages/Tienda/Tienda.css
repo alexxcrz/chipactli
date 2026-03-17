@@ -52,12 +52,47 @@
   gap: 8px;
 }
 
+.tiendaMetricasSubTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d4ddd8;
+  border-radius: 999px;
+  padding: 4px;
+  background: #f5f9f7;
+  width: fit-content;
+}
+
+.tiendaMetricasSubTab {
+  border: none;
+  background: transparent;
+  color: #365246;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tiendaMetricasSubTab.activa {
+  background: #4a7c59;
+  color: #fff;
+}
+
 .tiendaMetricasAcciones select {
   border: 1px solid #ccd7d1;
   border-radius: 10px;
   padding: 6px 8px;
   background: #fff;
   color: #2f4a3f;
+}
+
+.tiendaMetricasFechaInput {
+  border: 1px solid #ccd7d1;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #2f4a3f;
+  min-width: 150px;
 }
 
 .tiendaMetricasGrid {
@@ -133,6 +168,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+.tiendaMetricasAyuda {
+  margin: 0;
+  border: 1px solid #dae5df;
+  border-radius: 10px;
+  background: #f8fcfa;
+  color: #365246;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .tiendaMetricasActualizado {
   font-size: 12px;
   color: #557264;
@@ -177,6 +222,15 @@
   .tiendaVisitasActivas {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .tiendaMetricasSubTabs {
+    width: 100%;
+  }
+
+  .tiendaMetricasSubTab {
+    flex: 1;
+    text-align: center;
   }
 
   .tiendaHistorialVisitasFila {
@@ -4268,6 +4322,17 @@
 
   .tiendaGridAdminFull .tiendaCatalogo {
     min-height: auto;
+  }
+
+  .tiendaRootScrollTrastienda {
+    min-height: calc(100dvh - 104px) !important;
+    max-height: calc(100dvh - 104px) !important;
+    height: calc(100dvh - 104px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
   }
 }
 

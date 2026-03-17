@@ -564,6 +564,20 @@ const visitasDbReady = (async () => {
 
     await dbRunAsync(
       bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_visitas_eventos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dia_clave TEXT,
+        session_id TEXT,
+        accion TEXT,
+        producto TEXT,
+        seccion TEXT,
+        ruta TEXT,
+        creado_en TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await dbRunAsync(
+      bdVentas,
       `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_actualizado
        ON tienda_visitas_diarias (dia_clave DESC)`
     );
@@ -576,6 +590,11 @@ const visitasDbReady = (async () => {
       bdVentas,
       `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_paises
        ON tienda_visitas_diarias_paises (dia_clave, total DESC)`
+    );
+    await dbRunAsync(
+      bdVentas,
+      `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_eventos_dia
+       ON tienda_visitas_eventos (dia_clave, accion)`
     );
   } catch (error) {
     console.warn('[VISITAS] No se pudo inicializar persistencia:', error?.message || error);
@@ -606,6 +625,124 @@ function obtenerIpCliente(req) {
   ).trim();
 }
 
+const geoIpCache = new Map();
+const GEOIP_CACHE_TTL_MS = Math.max(10 * 60 * 1000, Number(process.env.GEOIP_CACHE_TTL_MS) || (12 * 60 * 60 * 1000));
+
+function normalizarIpEntrada(ip = '') {
+  const valor = String(ip || '').trim();
+  if (!valor) return '';
+  if (valor === '::1' || valor === 'localhost') return '';
+  if (valor.startsWith('::ffff:')) return valor.slice(7);
+  return valor;
+}
+
+function esIpPrivadaOInvalida(ip = '') {
+  const limpia = normalizarIpEntrada(ip);
+  if (!limpia) return true;
+  if (limpia.includes(':')) {
+    const prefijo = limpia.toLowerCase();
+    return prefijo.startsWith('fe80:') || prefijo.startsWith('fc') || prefijo.startsWith('fd');
+  }
+  const partes = limpia.split('.').map((x) => Number(x));
+  if (partes.length !== 4 || partes.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  if (partes[0] === 10) return true;
+  if (partes[0] === 127) return true;
+  if (partes[0] === 192 && partes[1] === 168) return true;
+  if (partes[0] === 172 && partes[1] >= 16 && partes[1] <= 31) return true;
+  if (partes[0] === 169 && partes[1] === 254) return true;
+  return false;
+}
+
+async function consultarGeoIpPublico(ip) {
+  const ipLimpia = normalizarIpEntrada(ip);
+  if (!ipLimpia || esIpPrivadaOInvalida(ipLimpia)) return null;
+
+  const cacheKey = ipLimpia;
+  const cacheItem = geoIpCache.get(cacheKey);
+  if (cacheItem && (Date.now() - cacheItem.ts) < GEOIP_CACHE_TTL_MS) {
+    return cacheItem.valor;
+  }
+
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 900);
+    const resp = await fetch(`https://ipwho.is/${encodeURIComponent(ipLimpia)}?fields=success,country,country_code,region,city`, {
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data?.success) return null;
+    const valor = {
+      pais: limpiarTextoCorto(data?.country || '', 48),
+      paisCodigo: limpiarTextoCorto(data?.country_code || '', 8).toUpperCase(),
+      region: limpiarTextoCorto(data?.region || '', 64),
+      ciudad: limpiarTextoCorto(data?.city || '', 64)
+    };
+    geoIpCache.set(cacheKey, { ts: Date.now(), valor });
+    return valor;
+  } catch {
+    return null;
+  }
+}
+
+const CODIGOS_ESTADOS_MX = {
+  AGU: 'Aguascalientes', BCN: 'Baja California', BCS: 'Baja California Sur', CAM: 'Campeche',
+  CHP: 'Chiapas', CHH: 'Chihuahua', COA: 'Coahuila', COL: 'Colima', CMX: 'CDMX', DUR: 'Durango',
+  GUA: 'Guanajuato', GRO: 'Guerrero', HID: 'Hidalgo', JAL: 'Jalisco', MEX: 'Estado de Mexico',
+  MIC: 'Michoacan', MOR: 'Morelos', NAY: 'Nayarit', NLE: 'Nuevo Leon', OAX: 'Oaxaca',
+  PUE: 'Puebla', QUE: 'Queretaro', ROO: 'Quintana Roo', SLP: 'San Luis Potosi',
+  SIN: 'Sinaloa', SON: 'Sonora', TAB: 'Tabasco', TAM: 'Tamaulipas', TLA: 'Tlaxcala',
+  VER: 'Veracruz', YUC: 'Yucatan', ZAC: 'Zacatecas'
+};
+
+function normalizarPais(valor = '') {
+  const limpio = limpiarTextoCorto(valor, 48);
+  if (!limpio) return { codigo: '', nombre: 'Desconocido' };
+  const mayus = limpio.toUpperCase();
+  const mapa = {
+    MX: 'Mexico', MEX: 'Mexico',
+    US: 'Estados Unidos', USA: 'Estados Unidos',
+    CA: 'Canada',
+    ES: 'Espana',
+    AR: 'Argentina',
+    CO: 'Colombia',
+    CL: 'Chile',
+    PE: 'Peru'
+  };
+  if (mapa[mayus]) {
+    return { codigo: mayus.slice(0, 3), nombre: mapa[mayus] };
+  }
+  return { codigo: mayus.length <= 3 ? mayus : '', nombre: limpio };
+}
+
+function normalizarRegion(region = '', paisCodigo = '') {
+  const limpia = limpiarTextoCorto(region, 64);
+  if (!limpia) return '';
+  const clavePais = String(paisCodigo || '').toUpperCase();
+  const regionMayus = limpia.toUpperCase();
+  if (['MX', 'MEX'].includes(clavePais) && CODIGOS_ESTADOS_MX[regionMayus]) {
+    return CODIGOS_ESTADOS_MX[regionMayus];
+  }
+  return limpia;
+}
+
+function construirEtiquetaUbicacion({ ciudad = '', region = '', pais = '' } = {}) {
+  const ciudadLimpia = limpiarTextoCorto(ciudad, 64);
+  const regionLimpia = limpiarTextoCorto(region, 64);
+  const paisLimpio = limpiarTextoCorto(pais, 48) || 'Desconocido';
+
+  const partes = [];
+  if (ciudadLimpia) partes.push(ciudadLimpia);
+  if (regionLimpia && (!ciudadLimpia || regionLimpia.toLowerCase() !== ciudadLimpia.toLowerCase())) {
+    partes.push(regionLimpia);
+  }
+  if (paisLimpio && (!regionLimpia || paisLimpio.toLowerCase() !== regionLimpia.toLowerCase())) {
+    partes.push(paisLimpio);
+  }
+  return partes.length ? partes.join(', ') : 'Desconocido';
+}
+
 function obtenerOrigenAproximado(req, body) {
   const paisHeader = limpiarTextoCorto(
     req.headers['cf-ipcountry']
@@ -613,17 +750,62 @@ function obtenerOrigenAproximado(req, body) {
     || req.headers['x-country-code']
     || ''
   );
-  const ciudadHeader = limpiarTextoCorto(req.headers['x-vercel-ip-city'] || '');
-  const regionHeader = limpiarTextoCorto(req.headers['x-vercel-ip-country-region'] || '');
+  const ciudadHeader = limpiarTextoCorto(
+    req.headers['x-vercel-ip-city']
+    || req.headers['cf-ipcity']
+    || req.headers['x-city']
+    || ''
+  );
+  const regionHeader = limpiarTextoCorto(
+    req.headers['x-vercel-ip-country-region']
+    || req.headers['cf-region-code']
+    || req.headers['cf-region']
+    || req.headers['x-region-code']
+    || req.headers['x-region']
+    || ''
+  );
   const paisBody = limpiarTextoCorto(body?.pais || '', 48);
   const ciudadBody = limpiarTextoCorto(body?.ciudad || '', 64);
+  const regionBody = limpiarTextoCorto(body?.region || '', 64);
+  const paisNormalizado = normalizarPais(paisHeader || paisBody || '');
+  const regionNormalizada = normalizarRegion(regionHeader || regionBody || '', paisNormalizado.codigo);
+  const ciudad = ciudadHeader || ciudadBody || '';
+  const ubicacion = construirEtiquetaUbicacion({
+    ciudad,
+    region: regionNormalizada,
+    pais: paisNormalizado.nombre
+  });
 
   return {
-    pais: paisHeader || paisBody || 'Desconocido',
-    ciudad: ciudadHeader || ciudadBody || '',
-    region: regionHeader || '',
+    pais: paisNormalizado.nombre,
+    paisCodigo: paisNormalizado.codigo,
+    ciudad,
+    region: regionNormalizada,
+    ubicacion,
     zonaHoraria: limpiarTextoCorto(body?.zonaHoraria || '', 64),
     idioma: limpiarTextoCorto(body?.idioma || '', 32)
+  };
+}
+
+async function enriquecerOrigenPorIp(req, origenBase) {
+  const origen = (origenBase && typeof origenBase === 'object') ? { ...origenBase } : {};
+  if (origen.ciudad && origen.region) return origen;
+
+  const ipCliente = obtenerIpCliente(req);
+  const geo = await consultarGeoIpPublico(ipCliente);
+  if (!geo) return origen;
+
+  const paisNormalizado = normalizarPais(origen.pais || geo.pais || geo.paisCodigo || '');
+  const regionNormalizada = normalizarRegion(origen.region || geo.region || '', paisNormalizado.codigo || geo.paisCodigo || '');
+  const ciudad = limpiarTextoCorto(origen.ciudad || geo.ciudad || '', 64);
+
+  return {
+    ...origen,
+    pais: paisNormalizado.nombre,
+    paisCodigo: paisNormalizado.codigo || limpiarTextoCorto(geo.paisCodigo || '', 8).toUpperCase(),
+    region: regionNormalizada,
+    ciudad,
+    ubicacion: construirEtiquetaUbicacion({ ciudad, region: regionNormalizada, pais: paisNormalizado.nombre })
   };
 }
 
@@ -640,6 +822,46 @@ function claveDiaLocal(fecha = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function obtenerDiaHoraPorZona(fecha = new Date(), zonaHoraria = '') {
+  const tz = String(zonaHoraria || '').trim();
+  if (!tz) {
+    return {
+      diaClave: claveDiaLocal(fecha),
+      horaClave: String(fecha.getHours()).padStart(2, '0')
+    };
+  }
+
+  try {
+    const partes = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      hour12: false
+    }).formatToParts(fecha);
+
+    const extraer = (tipo) => String(partes.find((p) => p.type === tipo)?.value || '').trim();
+    const yyyy = extraer('year');
+    const mm = extraer('month');
+    const dd = extraer('day');
+    const hh = extraer('hour');
+    if (!yyyy || !mm || !dd || !hh) {
+      throw new Error('Formato de zona horaria incompleto');
+    }
+
+    return {
+      diaClave: `${yyyy}-${mm}-${dd}`,
+      horaClave: String(hh).padStart(2, '0').slice(0, 2)
+    };
+  } catch {
+    return {
+      diaClave: claveDiaLocal(fecha),
+      horaClave: String(fecha.getHours()).padStart(2, '0')
+    };
+  }
+}
+
 function obtenerStatsDia(diaClave) {
   const actual = estadisticasVisitasPorDia.get(diaClave);
   if (actual) return actual;
@@ -649,7 +871,7 @@ function obtenerStatsDia(diaClave) {
     totalEventos: 0,
     sesionesUnicas: new Set(),
     porHora: new Map(),
-    porPais: new Map()
+    porUbicacion: new Map()
   };
   estadisticasVisitasPorDia.set(diaClave, nuevo);
   return nuevo;
@@ -693,26 +915,26 @@ function resumenUbicacionesActivas() {
   const conteo = new Map();
   for (const visita of visitantesActivos.values()) {
     if (visita?.esBot) continue;
-    const clave = limpiarTextoCorto(visita?.pais || 'Desconocido', 48) || 'Desconocido';
+    const clave = limpiarTextoCorto(visita?.ubicacion || visita?.pais || 'Desconocido', 96) || 'Desconocido';
     conteo.set(clave, (conteo.get(clave) || 0) + 1);
   }
   return Array.from(conteo.entries())
-    .map(([pais, total]) => ({ pais, total }))
+    .map(([ubicacion, total]) => ({ ubicacion, pais: ubicacion, total }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
 }
 
 function resumenUbicacionesDia(statsDia) {
-  const pares = Array.from(statsDia?.porPais?.entries?.() || []);
+  const pares = Array.from(statsDia?.porUbicacion?.entries?.() || []);
   return pares
-    .map(([pais, total]) => ({ pais, total: Number(total) || 0 }))
+    .map(([ubicacion, total]) => ({ ubicacion, pais: ubicacion, total: Number(total) || 0 }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 10);
 }
 
-async function registrarVisitaPersistente({ diaClave, horaClave, pais, sessionId, ahoraIso }) {
+async function registrarVisitaPersistente({ diaClave, horaClave, ubicacion, sessionId, ahoraIso }) {
   await visitasDbReady;
-  const paisSeguro = limpiarTextoCorto(pais || 'Desconocido', 48) || 'Desconocido';
+  const ubicacionSegura = limpiarTextoCorto(ubicacion || 'Desconocido', 96) || 'Desconocido';
 
   await dbRunAsync(
     bdVentas,
@@ -737,7 +959,7 @@ async function registrarVisitaPersistente({ diaClave, horaClave, pais, sessionId
     `INSERT INTO tienda_visitas_diarias_paises (dia_clave, pais, total)
      VALUES (?, ?, 1)
      ON CONFLICT(dia_clave, pais) DO UPDATE SET total = total + 1`,
-    [diaClave, paisSeguro]
+    [diaClave, ubicacionSegura]
   );
 
   if (!sessionId) return;
@@ -747,7 +969,7 @@ async function registrarVisitaPersistente({ diaClave, horaClave, pais, sessionId
     `INSERT OR IGNORE INTO tienda_visitas_sesiones_diarias
       (dia_clave, session_id, pais, primera_actividad_en, ultima_actividad_en)
      VALUES (?, ?, ?, ?, ?)`,
-    [diaClave, sessionId, paisSeguro, ahoraIso, ahoraIso]
+    [diaClave, sessionId, ubicacionSegura, ahoraIso, ahoraIso]
   );
 
   await dbRunAsync(
@@ -755,7 +977,7 @@ async function registrarVisitaPersistente({ diaClave, horaClave, pais, sessionId
     `UPDATE tienda_visitas_sesiones_diarias
      SET pais = ?, ultima_actividad_en = ?
      WHERE dia_clave = ? AND session_id = ?`,
-    [paisSeguro, ahoraIso, diaClave, sessionId]
+    [ubicacionSegura, ahoraIso, diaClave, sessionId]
   );
 
   if (sessionInsert.changes > 0) {
@@ -822,7 +1044,8 @@ async function obtenerResumenPersistenteDia(diaClave) {
     eventosDia: Number(diario?.total_eventos) || 0,
     horaPico: obtenerHoraPicoDesdeHoras(porHora),
     ubicacionesTop: (ubicacionesTop || []).map((item) => ({
-      pais: limpiarTextoCorto(item?.pais || 'Desconocido', 48) || 'Desconocido',
+      ubicacion: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
+      pais: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
       total: Number(item?.total) || 0
     })),
     porHora,
@@ -839,20 +1062,39 @@ function restarDiasClave(clave, dias) {
   return claveDiaLocal(fecha);
 }
 
-app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
+function sumarDiasClave(clave, dias) {
+  const fecha = new Date(`${String(clave || '').trim()}T00:00:00`);
+  if (!Number.isFinite(fecha.getTime())) {
+    return claveDiaLocal(new Date());
+  }
+  fecha.setDate(fecha.getDate() + (Number(dias) || 0));
+  return claveDiaLocal(fecha);
+}
+
+function esClaveFechaValida(clave) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(clave || '').trim());
+}
+
+app.post(['/api/visitas/ping', '/visitas/ping'], async (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
-  const diaClave = claveDiaLocal(ahoraDate);
-  const horaClave = String(ahoraDate.getHours()).padStart(2, '0');
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const tiempoLocalVisita = obtenerDiaHoraPorZona(ahoraDate, body?.zonaHoraria || '');
+  const diaClave = tiempoLocalVisita.diaClave;
+  const horaClave = tiempoLocalVisita.horaClave;
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
-  const origen = obtenerOrigenAproximado(req, body);
+  let origen = obtenerOrigenAproximado(req, body);
+  try {
+    origen = await enriquecerOrigenPorIp(req, origen);
+  } catch {
+    // Si el proveedor GeoIP no responde, mantener origen por headers/body.
+  }
   const esBot = esUserAgentBot(req);
   const statsDia = obtenerStatsDia(diaClave);
 
   statsDia.totalEventos += 1;
   statsDia.porHora.set(horaClave, (statsDia.porHora.get(horaClave) || 0) + 1);
-  statsDia.porPais.set(origen.pais, (statsDia.porPais.get(origen.pais) || 0) + 1);
+  statsDia.porUbicacion.set(origen.ubicacion, (statsDia.porUbicacion.get(origen.ubicacion) || 0) + 1);
 
   if (sessionId) {
     statsDia.sesionesUnicas.add(sessionId);
@@ -873,7 +1115,7 @@ app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
   registrarVisitaPersistente({
     diaClave,
     horaClave,
-    pais: origen.pais,
+    ubicacion: origen.ubicacion,
     sessionId,
     ahoraIso: new Date(ahora).toISOString()
   }).catch(() => {
@@ -893,6 +1135,43 @@ app.post(['/api/visitas/ping', '/visitas/ping'], (req, res) => {
     actualizadoEn: new Date(ahora).toISOString(),
     timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
   });
+});
+
+app.post(['/api/visitas/evento', '/visitas/evento'], async (req, res) => {
+  const ahora = Date.now();
+  const ahoraDate = new Date(ahora);
+  const diaClave = claveDiaLocal(ahoraDate);
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
+  const accion = limpiarTextoCorto(body.accion || '', 64);
+  const producto = limpiarTextoCorto(body.producto || '', 140);
+  const seccion = limpiarTextoCorto(body.seccion || '', 64);
+  const ruta = limpiarTextoCorto(body.ruta || '', 120);
+
+  if (!accion || esUserAgentBot(req)) {
+    return res.json({ ok: true, ignorado: true });
+  }
+
+  try {
+    await visitasDbReady;
+    await dbRunAsync(
+      bdVentas,
+      `INSERT INTO tienda_visitas_eventos (dia_clave, session_id, accion, producto, seccion, ruta, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        diaClave,
+        sessionId || null,
+        accion,
+        producto || null,
+        seccion || null,
+        ruta || null,
+        ahoraDate.toISOString()
+      ]
+    );
+    return res.json({ ok: true });
+  } catch {
+    return res.status(500).json({ ok: false, error: 'No se pudo registrar evento' });
+  }
 });
 
 app.get(['/api/visitas/estado', '/visitas/estado'], (req, res) => {
@@ -917,15 +1196,18 @@ app.get(['/api/visitas/resumen', '/visitas/resumen'], async (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
   const hoyClave = claveDiaLocal(ahoraDate);
+  const fechaSolicitada = String(req.query?.fecha || '').trim();
+  const fechaObjetivo = esClaveFechaValida(fechaSolicitada) ? fechaSolicitada : hoyClave;
+  const esDiaActual = fechaObjetivo === hoyClave;
   limpiarVisitantesInactivos(ahora);
   limpiarEstadisticasAntiguas(ahoraDate);
 
   try {
-    const resumenPersistente = await obtenerResumenPersistenteDia(hoyClave);
+    const resumenPersistente = await obtenerResumenPersistenteDia(fechaObjetivo);
     return res.json({
       ok: true,
-      fecha: hoyClave,
-      activosAhora: contarActivosReales(),
+      fecha: fechaObjetivo,
+      activosAhora: esDiaActual ? contarActivosReales() : 0,
       visitasDia: Number(resumenPersistente?.visitasDia) || 0,
       eventosDia: Number(resumenPersistente?.eventosDia) || 0,
       horaPico: resumenPersistente?.horaPico || { hora: '00:00', total: 0 },
@@ -935,12 +1217,12 @@ app.get(['/api/visitas/resumen', '/visitas/resumen'], async (req, res) => {
       timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
     });
   } catch {
-    const statsDia = obtenerStatsDia(hoyClave);
+    const statsDia = obtenerStatsDia(fechaObjetivo);
     const porHora = construirHorasDia(statsDia);
     return res.json({
       ok: true,
-      fecha: hoyClave,
-      activosAhora: contarActivosReales(),
+      fecha: fechaObjetivo,
+      activosAhora: esDiaActual ? contarActivosReales() : 0,
       visitasDia: statsDia.sesionesUnicas.size,
       eventosDia: statsDia.totalEventos,
       horaPico: obtenerHoraPico(statsDia),
@@ -953,7 +1235,7 @@ app.get(['/api/visitas/resumen', '/visitas/resumen'], async (req, res) => {
 });
 
 app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
-  const diasSolicitados = Number(req.query?.dias) || 14;
+  const diasSolicitados = Number(req.query?.dias) || 15;
   const dias = Math.max(7, Math.min(DIAS_HISTORICO_VISITAS_MAX, diasSolicitados));
   const hoyClave = claveDiaLocal(new Date());
   const desdeClave = restarDiasClave(hoyClave, dias - 1);
@@ -979,11 +1261,22 @@ app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
       [desdeClave]
     );
 
-    const porDia = (filas || []).map((item) => ({
-      fecha: String(item?.dia_clave || '').trim(),
-      visitas: Number(item?.sesiones_unicas) || 0,
-      eventos: Number(item?.total_eventos) || 0
-    }));
+    const mapaPorDia = new Map(
+      (filas || []).map((item) => [
+        String(item?.dia_clave || '').trim(),
+        {
+          visitas: Number(item?.sesiones_unicas) || 0,
+          eventos: Number(item?.total_eventos) || 0
+        }
+      ])
+    );
+
+    const porDia = [];
+    for (let i = 0; i < dias; i += 1) {
+      const fecha = sumarDiasClave(desdeClave, i);
+      const stats = mapaPorDia.get(fecha) || { visitas: 0, eventos: 0 };
+      porDia.push({ fecha, visitas: Number(stats.visitas) || 0, eventos: Number(stats.eventos) || 0 });
+    }
     const totalVisitas = porDia.reduce((acc, item) => acc + (Number(item?.visitas) || 0), 0);
     const totalEventos = porDia.reduce((acc, item) => acc + (Number(item?.eventos) || 0), 0);
     const maxDia = porDia.reduce((max, item) => (Number(item?.visitas) > Number(max?.visitas) ? item : max), { fecha: '', visitas: 0, eventos: 0 });
@@ -995,7 +1288,8 @@ app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
       hasta: hoyClave,
       porDia,
       topUbicaciones: (paises || []).map((item) => ({
-        pais: limpiarTextoCorto(item?.pais || 'Desconocido', 48) || 'Desconocido',
+        ubicacion: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
+        pais: limpiarTextoCorto(item?.pais || 'Desconocido', 96) || 'Desconocido',
         total: Number(item?.total) || 0
       })),
       totalVisitas,
@@ -1005,6 +1299,65 @@ app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
     });
   } catch {
     return res.status(500).json({ ok: false, error: 'No se pudo cargar historial de visitas' });
+  }
+});
+
+app.get(['/api/visitas/comportamiento', '/visitas/comportamiento'], async (req, res) => {
+  const diasSolicitados = Number(req.query?.dias) || 15;
+  const dias = Math.max(7, Math.min(DIAS_HISTORICO_VISITAS_MAX, diasSolicitados));
+  const hoyClave = claveDiaLocal(new Date());
+  const desdeClave = restarDiasClave(hoyClave, dias - 1);
+
+  try {
+    await visitasDbReady;
+    const total = await dbGetAsync(
+      bdVentas,
+      `SELECT COUNT(*) AS total
+       FROM tienda_visitas_eventos
+       WHERE dia_clave >= ?`,
+      [desdeClave]
+    );
+
+    const topAcciones = await dbAllAsync(
+      bdVentas,
+      `SELECT accion, COUNT(*) AS total
+       FROM tienda_visitas_eventos
+       WHERE dia_clave >= ?
+       GROUP BY accion
+       ORDER BY total DESC
+       LIMIT 12`,
+      [desdeClave]
+    );
+
+    const topProductos = await dbAllAsync(
+      bdVentas,
+      `SELECT producto, COUNT(*) AS total
+       FROM tienda_visitas_eventos
+       WHERE dia_clave >= ?
+         AND COALESCE(TRIM(producto), '') <> ''
+       GROUP BY producto
+       ORDER BY total DESC
+       LIMIT 12`,
+      [desdeClave]
+    );
+
+    return res.json({
+      ok: true,
+      rangoDias: dias,
+      desde: desdeClave,
+      hasta: hoyClave,
+      totalEventos: Number(total?.total) || 0,
+      topAcciones: (topAcciones || []).map((item) => ({
+        accion: limpiarTextoCorto(item?.accion || 'accion', 64) || 'accion',
+        total: Number(item?.total) || 0
+      })),
+      topProductos: (topProductos || []).map((item) => ({
+        producto: limpiarTextoCorto(item?.producto || 'Producto', 140) || 'Producto',
+        total: Number(item?.total) || 0
+      }))
+    });
+  } catch {
+    return res.status(500).json({ ok: false, error: 'No se pudo cargar comportamiento de visitas' });
   }
 });
 

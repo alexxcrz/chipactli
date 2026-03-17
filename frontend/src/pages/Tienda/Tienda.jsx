@@ -410,6 +410,14 @@ function obtenerNombrePerfilRed(url, clave = '') {
   return `@${red}`;
 }
 
+function fechaLocalIsoHoy() {
+  const ahora = new Date();
+  const yyyy = ahora.getFullYear();
+  const mm = String(ahora.getMonth() + 1).padStart(2, '0');
+  const dd = String(ahora.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function obtenerMetodosPagoConfig(valor, config = {}) {
   try {
     const parseado = JSON.parse(String(valor || '[]'));
@@ -797,13 +805,21 @@ export default function Tienda({
   });
   const [historialVisitasAdmin, setHistorialVisitasAdmin] = useState({
     cargando: false,
-    rangoDias: 14,
+    rangoDias: 15,
     porDia: [],
     topUbicaciones: [],
     totalVisitas: 0,
     totalEventos: 0,
     promedioVisitasDia: 0,
     diaConMasVisitas: { fecha: '', visitas: 0, eventos: 0 }
+  });
+  const [fechaVisitaSeleccionada, setFechaVisitaSeleccionada] = useState(() => fechaLocalIsoHoy());
+  const [metricasSubVista, setMetricasSubVista] = useState('visitas');
+  const [comportamientoVisitasAdmin, setComportamientoVisitasAdmin] = useState({
+    cargando: false,
+    totalEventos: 0,
+    topAcciones: [],
+    topProductos: []
   });
   const bloqueoAperturaCarritoRef = useRef(0);
   const inputLogoPagoArchivoRef = useRef(null);
@@ -882,7 +898,7 @@ export default function Tienda({
     () => (Array.isArray(visitasActivas?.ubicaciones)
       ? visitasActivas.ubicaciones
         .slice(0, 3)
-        .map((item) => `${item?.pais || 'Desconocido'} (${Number(item?.total) || 0})`)
+        .map((item) => `${item?.ubicacion || item?.pais || 'Desconocido'} (${Number(item?.total) || 0})`)
         .join(' · ')
       : ''),
     [visitasActivas]
@@ -892,6 +908,24 @@ export default function Tienda({
     () => (historialVisitasAdmin.porDia || []).reduce((max, item) => Math.max(max, Number(item?.visitas) || 0), 0),
     [historialVisitasAdmin.porDia]
   );
+
+  const esFechaResumenHoy = useMemo(() => {
+    const fechaResumen = String(resumenVisitasAdmin?.fecha || fechaVisitaSeleccionada || '').trim();
+    return Boolean(fechaResumen) && fechaResumen === fechaLocalIsoHoy();
+  }, [resumenVisitasAdmin?.fecha, fechaVisitaSeleccionada]);
+
+  const topHorasResumenVisitas = useMemo(() => {
+    const horaActual = new Date().getHours();
+    return (resumenVisitasAdmin.porHora || [])
+      .filter((item) => Number(item?.total) > 0)
+      .filter((item) => {
+        if (!esFechaResumenHoy) return true;
+        const hora = Number(String(item?.hora || '00').slice(0, 2));
+        return Number.isFinite(hora) && hora <= horaActual;
+      })
+      .sort((a, b) => Number(b?.total) - Number(a?.total))
+      .slice(0, 8);
+  }, [resumenVisitasAdmin.porHora, esFechaResumenHoy]);
 
   const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
   const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
@@ -1009,15 +1043,17 @@ export default function Tienda({
   useEffect(() => {
     if (!esVistaTrastienda || !tokenInterno || adminVista !== 'metricas') return undefined;
 
-    cargarResumenVisitasAdmin();
+    cargarResumenVisitasAdmin(fechaVisitaSeleccionada);
     cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
+    cargarComportamientoVisitasAdmin(historialVisitasAdmin.rangoDias);
     const intervalo = window.setInterval(() => {
-      cargarResumenVisitasAdmin();
+      cargarResumenVisitasAdmin(fechaVisitaSeleccionada);
       cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
+      cargarComportamientoVisitasAdmin(historialVisitasAdmin.rangoDias);
     }, 30_000);
 
     return () => window.clearInterval(intervalo);
-  }, [esVistaTrastienda, tokenInterno, adminVista, historialVisitasAdmin.rangoDias]);
+  }, [esVistaTrastienda, tokenInterno, adminVista, historialVisitasAdmin.rangoDias, fechaVisitaSeleccionada]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -2021,6 +2057,7 @@ export default function Tienda({
     } catch (_) {
       window.location.href = webUrl;
     }
+    registrarEventoComportamiento('enviar_whatsapp', nombre || 'anonimo');
     setMostrarWhatsForm(false);
     setWhatsForm({ nombre: '', mensaje: '' });
   }
@@ -2202,6 +2239,7 @@ export default function Tienda({
     if (Date.now() < bloqueoAperturaCarritoRef.current) return;
     setMostrarCarrito(true);
     setPasoCheckout(1);
+    registrarEventoComportamiento('abrir_carrito');
   }
 
   function cerrarCarrito() {
@@ -2216,6 +2254,7 @@ export default function Tienda({
       return;
     }
     setPasoCheckout(2);
+    registrarEventoComportamiento('iniciar_checkout');
   }
 
   function continuarPasoPago() {
@@ -2224,6 +2263,7 @@ export default function Tienda({
       return;
     }
     setPasoCheckout(3);
+    registrarEventoComportamiento('checkout_paso_pago');
   }
 
   function regresarPasoCheckout() {
@@ -3039,11 +3079,13 @@ export default function Tienda({
     return fetchJson(path, { ...options, headers });
   }
 
-  async function cargarResumenVisitasAdmin() {
+  async function cargarResumenVisitasAdmin(fecha = fechaVisitaSeleccionada) {
     if (!tokenInterno) return;
     setResumenVisitasAdmin((prev) => ({ ...prev, cargando: true }));
     try {
-      const data = await fetchAdmin('/visitas/resumen');
+      const fechaQuery = String(fecha || '').trim();
+      const ruta = fechaQuery ? `/visitas/resumen?fecha=${encodeURIComponent(fechaQuery)}` : '/visitas/resumen';
+      const data = await fetchAdmin(ruta);
       setResumenVisitasAdmin({
         cargando: false,
         fecha: String(data?.fecha || '').trim(),
@@ -3065,7 +3107,7 @@ export default function Tienda({
 
   async function cargarHistorialVisitasAdmin(rango = historialVisitasAdmin.rangoDias) {
     if (!tokenInterno) return;
-    const dias = Math.max(7, Math.min(120, Number(rango) || 14));
+    const dias = Math.max(7, Math.min(120, Number(rango) || 15));
     setHistorialVisitasAdmin((prev) => ({ ...prev, cargando: true, rangoDias: dias }));
     try {
       const data = await fetchAdmin(`/visitas/historial?dias=${dias}`);
@@ -3086,6 +3128,43 @@ export default function Tienda({
     } catch {
       setHistorialVisitasAdmin((prev) => ({ ...prev, cargando: false }));
     }
+  }
+
+  async function cargarComportamientoVisitasAdmin(rango = historialVisitasAdmin.rangoDias) {
+    if (!tokenInterno) return;
+    const dias = Math.max(7, Math.min(120, Number(rango) || 15));
+    setComportamientoVisitasAdmin((prev) => ({ ...prev, cargando: true }));
+    try {
+      const data = await fetchAdmin(`/visitas/comportamiento?dias=${dias}`);
+      setComportamientoVisitasAdmin({
+        cargando: false,
+        totalEventos: Number(data?.totalEventos) || 0,
+        topAcciones: Array.isArray(data?.topAcciones) ? data.topAcciones : [],
+        topProductos: Array.isArray(data?.topProductos) ? data.topProductos : []
+      });
+    } catch {
+      setComportamientoVisitasAdmin((prev) => ({ ...prev, cargando: false }));
+    }
+  }
+
+  function registrarEventoComportamiento(accion, producto = '') {
+    const sessionId = obtenerSesionVisitaId();
+    if (!sessionId) return;
+
+    const payload = {
+      sessionId,
+      accion: String(accion || '').trim().slice(0, 64),
+      producto: String(producto || '').trim().slice(0, 140),
+      seccion: String(seccionActiva || '').trim().slice(0, 64),
+      ruta: String(window?.location?.hash || '#/tienda').trim().slice(0, 120)
+    };
+    if (!payload.accion) return;
+
+    fetchJson('/visitas/evento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch(() => {});
   }
 
   async function cargarPuntosEntrega() {
@@ -3604,6 +3683,7 @@ export default function Tienda({
     setResenaNueva({ calificacion: 5, comentario: '' });
     cargarResenasProducto(producto?.nombre_receta);
     setVistaActiva('detalle');
+    registrarEventoComportamiento('ver_detalle_producto', producto?.nombre_receta || 'producto');
     const contenedor = contenedorScrollRef.current;
     if (contenedor && typeof contenedor.scrollTo === 'function') {
       contenedor.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3724,6 +3804,7 @@ export default function Tienda({
     }
 
     mostrarNotificacion('Producto agregado al carrito', 'exito');
+    registrarEventoComportamiento('agregar_carrito', recetaReal || producto?.nombre_receta || 'producto');
   }
 
   function actualizarCantidad(clave, cantidadNueva) {
@@ -3971,7 +4052,11 @@ export default function Tienda({
   const whatsMensajeInvalido = whatsMensajeTrimLen < 6 || whatsMensajeTrimLen > 420;
 
   return (
-    <div ref={contenedorScrollRef} className="tiendaRootScroll" tabIndex={0}>
+    <div
+      ref={contenedorScrollRef}
+      className={esVistaTrastienda ? 'tiendaRootScroll tiendaRootScrollTrastienda' : 'tiendaRootScroll'}
+      tabIndex={0}
+    >
       {!esVistaTrastienda && (
       <div className="tiendaPromoBar">
         {configTienda.promo_texto}
@@ -4378,150 +4463,239 @@ export default function Tienda({
             {adminVista === 'metricas' && (
               <div className="tiendaAdminForm tiendaMetricasWrap">
                 <div className="tiendaMetricasHeader">
-                  <strong>Resumen de visitas del día {resumenVisitasAdmin.fecha ? `(${resumenVisitasAdmin.fecha})` : ''}</strong>
+                  <strong>
+                    {metricasSubVista === 'visitas'
+                      ? `Resumen de visitas del día ${resumenVisitasAdmin.fecha ? `(${resumenVisitasAdmin.fecha})` : ''}`
+                      : `Comportamiento del rango (${historialVisitasAdmin.rangoDias} días)`}
+                  </strong>
                   <div className="tiendaMetricasAcciones">
                     <select
                       value={historialVisitasAdmin.rangoDias}
-                      onChange={(event) => cargarHistorialVisitasAdmin(event.target.value)}
+                      onChange={(event) => {
+                        cargarHistorialVisitasAdmin(event.target.value);
+                        cargarComportamientoVisitasAdmin(event.target.value);
+                      }}
                     >
                       <option value={7}>Últimos 7 días</option>
-                      <option value={14}>Últimos 14 días</option>
+                      <option value={15}>Últimos 15 días</option>
                       <option value={30}>Últimos 30 días</option>
                       <option value={90}>Últimos 90 días</option>
                     </select>
+                    <input
+                      type="date"
+                      className="tiendaMetricasFechaInput"
+                      value={fechaVisitaSeleccionada}
+                      onChange={(event) => setFechaVisitaSeleccionada(String(event.target.value || '').trim())}
+                    />
                     <button
                       type="button"
                       className="boton"
                       onClick={() => {
-                        cargarResumenVisitasAdmin();
+                        cargarResumenVisitasAdmin(fechaVisitaSeleccionada);
                         cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias);
+                        cargarComportamientoVisitasAdmin(historialVisitasAdmin.rangoDias);
                       }}
-                      disabled={resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando}
+                      disabled={resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando || comportamientoVisitasAdmin.cargando}
                     >
-                      {(resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando) ? 'Actualizando...' : 'Actualizar'}
+                      {(resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando || comportamientoVisitasAdmin.cargando) ? 'Actualizando...' : 'Actualizar'}
                     </button>
                   </div>
                 </div>
 
-                <div className="tiendaMetricasGrid">
-                  <article className="tiendaMetricaCard">
-                    <span>Personas activas ahora</span>
-                    <strong>{resumenVisitasAdmin.activosAhora}</strong>
-                  </article>
-                  <article className="tiendaMetricaCard">
-                    <span>Visitas únicas de hoy</span>
-                    <strong>{resumenVisitasAdmin.visitasDia}</strong>
-                  </article>
-                  <article className="tiendaMetricaCard">
-                    <span>Eventos registrados hoy</span>
-                    <strong>{resumenVisitasAdmin.eventosDia}</strong>
-                  </article>
-                  <article className="tiendaMetricaCard">
-                    <span>Horario con más visitas</span>
-                    <strong>
-                      {resumenVisitasAdmin.horaPico?.hora || '00:00'}
-                      {' - '}
-                      {String(Math.min(23, (Number(String(resumenVisitasAdmin.horaPico?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59
-                      {' '}
-                      ({Number(resumenVisitasAdmin.horaPico?.total) || 0})
-                    </strong>
-                  </article>
+                <div className="tiendaMetricasSubTabs" role="tablist" aria-label="Subsecciones de métricas">
+                  <button
+                    type="button"
+                    className={metricasSubVista === 'visitas' ? 'tiendaMetricasSubTab activa' : 'tiendaMetricasSubTab'}
+                    onClick={() => setMetricasSubVista('visitas')}
+                  >
+                    Visitas
+                  </button>
+                  <button
+                    type="button"
+                    className={metricasSubVista === 'comportamiento' ? 'tiendaMetricasSubTab activa' : 'tiendaMetricasSubTab'}
+                    onClick={() => setMetricasSubVista('comportamiento')}
+                  >
+                    Comportamiento
+                  </button>
                 </div>
 
-                <div className="tiendaMetricasBloques">
-                  <div className="tiendaMetricasBloque">
-                    <h4>Ubicaciones con más visitas hoy</h4>
-                    <ul className="tiendaMetricasLista">
-                      {(resumenVisitasAdmin.ubicacionesTop || []).map((item, idx) => (
-                        <li key={`ubi-top-${idx}-${item?.pais || 'sin-pais'}`}>
-                          <span>{item?.pais || 'Desconocido'}</span>
-                          <strong>{Number(item?.total) || 0}</strong>
-                        </li>
-                      ))}
-                      {!(resumenVisitasAdmin.ubicacionesTop || []).length && <li><span>Sin datos todavía</span></li>}
-                    </ul>
-                  </div>
-
-                  <div className="tiendaMetricasBloque">
-                    <h4>Visitas por horario (hoy)</h4>
-                    <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
-                      {(resumenVisitasAdmin.porHora || [])
-                        .filter((item) => Number(item?.total) > 0)
-                        .sort((a, b) => Number(b?.total) - Number(a?.total))
-                        .slice(0, 8)
-                        .map((item, idx) => (
-                          <li key={`hora-top-${idx}-${item?.hora || '00:00'}`}>
-                            <span>{item?.hora || '00:00'} - {String(Math.min(23, (Number(String(item?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59</span>
-                            <strong>{Number(item?.total) || 0}</strong>
-                          </li>
-                        ))}
-                      {!((resumenVisitasAdmin.porHora || []).some((item) => Number(item?.total) > 0)) && <li><span>Sin datos todavía</span></li>}
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="tiendaMetricasBloques">
-                  <div className="tiendaMetricasBloque tiendaMetricasBloqueAncho">
-                    <h4>Historial de visitas por día</h4>
-                    <div className="tiendaHistorialVisitasChart">
-                      {(historialVisitasAdmin.porDia || []).map((item) => {
-                        const visitas = Number(item?.visitas) || 0;
-                        const ancho = maximoVisitasHistorial > 0
-                          ? Math.max(4, Math.round((visitas / maximoVisitasHistorial) * 100))
-                          : 0;
-                        return (
-                          <div className="tiendaHistorialVisitasFila" key={`hist-dia-${item?.fecha || 'sin-fecha'}`}>
-                            <span>{item?.fecha || 'Sin fecha'}</span>
-                            <div className="tiendaHistorialVisitasBarraWrap">
-                              <div className="tiendaHistorialVisitasBarra" style={{ width: `${ancho}%` }} />
-                            </div>
-                            <strong>{visitas}</strong>
-                          </div>
-                        );
-                      })}
-                      {!(historialVisitasAdmin.porDia || []).length && <div className="tiendaVacio">Sin historial todavía</div>}
-                    </div>
-                  </div>
-
-                  <div className="tiendaMetricasBloque">
-                    <h4>Resumen del rango</h4>
-                    <ul className="tiendaMetricasLista">
-                      <li>
-                        <span>Total visitas únicas</span>
-                        <strong>{historialVisitasAdmin.totalVisitas}</strong>
-                      </li>
-                      <li>
-                        <span>Total eventos</span>
-                        <strong>{historialVisitasAdmin.totalEventos}</strong>
-                      </li>
-                      <li>
-                        <span>Promedio diario</span>
-                        <strong>{historialVisitasAdmin.promedioVisitasDia}</strong>
-                      </li>
-                      <li>
-                        <span>Día más fuerte</span>
+                {metricasSubVista === 'visitas' && (
+                  <>
+                    <div className="tiendaMetricasGrid">
+                      <article className="tiendaMetricaCard">
+                        <span>Personas activas ahora</span>
+                        <strong>{resumenVisitasAdmin.activosAhora}</strong>
+                      </article>
+                      <article className="tiendaMetricaCard">
+                        <span>Visitas únicas de hoy</span>
+                        <strong>{resumenVisitasAdmin.visitasDia}</strong>
+                      </article>
+                      <article className="tiendaMetricaCard">
+                        <span>Eventos registrados hoy</span>
+                        <strong>{resumenVisitasAdmin.eventosDia}</strong>
+                      </article>
+                      <article className="tiendaMetricaCard">
+                        <span>Horario con más visitas</span>
                         <strong>
-                          {historialVisitasAdmin.diaConMasVisitas?.fecha || 'N/A'}
+                          {resumenVisitasAdmin.horaPico?.hora || '00:00'}
+                          {' - '}
+                          {String(Math.min(23, (Number(String(resumenVisitasAdmin.horaPico?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59
                           {' '}
-                          ({Number(historialVisitasAdmin.diaConMasVisitas?.visitas) || 0})
+                          ({Number(resumenVisitasAdmin.horaPico?.total) || 0})
                         </strong>
-                      </li>
-                    </ul>
-                  </div>
+                      </article>
+                    </div>
 
-                  <div className="tiendaMetricasBloque">
-                    <h4>Ubicaciones top del rango</h4>
-                    <ul className="tiendaMetricasLista">
-                      {(historialVisitasAdmin.topUbicaciones || []).map((item, idx) => (
-                        <li key={`ubi-rango-${idx}-${item?.pais || 'sin-pais'}`}>
-                          <span>{item?.pais || 'Desconocido'}</span>
-                          <strong>{Number(item?.total) || 0}</strong>
-                        </li>
-                      ))}
-                      {!(historialVisitasAdmin.topUbicaciones || []).length && <li><span>Sin datos todavía</span></li>}
-                    </ul>
-                  </div>
-                </div>
+                    <div className="tiendaMetricasBloques">
+                      <div className="tiendaMetricasBloque">
+                        <h4>Ubicaciones con más visitas hoy</h4>
+                        <ul className="tiendaMetricasLista">
+                          {(resumenVisitasAdmin.ubicacionesTop || []).map((item, idx) => (
+                            <li key={`ubi-top-${idx}-${item?.pais || 'sin-pais'}`}>
+                              <span>{item?.ubicacion || item?.pais || 'Desconocido'}</span>
+                              <strong>{Number(item?.total) || 0}</strong>
+                            </li>
+                          ))}
+                          {!(resumenVisitasAdmin.ubicacionesTop || []).length && <li><span>Sin datos todavía</span></li>}
+                        </ul>
+                      </div>
+
+                      <div className="tiendaMetricasBloque">
+                        <h4>Visitas por horario (hoy)</h4>
+                        <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
+                          {topHorasResumenVisitas
+                            .map((item, idx) => (
+                              <li key={`hora-top-${idx}-${item?.hora || '00:00'}`}>
+                                <span>{item?.hora || '00:00'} - {String(Math.min(23, (Number(String(item?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59</span>
+                                <strong>{Number(item?.total) || 0}</strong>
+                              </li>
+                            ))}
+                          {!topHorasResumenVisitas.length && <li><span>Sin datos todavía</span></li>}
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div className="tiendaMetricasBloques">
+                      <div className="tiendaMetricasBloque tiendaMetricasBloqueAncho">
+                        <h4>Historial de visitas por día</h4>
+                        <div className="tiendaHistorialVisitasChart">
+                          {(historialVisitasAdmin.porDia || []).map((item) => {
+                            const visitas = Number(item?.visitas) || 0;
+                            const ancho = maximoVisitasHistorial > 0
+                              ? Math.max(4, Math.round((visitas / maximoVisitasHistorial) * 100))
+                              : 0;
+                            return (
+                              <div className="tiendaHistorialVisitasFila" key={`hist-dia-${item?.fecha || 'sin-fecha'}`}>
+                                <span>{item?.fecha || 'Sin fecha'}</span>
+                                <div className="tiendaHistorialVisitasBarraWrap">
+                                  <div className="tiendaHistorialVisitasBarra" style={{ width: `${ancho}%` }} />
+                                </div>
+                                <strong>{visitas}</strong>
+                              </div>
+                            );
+                          })}
+                          {!(historialVisitasAdmin.porDia || []).length && <div className="tiendaVacio">Sin historial todavía</div>}
+                        </div>
+                      </div>
+
+                      <div className="tiendaMetricasBloque">
+                        <h4>Resumen del rango</h4>
+                        <ul className="tiendaMetricasLista">
+                          <li>
+                            <span>Total visitas únicas</span>
+                            <strong>{historialVisitasAdmin.totalVisitas}</strong>
+                          </li>
+                          <li>
+                            <span>Total eventos</span>
+                            <strong>{historialVisitasAdmin.totalEventos}</strong>
+                          </li>
+                          <li>
+                            <span>Promedio diario</span>
+                            <strong>{historialVisitasAdmin.promedioVisitasDia}</strong>
+                          </li>
+                          <li>
+                            <span>Día más fuerte</span>
+                            <strong>
+                              {historialVisitasAdmin.diaConMasVisitas?.fecha || 'N/A'}
+                              {' '}
+                              ({Number(historialVisitasAdmin.diaConMasVisitas?.visitas) || 0})
+                            </strong>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="tiendaMetricasBloque">
+                        <h4>Ubicaciones top del rango</h4>
+                        <ul className="tiendaMetricasLista">
+                          {(historialVisitasAdmin.topUbicaciones || []).map((item, idx) => (
+                            <li key={`ubi-rango-${idx}-${item?.pais || 'sin-pais'}`}>
+                              <span>{item?.ubicacion || item?.pais || 'Desconocido'}</span>
+                              <strong>{Number(item?.total) || 0}</strong>
+                            </li>
+                          ))}
+                          {!(historialVisitasAdmin.topUbicaciones || []).length && <li><span>Sin datos todavía</span></li>}
+                        </ul>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {metricasSubVista === 'comportamiento' && (
+                  <>
+                    <div className="tiendaMetricasGrid">
+                      <article className="tiendaMetricaCard">
+                        <span>Eventos del rango</span>
+                        <strong>{comportamientoVisitasAdmin.totalEventos}</strong>
+                      </article>
+                      <article className="tiendaMetricaCard">
+                        <span>Acción más frecuente</span>
+                        <strong>
+                          {comportamientoVisitasAdmin.topAcciones?.[0]?.accion
+                            ? String(comportamientoVisitasAdmin.topAcciones[0].accion).replace(/_/g, ' ')
+                            : 'Sin datos'}
+                        </strong>
+                      </article>
+                      <article className="tiendaMetricaCard">
+                        <span>Producto más visto/interactivo</span>
+                        <strong>
+                          {comportamientoVisitasAdmin.topProductos?.[0]?.producto || 'Sin datos'}
+                        </strong>
+                      </article>
+                    </div>
+
+                    <p className="tiendaMetricasAyuda">
+                      Eventos registrados: acciones como ver detalle, agregar al carrito, iniciar checkout y enviar WhatsApp.
+                    </p>
+
+                    <div className="tiendaMetricasBloques">
+                      <div className="tiendaMetricasBloque">
+                        <h4>Acciones que más realizan</h4>
+                        <ul className="tiendaMetricasLista">
+                          {(comportamientoVisitasAdmin.topAcciones || []).map((item, idx) => (
+                            <li key={`accion-top-${idx}-${item?.accion || 'accion'}`}>
+                              <span>{String(item?.accion || 'accion').replace(/_/g, ' ')}</span>
+                              <strong>{Number(item?.total) || 0}</strong>
+                            </li>
+                          ))}
+                          {!(comportamientoVisitasAdmin.topAcciones || []).length && <li><span>Sin datos todavía</span></li>}
+                        </ul>
+                      </div>
+
+                      <div className="tiendaMetricasBloque">
+                        <h4>Productos que más interesan</h4>
+                        <ul className="tiendaMetricasLista">
+                          {(comportamientoVisitasAdmin.topProductos || []).map((item, idx) => (
+                            <li key={`producto-top-${idx}-${item?.producto || 'producto'}`}>
+                              <span>{item?.producto || 'Producto'}</span>
+                              <strong>{Number(item?.total) || 0}</strong>
+                            </li>
+                          ))}
+                          {!(comportamientoVisitasAdmin.topProductos || []).length && <li><span>Sin datos todavía</span></li>}
+                        </ul>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className="tiendaMetricasActualizado">
                   Última actualización: {resumenVisitasAdmin.actualizadoEn ? String(resumenVisitasAdmin.actualizadoEn).replace('T', ' ').slice(0, 19) : 'pendiente'}

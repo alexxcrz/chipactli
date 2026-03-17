@@ -203,6 +203,8 @@ export default function App() {
     pendientes: [],
     drafts: {}
   });
+  const [escudoCapturaActivo, setEscudoCapturaActivo] = useState(false);
+  const escudoCapturaTimeoutRef = useRef(0);
 
   const isAuthenticated = Boolean(token && currentUser?.username);
 
@@ -223,6 +225,17 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: { tipo } }));
     });
     window.dispatchEvent(new CustomEvent('chipactli:app-soft-refresh'));
+  }, []);
+
+  const activarEscudoCaptura = useCallback((duracionMs = 1200) => {
+    setEscudoCapturaActivo(true);
+    if (escudoCapturaTimeoutRef.current) {
+      window.clearTimeout(escudoCapturaTimeoutRef.current);
+    }
+    escudoCapturaTimeoutRef.current = window.setTimeout(() => {
+      setEscudoCapturaActivo(false);
+      escudoCapturaTimeoutRef.current = 0;
+    }, Math.max(400, Number(duracionMs) || 1200));
   }, []);
 
   // mapping between page keys and hash fragments
@@ -293,19 +306,36 @@ export default function App() {
       if (atajoDevTools || atajoCaptura || atajoImpresion) {
         event.preventDefault();
         event.stopPropagation();
+        activarEscudoCaptura(1200);
         if (key === 'printscreen' && navigator?.clipboard?.writeText) {
           navigator.clipboard.writeText('').catch(() => {});
         }
       }
     };
 
+    const reforzarTrasPrintScreen = (event) => {
+      const key = String(event?.key || '').toLowerCase();
+      if (key === 'printscreen') {
+        activarEscudoCaptura(1400);
+      }
+    };
+
     document.addEventListener('contextmenu', bloquearContexto);
     window.addEventListener('keydown', bloquearAtajosCaptura, true);
+    window.addEventListener('keyup', reforzarTrasPrintScreen, true);
 
     return () => {
       document.removeEventListener('contextmenu', bloquearContexto);
       window.removeEventListener('keydown', bloquearAtajosCaptura, true);
+      window.removeEventListener('keyup', reforzarTrasPrintScreen, true);
     };
+  }, [activarEscudoCaptura]);
+
+  React.useEffect(() => () => {
+    if (escudoCapturaTimeoutRef.current) {
+      window.clearTimeout(escudoCapturaTimeoutRef.current);
+      escudoCapturaTimeoutRef.current = 0;
+    }
   }, []);
 
   React.useEffect(() => {
@@ -1395,6 +1425,9 @@ export default function App() {
 
   return (
     <div className="app" style={{ display: 'flex', minHeight: '100vh' }}>
+      <div className={escudoCapturaActivo ? 'escudoAntiCaptura activo' : 'escudoAntiCaptura'} aria-hidden={!escudoCapturaActivo}>
+        <span>Contenido protegido</span>
+      </div>
       <aside className={`sidebar ${showSidebar ? 'visible' : ''}`}>
         <nav className="menuNavegacion">
           {menuGroups.map(group => {

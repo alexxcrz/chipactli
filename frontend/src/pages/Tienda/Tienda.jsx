@@ -830,6 +830,7 @@ export default function Tienda({
   const contenedorScrollRef = useRef(null);
   const detalleTouchStartRef = useRef({ x: 0, y: 0 });
   const detalleTouchTrackingRef = useRef(false);
+  const ultimoClickComportamientoRef = useRef({ ts: 0, clave: '' });
   const eventosPedidoNotificadosRef = useRef(new Set());
   const estadoOrdenesClienteRef = useRef(new Map());
   const estadoOrdenesInicializadoRef = useRef(false);
@@ -1125,6 +1126,38 @@ export default function Tienda({
     if (vistaActiva !== 'tienda') return;
     registrarEventoComportamiento('ver_seccion', seccionActiva || 'todos');
   }, [esVistaTrastienda, vistaActiva, seccionActiva]);
+
+  useEffect(() => {
+    const contenedor = contenedorScrollRef.current;
+    if (!contenedor) return undefined;
+
+    const onClickCaptura = (event) => {
+      const target = event?.target;
+      if (!(target instanceof Element)) return;
+      const clickeable = target.closest('button, a, [role="button"], .tiendaTab, .boton');
+      if (!clickeable) return;
+      if (!contenedor.contains(clickeable)) return;
+
+      const texto = String(
+        clickeable.getAttribute('aria-label')
+        || clickeable.getAttribute('title')
+        || clickeable.textContent
+        || ''
+      ).replace(/\s+/g, ' ').trim().slice(0, 120);
+      const clave = `${String(vistaActiva || '')}:${texto || 'clic'}`;
+      const ahora = Date.now();
+      if ((ahora - Number(ultimoClickComportamientoRef.current.ts || 0)) < 650
+        && ultimoClickComportamientoRef.current.clave === clave) {
+        return;
+      }
+
+      ultimoClickComportamientoRef.current = { ts: ahora, clave };
+      registrarEventoComportamiento('click_interfaz', texto || 'clic');
+    };
+
+    contenedor.addEventListener('click', onClickCaptura, true);
+    return () => contenedor.removeEventListener('click', onClickCaptura, true);
+  }, [vistaActiva, adminVista, seccionActiva]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -3233,10 +3266,22 @@ export default function Tienda({
     };
     if (!payload.accion) return;
 
+    const body = JSON.stringify(payload);
+
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      try {
+        const blob = new Blob([body], { type: 'application/json' });
+        navigator.sendBeacon(apiUrl('/visitas/evento'), blob);
+      } catch {
+        // Ignorar y continuar con fetch.
+      }
+    }
+
     fetchJson('/visitas/evento', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body,
+      keepalive: true
     }).catch(() => {});
   }
 

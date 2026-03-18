@@ -614,15 +614,32 @@ function limpiarTextoCorto(valor, max = 64) {
   return limpio.replace(/[\r\n\t]/g, ' ');
 }
 
-function obtenerIpCliente(req) {
+function obtenerIpsCliente(req) {
+  const lista = [];
   const xff = String(req.headers['x-forwarded-for'] || '').trim();
-  if (xff) return xff.split(',')[0].trim();
-  return String(
-    req.headers['cf-connecting-ip']
-    || req.headers['x-real-ip']
-    || req.socket?.remoteAddress
-    || ''
-  ).trim();
+  if (xff) {
+    xff.split(',').forEach((ip) => {
+      const limpia = normalizarIpEntrada(ip);
+      if (limpia) lista.push(limpia);
+    });
+  }
+
+  const candidatas = [
+    req.headers['cf-connecting-ip'],
+    req.headers['x-real-ip'],
+    req.socket?.remoteAddress
+  ];
+  candidatas.forEach((ip) => {
+    const limpia = normalizarIpEntrada(ip);
+    if (limpia) lista.push(limpia);
+  });
+
+  return Array.from(new Set(lista));
+}
+
+function obtenerIpCliente(req) {
+  const ips = obtenerIpsCliente(req);
+  return ips[0] || '';
 }
 
 const geoIpCache = new Map();
@@ -632,8 +649,17 @@ function normalizarIpEntrada(ip = '') {
   const valor = String(ip || '').trim();
   if (!valor) return '';
   if (valor === '::1' || valor === 'localhost') return '';
-  if (valor.startsWith('::ffff:')) return valor.slice(7);
-  return valor;
+
+  let salida = valor;
+  if (salida.startsWith('::ffff:')) salida = salida.slice(7);
+  if (salida.startsWith('[') && salida.includes(']')) {
+    salida = salida.slice(1, salida.indexOf(']'));
+  }
+  const esIpv4ConPuerto = /^\d+\.\d+\.\d+\.\d+:\d+$/.test(salida);
+  if (esIpv4ConPuerto) {
+    salida = salida.split(':')[0];
+  }
+  return salida;
 }
 
 function esIpPrivadaOInvalida(ip = '') {
@@ -663,22 +689,56 @@ async function consultarGeoIpPublico(ip) {
     return cacheItem.valor;
   }
 
-  try {
+  async function consultarProveedor(url, transformar) {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 900);
-    const resp = await fetch(`https://ipwho.is/${encodeURIComponent(ipLimpia)}?fields=success,country,country_code,region,city`, {
-      signal: controller.signal
-    });
-    clearTimeout(id);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data?.success) return null;
+    const id = setTimeout(() => controller.abort(), 2200);
+    try {
+      const resp = await fetch(url, { signal: controller.signal });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return transformar(data);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  try {
+    const valorIpWho = await consultarProveedor(
+      `https://ipwho.is/${encodeURIComponent(ipLimpia)}?fields=success,country,country_code,region,city`,
+      (data) => {
+        if (!data?.success) return null;
+        return {
+          pais: limpiarTextoCorto(data?.country || '', 48),
+          paisCodigo: limpiarTextoCorto(data?.country_code || '', 8).toUpperCase(),
+          region: limpiarTextoCorto(data?.region || '', 64),
+          ciudad: limpiarTextoCorto(data?.city || '', 64)
+        };
+      }
+    );
+
+    const valorIpApi = await consultarProveedor(
+      `https://ipapi.co/${encodeURIComponent(ipLimpia)}/json/`,
+      (data) => {
+        if (!data || data?.error) return null;
+        return {
+          pais: limpiarTextoCorto(data?.country_name || '', 48),
+          paisCodigo: limpiarTextoCorto(data?.country || '', 8).toUpperCase(),
+          region: limpiarTextoCorto(data?.region || data?.region_code || '', 64),
+          ciudad: limpiarTextoCorto(data?.city || '', 64)
+        };
+      }
+    );
+
     const valor = {
-      pais: limpiarTextoCorto(data?.country || '', 48),
-      paisCodigo: limpiarTextoCorto(data?.country_code || '', 8).toUpperCase(),
-      region: limpiarTextoCorto(data?.region || '', 64),
-      ciudad: limpiarTextoCorto(data?.city || '', 64)
+      pais: valorIpWho?.pais || valorIpApi?.pais || '',
+      paisCodigo: valorIpWho?.paisCodigo || valorIpApi?.paisCodigo || '',
+      region: valorIpWho?.region || valorIpApi?.region || '',
+      ciudad: valorIpWho?.ciudad || valorIpApi?.ciudad || ''
     };
+    if (!valor.pais && !valor.region && !valor.ciudad) return null;
+
     geoIpCache.set(cacheKey, { ts: Date.now(), valor });
     return valor;
   } catch {
@@ -810,8 +870,24 @@ async function enriquecerOrigenPorIp(req, origenBase) {
   const origen = (origenBase && typeof origenBase === 'object') ? { ...origenBase } : {};
   if (origen.ciudad && origen.region) return origen;
 
-  const ipCliente = obtenerIpCliente(req);
-  const geo = await consultarGeoIpPublico(ipCliente);
+  const ips = obtenerIpsCliente(req).slice(0, 4);
+  let geo = null;
+  let mejorPuntaje = -1;
+
+  for (const ip of ips) {
+    const candidato = await consultarGeoIpPublico(ip);
+    if (!candidato) continue;
+    const puntaje =
+      (candidato.ciudad ? 3 : 0)
+      + (candidato.region ? 2 : 0)
+      + (candidato.pais ? 1 : 0);
+    if (puntaje > mejorPuntaje) {
+      geo = candidato;
+      mejorPuntaje = puntaje;
+      if (puntaje >= 6) break;
+    }
+  }
+
   if (!geo) return origen;
 
   const paisNormalizado = normalizarPais(origen.pais || geo.pais || geo.paisCodigo || '');
@@ -939,7 +1015,12 @@ function resumenUbicacionesActivas() {
   }
   return Array.from(conteo.entries())
     .map(([ubicacion, total]) => ({ ubicacion, pais: ubicacion, total }))
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => {
+      const specA = String(a?.ubicacion || '').includes(',') ? 1 : 0;
+      const specB = String(b?.ubicacion || '').includes(',') ? 1 : 0;
+      if (specA !== specB) return specB - specA;
+      return (Number(b?.total) || 0) - (Number(a?.total) || 0);
+    })
     .slice(0, 10);
 }
 
@@ -947,7 +1028,12 @@ function resumenUbicacionesDia(statsDia) {
   const pares = Array.from(statsDia?.porUbicacion?.entries?.() || []);
   return pares
     .map(([ubicacion, total]) => ({ ubicacion, pais: ubicacion, total: Number(total) || 0 }))
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => {
+      const specA = String(a?.ubicacion || '').includes(',') ? 1 : 0;
+      const specB = String(b?.ubicacion || '').includes(',') ? 1 : 0;
+      if (specA !== specB) return specB - specA;
+      return (Number(b?.total) || 0) - (Number(a?.total) || 0);
+    })
     .slice(0, 10);
 }
 
@@ -1051,7 +1137,8 @@ async function obtenerResumenPersistenteDia(diaClave) {
     `SELECT pais, total
      FROM tienda_visitas_diarias_paises
      WHERE dia_clave = ?
-     ORDER BY total DESC
+     ORDER BY CASE WHEN INSTR(pais, ',') > 0 THEN 1 ELSE 0 END DESC,
+              total DESC
      LIMIT 10`,
     [diaClave]
   );
@@ -1276,7 +1363,8 @@ app.get(['/api/visitas/historial', '/visitas/historial'], async (req, res) => {
        FROM tienda_visitas_diarias_paises
        WHERE dia_clave >= ?
        GROUP BY pais
-       ORDER BY total DESC
+       ORDER BY CASE WHEN INSTR(pais, ',') > 0 THEN 1 ELSE 0 END DESC,
+                total DESC
        LIMIT 10`,
       [desdeClave]
     );
@@ -1361,12 +1449,33 @@ app.get(['/api/visitas/comportamiento', '/visitas/comportamiento'], async (req, 
       [desdeClave]
     );
 
+    const totalEventos = Number(total?.total) || 0;
+    if (totalEventos <= 0) {
+      const fallbackVisitas = await dbGetAsync(
+        bdVentas,
+        `SELECT COALESCE(SUM(total_eventos), 0) AS total
+         FROM tienda_visitas_diarias
+         WHERE dia_clave >= ?`,
+        [desdeClave]
+      );
+      const totalFallback = Number(fallbackVisitas?.total) || 0;
+      return res.json({
+        ok: true,
+        rangoDias: dias,
+        desde: desdeClave,
+        hasta: hoyClave,
+        totalEventos: totalFallback,
+        topAcciones: totalFallback > 0 ? [{ accion: 'visita_pagina', total: totalFallback }] : [],
+        topProductos: []
+      });
+    }
+
     return res.json({
       ok: true,
       rangoDias: dias,
       desde: desdeClave,
       hasta: hoyClave,
-      totalEventos: Number(total?.total) || 0,
+      totalEventos,
       topAcciones: (topAcciones || []).map((item) => ({
         accion: limpiarTextoCorto(item?.accion || 'accion', 64) || 'accion',
         total: Number(item?.total) || 0

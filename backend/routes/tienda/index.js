@@ -504,6 +504,41 @@ function boolToInt(valor) {
   return valor === true || Number(valor) === 1 ? 1 : 0;
 }
 
+function textoCarrito(valor, max = 220) {
+  return String(valor || '').trim().slice(0, max);
+}
+
+function normalizarItemsCarrito(items = []) {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+
+      const clave = textoCarrito(item?.clave, 260);
+      const nombreReceta = textoCarrito(item?.nombre_receta, 180);
+      if (!clave || !nombreReceta) return null;
+
+      const cantidad = Math.max(1, Math.min(999, Number(item?.cantidad) || 1));
+      const precioUnitario = Math.max(0, Number(item?.precio_unitario) || 0);
+
+      return {
+        clave,
+        nombre_receta: nombreReceta,
+        nombre_base: textoCarrito(item?.nombre_base, 180),
+        categoria_nombre: textoCarrito(item?.categoria_nombre, 120),
+        descripcion_mp: textoCarrito(item?.descripcion_mp, 220),
+        slug: textoCarrito(item?.slug, 180),
+        variante: textoCarrito(item?.variante, 120),
+        cantidad,
+        precio_unitario: precioUnitario,
+        subtotal: Number((cantidad * precioUnitario).toFixed(2))
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 250);
+}
+
 function valorActivoAInt(valor) {
   if (valor === false || valor === 0 || valor === '0') return 0;
   const txt = String(valor ?? '').trim().toLowerCase();
@@ -1994,6 +2029,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const existe = await dbGet(bdVentas, 'SELECT id FROM tienda_clientes WHERE id = ? LIMIT 1', [id]);
       if (!existe) return res.status(404).json({ error: 'Cliente no encontrado' });
 
+      await dbRun(bdVentas, 'DELETE FROM tienda_carritos WHERE id_cliente = ?', [id]);
       await dbRun(bdVentas, 'DELETE FROM tienda_notificaciones_cliente WHERE id_cliente = ?', [id]);
       await dbRun(bdVentas, 'DELETE FROM tienda_clientes_direcciones WHERE id_cliente = ?', [id]);
       await dbRun(bdVentas, 'DELETE FROM tienda_atencion_clientes WHERE id_cliente = ?', [id]);
@@ -2774,6 +2810,96 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "No se pudo iniciar sesión" });
+    }
+  });
+
+  app.get('/tienda/auth/carrito', authCliente, async (req, res) => {
+    try {
+      const row = await dbGet(
+        bdVentas,
+        `SELECT items_json, creado_en, actualizado_en
+         FROM tienda_carritos
+         WHERE id_cliente = ?
+         LIMIT 1`,
+        [req.cliente.id]
+      );
+
+      if (!row) {
+        return res.json({
+          exito: true,
+          items: [],
+          creado_en: Date.now(),
+          actualizado_en: null
+        });
+      }
+
+      const items = normalizarItemsCarrito(parseJSON(row?.items_json, []));
+      const creadoEn = Math.max(0, Number(row?.creado_en) || 0) || Date.now();
+      return res.json({
+        exito: true,
+        items,
+        creado_en: creadoEn,
+        actualizado_en: row?.actualizado_en || null
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo cargar el carrito' });
+    }
+  });
+
+  app.put('/tienda/auth/carrito', authCliente, async (req, res) => {
+    try {
+      const items = normalizarItemsCarrito(Array.isArray(req.body?.items) ? req.body.items : []);
+      const creadoEn = Math.max(0, Number(req.body?.creado_en) || 0) || Date.now();
+
+      if (!items.length) {
+        await dbRun(bdVentas, 'DELETE FROM tienda_carritos WHERE id_cliente = ?', [req.cliente.id]);
+        transmitir({
+          tipo: 'tienda_carrito_actualizado',
+          id_cliente: Number(req.cliente.id) || 0,
+          cantidad_items: 0
+        });
+        return res.json({
+          exito: true,
+          items: [],
+          creado_en: creadoEn,
+          actualizado_en: null
+        });
+      }
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_carritos (id_cliente, items_json, creado_en, actualizado_en)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(id_cliente) DO UPDATE SET
+           items_json = excluded.items_json,
+           creado_en = excluded.creado_en,
+           actualizado_en = CURRENT_TIMESTAMP`,
+        [req.cliente.id, JSON.stringify(items), creadoEn]
+      );
+
+      const actual = await dbGet(
+        bdVentas,
+        `SELECT actualizado_en
+         FROM tienda_carritos
+         WHERE id_cliente = ?
+         LIMIT 1`,
+        [req.cliente.id]
+      );
+
+      transmitir({
+        tipo: 'tienda_carrito_actualizado',
+        id_cliente: Number(req.cliente.id) || 0,
+        cantidad_items: items.reduce((sum, item) => sum + (Number(item?.cantidad) || 0), 0)
+      });
+
+      return res.json({
+        exito: true,
+        items,
+        creado_en: creadoEn,
+        actualizado_en: actual?.actualizado_en || null
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo guardar el carrito' });
     }
   });
 

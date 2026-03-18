@@ -3017,12 +3017,49 @@ async function producirDesdeReceta() {
       })
     });
 
-    if (respuesta.ok) {
-      cerrarModal('modalProduccionRapida');
-      mostrarNotificacion('Producción registrada correctamente', 'exito');
-      // Recarga eliminada: ya no se refresca recetas
-      // window.dispatchEvent(new CustomEvent('produccionActualizada'));
+    const data = await respuesta.json().catch(() => ({}));
+
+    if (!respuesta.ok) {
+      if (data?.requiere_activar_lote) {
+        const detalle = Array.isArray(data?.faltantes)
+          ? data.faltantes
+            .filter((f) => Boolean(f?.requiere_activar_lote))
+            .map((f) => String(f?.nombre_insumo || '').trim())
+            .filter(Boolean)
+            .join(', ')
+          : '';
+        mostrarNotificacion(
+          detalle
+            ? `Activa el lote alterno para: ${detalle}`
+            : 'Hay lotes desactivados con stock. Actívalos para producir.',
+          'advertencia'
+        );
+        return;
+      }
+      mostrarNotificacion(data?.error || 'No se pudo registrar la producción', 'error');
+      return;
     }
+
+    cerrarModal('modalProduccionRapida');
+    mostrarNotificacion('Producción registrada correctamente', 'exito');
+    const avisos = Array.isArray(data?.avisos) ? data.avisos : [];
+    if (avisos.length > 0) {
+      mostrarNotificacion(String(avisos[0]?.mensaje || 'Hay un lote alterno disponible para activar'), 'advertencia');
+    }
+    const ordenesAuto = Array.isArray(data?.ordenes_compra_automaticas) ? data.ordenes_compra_automaticas : [];
+    if (ordenesAuto.length > 0) {
+      const primera = ordenesAuto[0] || {};
+      const numero = String(primera?.numero_orden || '').trim();
+      const insumo = String(primera?.nombre_insumo || '').trim();
+      mostrarNotificacion(
+        numero
+          ? `Se creó orden automática ${numero} para ${insumo || 'insumo con bajo nivel'}`
+          : 'Se creó una orden automática por bajo nivel de insumo',
+        'advertencia'
+      );
+    }
+    // Recarga eliminada: ya no se refresca recetas
+    // window.dispatchEvent(new CustomEvent('produccionActualizada'));
   } catch (error) {
     console.error('Error registrando producción:', error);
     mostrarNotificacion('Error al registrar la producción', 'error');
@@ -3079,13 +3116,47 @@ async function producirDesdePaquete() {
       })
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data?.error || 'No se pudo registrar producción del paquete');
+    if (!resp.ok) {
+      if (data?.requiere_activar_lote) {
+        const detalle = Array.isArray(data?.faltantes)
+          ? data.faltantes
+            .filter((f) => Boolean(f?.requiere_activar_lote))
+            .map((f) => String(f?.nombre_insumo || '').trim())
+            .filter(Boolean)
+            .join(', ')
+          : '';
+        mostrarNotificacion(
+          detalle
+            ? `Activa el lote alterno para: ${detalle}`
+            : 'Hay lotes desactivados con stock. Actívalos para producir.',
+          'advertencia'
+        );
+        return;
+      }
+      throw new Error(data?.error || 'No se pudo registrar producción del paquete');
+    }
 
     cerrarModal('modalProduccionPaquete');
     mostrarNotificacion(
       `Producción registrada: ${Number(data?.total_producciones) || 0} receta(s), ${Number(data?.total_piezas) || 0} pieza(s)`,
       'exito'
     );
+    const avisos = Array.isArray(data?.avisos) ? data.avisos : [];
+    if (avisos.length > 0) {
+      mostrarNotificacion(String(avisos[0]?.mensaje || 'Hay un lote alterno disponible para activar'), 'advertencia');
+    }
+    const ordenesAuto = Array.isArray(data?.ordenes_compra_automaticas) ? data.ordenes_compra_automaticas : [];
+    if (ordenesAuto.length > 0) {
+      const primera = ordenesAuto[0] || {};
+      const numero = String(primera?.numero_orden || '').trim();
+      const insumo = String(primera?.nombre_insumo || '').trim();
+      mostrarNotificacion(
+        numero
+          ? `Se creó orden automática ${numero} para ${insumo || 'insumo con bajo nivel'}`
+          : 'Se creó una orden automática por bajo nivel de insumo',
+        'advertencia'
+      );
+    }
     // Recarga eliminada: ya no se refresca recetas ni paquetes
     // window.dispatchEvent(new CustomEvent('produccionActualizada'));
   } catch (error) {

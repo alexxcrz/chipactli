@@ -144,6 +144,43 @@
   color: #2d4f40;
 }
 
+.tiendaMetricasHorasHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.tiendaMetricasHorasNavegacion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tiendaMetricasHorasFlecha {
+  border: 1px solid #cdd9d2;
+  background: #f8fcfa;
+  color: #2d4f40;
+  border-radius: 8px;
+  min-width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.tiendaMetricasHorasFlecha:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tiendaMetricasHorasRango {
+  font-size: 12px;
+  color: #476457;
+  font-variant-numeric: tabular-nums;
+}
+
 .tiendaMetricasLista {
   list-style: none;
   margin: 0;
@@ -166,6 +203,15 @@
 
 .tiendaMetricasListaHoras li {
   font-variant-numeric: tabular-nums;
+}
+
+.tiendaMetricasListaHoras li.tiendaHoraActual {
+  border-color: #9ec2ad;
+  background: #eef7f1;
+}
+
+.tiendaMetricasListaHoras li.tiendaHoraFutura {
+  opacity: 0.72;
 }
 
 .tiendaMetricasAyuda {

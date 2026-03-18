@@ -6,7 +6,7 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
   bdInventario.serialize(() => {
     bdInventario.run(`CREATE TABLE IF NOT EXISTS inventario (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      codigo TEXT UNIQUE,
+      codigo TEXT,
       nombre TEXT,
       proveedor TEXT,
       unidad TEXT,
@@ -14,7 +14,9 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       cantidad_disponible REAL,
       costo_total REAL,
       costo_por_unidad REAL,
-      pendiente INTEGER DEFAULT 0
+      pendiente INTEGER DEFAULT 0,
+      prioridad_consumo TEXT DEFAULT 'normal',
+      activo_consumo INTEGER DEFAULT 1
     )`);
 
     // Migración: agregar columna 'pendiente' si no existe
@@ -25,7 +27,54 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!err && columnas && !columnas.some(col => col.name === "proveedor")) {
         bdInventario.run("ALTER TABLE inventario ADD COLUMN proveedor TEXT");
       }
+      if (!err && columnas && !columnas.some(col => col.name === "prioridad_consumo")) {
+        bdInventario.run("ALTER TABLE inventario ADD COLUMN prioridad_consumo TEXT DEFAULT 'normal'");
+      }
+      if (!err && columnas && !columnas.some(col => col.name === "activo_consumo")) {
+        bdInventario.run("ALTER TABLE inventario ADD COLUMN activo_consumo INTEGER DEFAULT 1");
+      }
     });
+
+    bdInventario.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventario'", (errTabla, rowTabla) => {
+      const sqlTabla = String(rowTabla?.sql || '');
+      const requiereMigracionCodigoUnico = !errTabla && /codigo\s+TEXT\s+UNIQUE/i.test(sqlTabla);
+      if (!requiereMigracionCodigoUnico) return;
+
+      bdInventario.serialize(() => {
+        bdInventario.run('ALTER TABLE inventario RENAME TO inventario_legacy_migracion', (errRename) => {
+          if (errRename) return;
+
+          bdInventario.run(`CREATE TABLE inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT,
+            nombre TEXT,
+            proveedor TEXT,
+            unidad TEXT,
+            cantidad_total REAL,
+            cantidad_disponible REAL,
+            costo_total REAL,
+            costo_por_unidad REAL,
+            pendiente INTEGER DEFAULT 0,
+            prioridad_consumo TEXT DEFAULT 'normal',
+            activo_consumo INTEGER DEFAULT 1
+          )`, (errCreateNueva) => {
+            if (errCreateNueva) return;
+
+            bdInventario.run(
+              `INSERT INTO inventario (id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente, prioridad_consumo, activo_consumo)
+               SELECT id, codigo, nombre, COALESCE(proveedor, ''), unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, COALESCE(pendiente, 0), 'normal', 1
+               FROM inventario_legacy_migracion`,
+              () => {
+                bdInventario.run('DROP TABLE inventario_legacy_migracion');
+              }
+            );
+          });
+        });
+      });
+    });
+
+    bdInventario.run(`CREATE INDEX IF NOT EXISTS idx_inventario_codigo_proveedor
+      ON inventario (codigo, proveedor)`);
 
     bdInventario.run(`CREATE TABLE IF NOT EXISTS historial_inventario (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -447,6 +496,17 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_carritos (
+      id_cliente INTEGER PRIMARY KEY,
+      items_json TEXT,
+      creado_en INTEGER,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_carritos_actualizado
+      ON tienda_carritos (actualizado_en DESC)`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_clientes_direcciones (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

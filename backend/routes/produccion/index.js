@@ -54,6 +54,181 @@ function convertirCantidadValidada(cantidad, unidadOrigen, unidadDestino) {
   return convertido;
 }
 
+async function obtenerContextoLotesInsumo(bdInventario, idInsumo) {
+  const base = await dbGet(bdInventario, 'SELECT * FROM inventario WHERE id=?', [idInsumo]);
+  if (!base) return null;
+
+  const codigo = String(base?.codigo || '').trim();
+  const nombre = String(base?.nombre || '').trim();
+  const unidad = String(base?.unidad || '').trim();
+
+  let lotes = [];
+  if (codigo) {
+    lotes = await dbAll(
+      bdInventario,
+      `SELECT *
+       FROM inventario
+       WHERE LOWER(TRIM(COALESCE(codigo, ''))) = LOWER(TRIM(?))
+         AND LOWER(TRIM(COALESCE(unidad, ''))) = LOWER(TRIM(?))
+       ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, id ASC`,
+      [codigo, unidad, Number(base?.id || 0)]
+    );
+  } else {
+    lotes = await dbAll(
+      bdInventario,
+      `SELECT *
+       FROM inventario
+       WHERE LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?))
+         AND LOWER(TRIM(COALESCE(unidad, ''))) = LOWER(TRIM(?))
+       ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, id ASC`,
+      [nombre, unidad, Number(base?.id || 0)]
+    );
+  }
+
+  return {
+    base,
+    lotes: Array.isArray(lotes) ? lotes : []
+  };
+}
+
+function planearConsumoPorLotes(contexto, requerido, consumoPlaneadoPorLote = new Map()) {
+  const lotes = Array.isArray(contexto?.lotes) ? contexto.lotes : [];
+  const base = contexto?.base || null;
+  const activos = lotes.filter((l) => Number(l?.activo_consumo ?? 1) === 1);
+  const inactivos = lotes.filter((l) => Number(l?.activo_consumo ?? 1) !== 1);
+
+  const disponibleActivo = activos.reduce((acc, lote) => {
+    const id = Number(lote?.id || 0);
+    const planeado = Number(consumoPlaneadoPorLote.get(id) || 0);
+    const disponibleRaw = Number(lote?.cantidad_disponible) || 0;
+    const disponibleReal = Math.max(0, disponibleRaw - planeado);
+    return acc + disponibleReal;
+  }, 0);
+
+  const disponibleInactivo = inactivos.reduce((acc, lote) => {
+    const disponibleRaw = Number(lote?.cantidad_disponible) || 0;
+    return acc + Math.max(0, disponibleRaw);
+  }, 0);
+
+  let restante = Number(requerido || 0);
+  const consumos = [];
+
+  for (const lote of activos) {
+    if (restante <= 1e-9) break;
+    const id = Number(lote?.id || 0);
+    const planeado = Number(consumoPlaneadoPorLote.get(id) || 0);
+    const disponibleRaw = Number(lote?.cantidad_disponible) || 0;
+    const disponibleReal = Math.max(0, disponibleRaw - planeado);
+    if (disponibleReal <= 0) continue;
+
+    const usar = Math.min(restante, disponibleReal);
+    if (usar <= 0) continue;
+
+    consumoPlaneadoPorLote.set(id, planeado + usar);
+    consumos.push({
+      id_insumo: id,
+      nombre_insumo: String(lote?.nombre || '').trim() || `Insumo #${id}`,
+      unidad_insumo: String(lote?.unidad || '').trim(),
+      costo_por_unidad: Number(lote?.costo_por_unidad) || 0,
+      requerido: usar
+    });
+    restante -= usar;
+  }
+
+  const consumoPrincipal = base
+    ? consumos.find((item) => Number(item?.id_insumo || 0) === Number(base?.id || 0))
+    : null;
+  const principalDisponible = Number(base?.cantidad_disponible) || 0;
+  const principalTotal = Number(base?.cantidad_total) || 0;
+  const principalUsado = Number(consumoPrincipal?.requerido || 0);
+  const principalRestante = Math.max(0, principalDisponible - principalUsado);
+  const principalPorcentaje = principalTotal > 0 ? ((principalRestante / principalTotal) * 100) : 0;
+
+  return {
+    consumos,
+    faltante: Math.max(0, restante),
+    disponible_activo: disponibleActivo,
+    disponible_inactivo: disponibleInactivo,
+    tiene_lotes_inactivos: disponibleInactivo > 0,
+    aviso_lote_alterno: principalPorcentaje <= 20 && disponibleInactivo > 0
+  };
+}
+
+async function crearOrdenCompraAutomaticaInsumo(bdInventario, insumo = {}, cantidadSugerida = 0) {
+  const idInsumo = Number(insumo?.id || 0);
+  if (!Number.isFinite(idInsumo) || idInsumo <= 0) return null;
+
+  const pendienteExistente = await dbGet(
+    bdInventario,
+    `SELECT o.id, o.numero_orden
+     FROM ordenes_compra_items i
+     INNER JOIN ordenes_compra o ON o.id = i.id_orden
+     WHERE i.id_inventario=?
+       AND COALESCE(i.surtido, 0)=0
+       AND LOWER(TRIM(COALESCE(o.estado, ''))) <> 'surtida'
+     ORDER BY COALESCE(o.fecha_creacion, '') DESC, o.id DESC
+     LIMIT 1`,
+    [idInsumo]
+  );
+  if (pendienteExistente?.id) {
+    return {
+      ya_existia: true,
+      id_orden: Number(pendienteExistente.id || 0),
+      numero_orden: String(pendienteExistente.numero_orden || '').trim()
+    };
+  }
+
+  const ultimo = await dbGet(
+    bdInventario,
+    `SELECT numero_orden
+     FROM ordenes_compra
+     WHERE numero_orden LIKE 'CHIOC%'
+     ORDER BY numero_orden DESC
+     LIMIT 1`
+  );
+
+  const actual = String(ultimo?.numero_orden || '').trim();
+  const match = actual.match(/^CHIOC(\d+)$/);
+  const consecutivo = match ? (Number(match[1]) || 0) + 1 : 1;
+  const numeroOrden = `CHIOC${String(consecutivo).padStart(7, '0')}`;
+  const fechaCreacion = new Date().toISOString();
+  const cantidad = Math.max(1, Number(cantidadSugerida || 0));
+  const precioUnitario = Number(insumo?.costo_por_unidad || 0);
+
+  const nuevaOrden = await dbRun(
+    bdInventario,
+    `INSERT INTO ordenes_compra (numero_orden, proveedor, fecha_creacion, estado, fecha_surtida)
+     VALUES (?,?,?,?,NULL)`,
+    [numeroOrden, String(insumo?.proveedor || '').trim(), fechaCreacion, 'pendiente']
+  );
+
+  await dbRun(
+    bdInventario,
+    `INSERT INTO ordenes_compra_items
+      (id_orden, tipo_item, id_inventario, id_utensilio, codigo, nombre, cantidad_requerida, cantidad_surtida, precio_unitario, costo_total_surtido, surtido)
+     VALUES (?,?,?,?,?,?,?,?,?,?,0)`,
+    [
+      nuevaOrden.lastID,
+      'insumo',
+      idInsumo,
+      null,
+      String(insumo?.codigo || '').trim(),
+      String(insumo?.nombre || '').trim(),
+      cantidad,
+      0,
+      precioUnitario,
+      0
+    ]
+  );
+
+  return {
+    ya_existia: false,
+    id_orden: Number(nuevaOrden.lastID || 0),
+    numero_orden: numeroOrden,
+    cantidad_requerida: cantidad
+  };
+}
+
 export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventario, bdVentas = null) {
   app.get("/produccion/historial/:id_receta", async (req, res) => {
     const idReceta = Number(req.params.id_receta || 0);
@@ -158,6 +333,10 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
 
       const planDescuentos = [];
       const incompatibilidades = [];
+      const faltantes = [];
+      const avisos = [];
+      const consumoPlaneadoPorLote = new Map();
+      const contextosIngredientes = new Map();
       if (receta?.id) {
         const ingredientes = await dbAll(
           bdRecetas,
@@ -169,34 +348,57 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
           const idInsumo = Number(ing?.id_insumo);
           if (!Number.isFinite(idInsumo) || idInsumo <= 0) continue;
 
-          const insumo = await dbGet(bdInventario, "SELECT * FROM inventario WHERE id=?", [idInsumo]);
-          if (!insumo) continue;
+          const contexto = await obtenerContextoLotesInsumo(bdInventario, idInsumo);
+          if (!contexto?.base) continue;
+          const insumoBase = contexto.base;
 
           const unidadReceta = String(ing?.unidad || '').trim();
-          const unidadInsumo = String(insumo?.unidad || '').trim();
+          const unidadInsumo = String(insumoBase?.unidad || '').trim();
           const requerido = convertirCantidadValidada((Number(ing?.cantidad) || 0) * cantidadProduccion, unidadReceta, unidadInsumo);
           if (!Number.isFinite(requerido) || requerido <= 0) {
             incompatibilidades.push({
               id_insumo: idInsumo,
-              nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              nombre_insumo: String(insumoBase?.nombre || '').trim() || `Insumo #${idInsumo}`,
               unidad_receta: unidadReceta,
               unidad_inventario: unidadInsumo
             });
             continue;
           }
 
-          const disponible = Number(insumo?.cantidad_disponible) || 0;
-          const faltante = requerido > disponible ? (requerido - disponible) : 0;
-
-          planDescuentos.push({
+          const planLotes = planearConsumoPorLotes(contexto, requerido, consumoPlaneadoPorLote);
+          contextosIngredientes.set(idInsumo, {
             id_insumo: idInsumo,
-            nombre_insumo: String(insumo?.nombre || "").trim() || `Insumo #${idInsumo}`,
-            unidad_insumo: String(insumo?.unidad || "").trim(),
-            costo_por_unidad: Number(insumo?.costo_por_unidad) || 0,
+            base: insumoBase,
             requerido,
-            disponible,
-            faltante
+            disponible_activo: planLotes.disponible_activo,
+            disponible_inactivo: planLotes.disponible_inactivo,
+            tiene_lotes_inactivos: planLotes.tiene_lotes_inactivos,
+            aviso_lote_alterno: planLotes.aviso_lote_alterno
           });
+
+          if (planLotes.faltante > 1e-9) {
+            faltantes.push({
+              id_insumo: idInsumo,
+              nombre_insumo: String(insumoBase?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              faltante: planLotes.faltante,
+              unidad: String(insumoBase?.unidad || '').trim(),
+              disponible: planLotes.disponible_activo,
+              requerido,
+              requiere_activar_lote: Boolean(planLotes.tiene_lotes_inactivos)
+            });
+            continue;
+          }
+
+          planDescuentos.push(...planLotes.consumos);
+
+          if (planLotes.aviso_lote_alterno) {
+            avisos.push({
+              tipo: 'lote_alterno_disponible',
+              id_insumo: idInsumo,
+              nombre_insumo: String(insumoBase?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              mensaje: `El lote activo de ${String(insumoBase?.nombre || '').trim() || `Insumo #${idInsumo}`} está bajo y hay otro lote disponible para activar.`
+            });
+          }
         }
       }
 
@@ -207,18 +409,14 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         });
       }
 
-      const faltantes = planDescuentos.filter((item) => item.faltante > 0);
       if (faltantes.length) {
+        const requiereActivacion = faltantes.some((f) => Boolean(f?.requiere_activar_lote));
         return res.status(400).json({
-          error: "Inventario insuficiente para registrar la producción",
-          faltantes: faltantes.map((f) => ({
-            id_insumo: f.id_insumo,
-            nombre_insumo: f.nombre_insumo,
-            faltante: f.faltante,
-            unidad: f.unidad_insumo,
-            disponible: f.disponible,
-            requerido: f.requerido
-          }))
+          error: requiereActivacion
+            ? "Hay lotes desactivados con stock. Actívalos para completar la receta"
+            : "Inventario insuficiente para registrar la producción",
+          requiere_activar_lote: requiereActivacion,
+          faltantes
         });
       }
 
@@ -269,12 +467,68 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       if (descuentosAplicados.length > 0) {
         transmitir({ tipo: "inventario_actualizado", accion: "descontado", nombre_receta: nombreReceta, cantidad: cantidadProduccion });
       }
+
+      const ordenesCompraAutomaticas = [];
+      for (const ctx of contextosIngredientes.values()) {
+        const idInsumo = Number(ctx?.id_insumo || 0);
+        if (!Number.isFinite(idInsumo) || idInsumo <= 0) continue;
+
+        const contextoActual = await obtenerContextoLotesInsumo(bdInventario, idInsumo);
+        const baseActual = contextoActual?.base;
+        const lotesActuales = Array.isArray(contextoActual?.lotes) ? contextoActual.lotes : [];
+        if (!baseActual || !lotesActuales.length) continue;
+
+        const principalTotal = Number(baseActual?.cantidad_total || 0);
+        const principalDisponible = Number(baseActual?.cantidad_disponible || 0);
+        if (principalTotal <= 0 || principalDisponible <= 0) continue;
+
+        const principalPorcentaje = (principalDisponible / principalTotal) * 100;
+        if (principalPorcentaje > 20) continue;
+
+        const lotesAlternosConStock = lotesActuales.filter((l) => Number(l?.id || 0) !== Number(baseActual?.id || 0) && Number(l?.cantidad_disponible || 0) > 0);
+        if (lotesAlternosConStock.length > 0) {
+          const tieneAlternoInactivo = lotesAlternosConStock.some((l) => Number(l?.activo_consumo ?? 1) !== 1);
+          if (tieneAlternoInactivo) {
+            avisos.push({
+              tipo: 'lote_alterno_disponible',
+              id_insumo: Number(baseActual?.id || 0),
+              nombre_insumo: String(baseActual?.nombre || '').trim(),
+              mensaje: `Queda poco de ${String(baseActual?.nombre || '').trim()}. Hay otro lote disponible para activar.`
+            });
+          }
+          continue;
+        }
+
+        const cantidadSugerida = Math.max(1, principalTotal - principalDisponible);
+        const orden = await crearOrdenCompraAutomaticaInsumo(bdInventario, baseActual, cantidadSugerida);
+        if (!orden || orden?.ya_existia) continue;
+
+        ordenesCompraAutomaticas.push({
+          id_orden: Number(orden?.id_orden || 0),
+          numero_orden: String(orden?.numero_orden || '').trim(),
+          id_insumo: Number(baseActual?.id || 0),
+          nombre_insumo: String(baseActual?.nombre || '').trim(),
+          cantidad_requerida: Number(orden?.cantidad_requerida || 0)
+        });
+
+        transmitir({
+          tipo: "orden_compra_nueva",
+          id_orden: Number(orden?.id_orden || 0),
+          numero_orden: String(orden?.numero_orden || '').trim(),
+          proveedor: String(baseActual?.proveedor || '').trim() || "Sin proveedor",
+          total_items: 1
+        });
+      }
+
+      if (ordenesCompraAutomaticas.length > 0) {
+        transmitir({ tipo: "inventario_actualizado" });
+      }
       transmitir({ tipo: "produccion_actualizado", accion: "registrada", nombre_receta: nombreReceta, cantidad: cantidadProduccion });
       if (descuentosAplicados.length > 0) {
         transmitir({ tipo: "produccion_descuento", receta: nombreReceta, cantidad: cantidadProduccion, descuentos: descuentosAplicados });
       }
 
-      return res.json({ ok: true, descuentos: descuentosAplicados });
+      return res.json({ ok: true, descuentos: descuentosAplicados, avisos, ordenes_compra_automaticas: ordenesCompraAutomaticas });
     } catch {
       return res.status(500).json({ error: "Error en produccion" });
     }
@@ -309,6 +563,10 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       const produccionesPlan = [];
       const requeridosMap = new Map();
       const incompatibilidades = [];
+      const faltantes = [];
+      const avisos = [];
+      const consumoPlaneadoPorLote = new Map();
+      const contextosIngredientes = new Map();
 
       for (const item of items) {
         const recetaNombre = String(item?.receta_nombre || "").trim();
@@ -330,8 +588,9 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
           const idInsumo = Number(ing?.id_insumo);
           if (!Number.isFinite(idInsumo) || idInsumo <= 0) continue;
 
-          const insumo = await dbGet(bdInventario, "SELECT * FROM inventario WHERE id=?", [idInsumo]);
-          if (!insumo) continue;
+          const contexto = await obtenerContextoLotesInsumo(bdInventario, idInsumo);
+          if (!contexto?.base) continue;
+          const insumo = contexto.base;
 
           const unidadReceta = String(ing?.unidad || '').trim();
           const unidadInsumo = String(insumo?.unidad || '').trim();
@@ -347,26 +606,56 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
             continue;
           }
 
-          const existente = requeridosMap.get(idInsumo);
-          if (existente) {
-            existente.requerido += requerido;
-          } else {
-            requeridosMap.set(idInsumo, {
+          const planLotes = planearConsumoPorLotes(contexto, requerido, consumoPlaneadoPorLote);
+          contextosIngredientes.set(idInsumo, {
+            id_insumo: idInsumo,
+            base: insumo,
+            requerido,
+            disponible_activo: planLotes.disponible_activo,
+            disponible_inactivo: planLotes.disponible_inactivo,
+            tiene_lotes_inactivos: planLotes.tiene_lotes_inactivos,
+            aviso_lote_alterno: planLotes.aviso_lote_alterno
+          });
+
+          if (planLotes.faltante > 1e-9) {
+            faltantes.push({
+              receta: recetaNombre,
               id_insumo: idInsumo,
-              nombre_insumo: String(insumo?.nombre || "").trim() || `Insumo #${idInsumo}`,
-              unidad_insumo: String(insumo?.unidad || "").trim(),
-              costo_por_unidad: Number(insumo?.costo_por_unidad) || 0,
+              nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              faltante: planLotes.faltante,
+              unidad: String(insumo?.unidad || '').trim(),
+              disponible: planLotes.disponible_activo,
               requerido,
-              disponible: Number(insumo?.cantidad_disponible) || 0
+              requiere_activar_lote: Boolean(planLotes.tiene_lotes_inactivos)
             });
+            continue;
           }
 
-          descuentosReceta.push({
-            id_insumo: idInsumo,
-            unidad_insumo: String(insumo?.unidad || "").trim(),
-            costo_por_unidad: Number(insumo?.costo_por_unidad) || 0,
-            requerido
+          planLotes.consumos.forEach((consumo) => {
+            const existente = requeridosMap.get(Number(consumo?.id_insumo || 0));
+            if (existente) {
+              existente.requerido += Number(consumo?.requerido || 0);
+            } else {
+              requeridosMap.set(Number(consumo?.id_insumo || 0), {
+                id_insumo: Number(consumo?.id_insumo || 0),
+                nombre_insumo: String(consumo?.nombre_insumo || '').trim(),
+                unidad_insumo: String(consumo?.unidad_insumo || '').trim(),
+                costo_por_unidad: Number(consumo?.costo_por_unidad) || 0,
+                requerido: Number(consumo?.requerido || 0)
+              });
+            }
           });
+
+          descuentosReceta.push(...planLotes.consumos);
+
+          if (planLotes.aviso_lote_alterno) {
+            avisos.push({
+              tipo: 'lote_alterno_disponible',
+              id_insumo: idInsumo,
+              nombre_insumo: String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`,
+              mensaje: `El lote activo de ${String(insumo?.nombre || '').trim() || `Insumo #${idInsumo}`} está bajo y hay otro lote disponible para activar.`
+            });
+          }
         }
 
         produccionesPlan.push({
@@ -390,26 +679,13 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         return res.status(400).json({ error: "No se encontraron recetas válidas para producir" });
       }
 
-      const faltantes = [];
-      for (const reqInsumo of requeridosMap.values()) {
-        const faltante = reqInsumo.requerido > reqInsumo.disponible
-          ? (reqInsumo.requerido - reqInsumo.disponible)
-          : 0;
-        if (faltante > 0) {
-          faltantes.push({
-            id_insumo: reqInsumo.id_insumo,
-            nombre_insumo: reqInsumo.nombre_insumo,
-            faltante,
-            unidad: reqInsumo.unidad_insumo,
-            disponible: reqInsumo.disponible,
-            requerido: reqInsumo.requerido
-          });
-        }
-      }
-
       if (faltantes.length) {
+        const requiereActivacion = faltantes.some((f) => Boolean(f?.requiere_activar_lote));
         return res.status(400).json({
-          error: "Inventario insuficiente para registrar la producción del paquete",
+          error: requiereActivacion
+            ? "Hay lotes desactivados con stock. Actívalos para completar la receta"
+            : "Inventario insuficiente para registrar la producción del paquete",
+          requiere_activar_lote: requiereActivacion,
           faltantes
         });
       }
@@ -452,6 +728,62 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
         );
       }
 
+      const ordenesCompraAutomaticas = [];
+      for (const ctx of contextosIngredientes.values()) {
+        const idInsumo = Number(ctx?.id_insumo || 0);
+        if (!Number.isFinite(idInsumo) || idInsumo <= 0) continue;
+
+        const contextoActual = await obtenerContextoLotesInsumo(bdInventario, idInsumo);
+        const baseActual = contextoActual?.base;
+        const lotesActuales = Array.isArray(contextoActual?.lotes) ? contextoActual.lotes : [];
+        if (!baseActual || !lotesActuales.length) continue;
+
+        const principalTotal = Number(baseActual?.cantidad_total || 0);
+        const principalDisponible = Number(baseActual?.cantidad_disponible || 0);
+        if (principalTotal <= 0 || principalDisponible <= 0) continue;
+
+        const principalPorcentaje = (principalDisponible / principalTotal) * 100;
+        if (principalPorcentaje > 20) continue;
+
+        const lotesAlternosConStock = lotesActuales.filter((l) => Number(l?.id || 0) !== Number(baseActual?.id || 0) && Number(l?.cantidad_disponible || 0) > 0);
+        if (lotesAlternosConStock.length > 0) {
+          const tieneAlternoInactivo = lotesAlternosConStock.some((l) => Number(l?.activo_consumo ?? 1) !== 1);
+          if (tieneAlternoInactivo) {
+            avisos.push({
+              tipo: 'lote_alterno_disponible',
+              id_insumo: Number(baseActual?.id || 0),
+              nombre_insumo: String(baseActual?.nombre || '').trim(),
+              mensaje: `Queda poco de ${String(baseActual?.nombre || '').trim()}. Hay otro lote disponible para activar.`
+            });
+          }
+          continue;
+        }
+
+        const cantidadSugerida = Math.max(1, principalTotal - principalDisponible);
+        const orden = await crearOrdenCompraAutomaticaInsumo(bdInventario, baseActual, cantidadSugerida);
+        if (!orden || orden?.ya_existia) continue;
+
+        ordenesCompraAutomaticas.push({
+          id_orden: Number(orden?.id_orden || 0),
+          numero_orden: String(orden?.numero_orden || '').trim(),
+          id_insumo: Number(baseActual?.id || 0),
+          nombre_insumo: String(baseActual?.nombre || '').trim(),
+          cantidad_requerida: Number(orden?.cantidad_requerida || 0)
+        });
+
+        transmitir({
+          tipo: "orden_compra_nueva",
+          id_orden: Number(orden?.id_orden || 0),
+          numero_orden: String(orden?.numero_orden || '').trim(),
+          proveedor: String(baseActual?.proveedor || '').trim() || "Sin proveedor",
+          total_items: 1
+        });
+      }
+
+      if (ordenesCompraAutomaticas.length > 0) {
+        transmitir({ tipo: "inventario_actualizado" });
+      }
+
       transmitir({
         tipo: "inventario_actualizado",
         accion: "descontado",
@@ -473,7 +805,9 @@ export function registrarRutasProduccion(app, bdProduccion, bdRecetas, bdInventa
       return res.json({
         ok: true,
         total_producciones: produccionesPlan.length,
-        total_piezas: totalPiezas
+        total_piezas: totalPiezas,
+        avisos,
+        ordenes_compra_automaticas: ordenesCompraAutomaticas
       });
     } catch {
       return res.status(500).json({ error: "Error en produccion de paquete" });

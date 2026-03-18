@@ -18,6 +18,8 @@ let busquedaArchivoListaPrecios = '';
 let itemsOrdenTemporal = [];
 let proveedoresCatalogo = [];
 let proveedoresMaestros = [];
+let proveedorFiltroTexto = '';
+let proveedoresUsoMapa = new Map();
 let proveedorPendienteEliminar = null;
 let usoProveedorPendiente = { inventario: 0, utensilios: 0, total: 0 };
 let ordenesCompraCache = [];
@@ -349,6 +351,7 @@ async function eliminarArchivoListaPrecios(idArchivo) {
 function setTabOrdenes(tab) {
   tabOrdenesActiva = ['lista-insumos', 'nueva', 'ordenes', 'proveedores'].includes(tab) ? tab : 'lista-insumos';
   guardarTabPersistida(CLAVE_TAB_INVENTARIO_ORDENES, tabOrdenesActiva);
+  const barraBusquedaGeneral = document.getElementById('barraBusquedaOrdenesGeneral');
   const panelListaInsumos = document.getElementById('panelOrdenListaInsumos');
   const panelNueva = document.getElementById('panelOrdenNueva');
   const panelOrdenes = document.getElementById('panelOrdenesCompra');
@@ -363,6 +366,7 @@ function setTabOrdenes(tab) {
   if (panelNueva) panelNueva.style.display = tabOrdenesActiva === 'nueva' ? '' : 'none';
   if (panelOrdenes) panelOrdenes.style.display = tabOrdenesActiva === 'ordenes' ? '' : 'none';
   if (panelProveedores) panelProveedores.style.display = tabOrdenesActiva === 'proveedores' ? '' : 'none';
+  if (barraBusquedaGeneral) barraBusquedaGeneral.style.display = tabOrdenesActiva === 'proveedores' ? 'none' : '';
 
   if (btnListaInsumos) btnListaInsumos.classList.toggle('activo', tabOrdenesActiva === 'lista-insumos');
   if (btnNueva) btnNueva.classList.toggle('activo', tabOrdenesActiva === 'nueva');
@@ -486,7 +490,7 @@ async function cargarInventario() {
     }
 
     if (!lista.length) {
-      cuerpo.innerHTML = '<tr><td colspan="10" style="text-align:center">No hay insumos</td></tr>';
+      cuerpo.innerHTML = '<tr><td colspan="11" style="text-align:center">No hay insumos</td></tr>';
       return;
     }
 
@@ -495,11 +499,11 @@ async function cargarInventario() {
     agruparPorProveedor(lista).forEach((grupo) => {
       const filaGrupo = document.createElement('tr');
       filaGrupo.className = 'filaGrupoProveedorInventario';
-      filaGrupo.innerHTML = `<td colspan="10">Proveedor: ${escapeHtml(grupo.proveedor)}</td>`;
+      filaGrupo.innerHTML = `<td colspan="11">Proveedor: ${escapeHtml(grupo.proveedor)}</td>`;
       fragment.appendChild(filaGrupo);
 
       grupo.items.forEach((insumo) => {
-        const nombreInsumoSeguro = escaparParaInlineJs(insumo?.nombre);
+        const activoConsumo = Number(insumo?.activo_consumo ?? 1) === 1;
         const esPendiente = Number(insumo?.pendiente || 0) === 1;
         const porcentaje = Number(insumo.cantidad_total || 0) > 0
           ? Math.min(100, Math.max(0, (Number(insumo.cantidad_disponible || 0) / Number(insumo.cantidad_total || 0)) * 100))
@@ -516,10 +520,16 @@ async function cargarInventario() {
           <td>${Number(insumo.cantidad_disponible || 0).toFixed(2)}</td>
           <td>$${Number(insumo.costo_total || 0).toFixed(2)}</td>
           <td>$${Number(insumo.costo_por_unidad || 0).toFixed(2)}</td>
+          <td>
+            <label class="switchConsumoInventario" title="${activoConsumo ? 'Este lote participa en recetas' : 'Este lote NO participa en recetas'}">
+              <input type="checkbox" ${activoConsumo ? 'checked' : ''} onchange="window.inventario.cambiarActivoConsumo(${insumo.id}, this.checked)" />
+              <span class="sliderConsumoInventario"></span>
+            </label>
+          </td>
           <td><div class="barraPorcentaje"><div class="barraPorcentajeRelleno ${clase}" style="width:${porcentaje.toFixed(0)}%"></div><span class="textoPorcentaje">${porcentaje.toFixed(0)}%</span></div></td>
           <td>
             <button onclick="window.inventario.editarInsumo(${insumo.id})" class="botonPequeno">✏️</button>
-            <button onclick="window.inventario.mostrarHistorialInsumo(${insumo.id}, '${nombreInsumoSeguro}')" class="botonPequeno">📜</button>
+            <button data-nombre="${escapeHtml(insumo?.nombre || '')}" onclick="window.inventario.mostrarHistorialInsumoDesdeBoton(${insumo.id}, this)" class="botonPequeno">📜</button>
             <button onclick="window.inventario.eliminarInsumo(${insumo.id})" class="botonPequeno botonDanger">🗑️</button>
           </td>
         `;
@@ -1299,22 +1309,45 @@ async function cargarProveedoresMaestros() {
         }
       })
     );
-    const mapaUso = new Map(usos);
-    const cuerpo = document.getElementById('cuerpoTablaProveedores');
-    if (!cuerpo) return;
+    proveedoresUsoMapa = new Map(usos);
+    renderTablaProveedoresMaestros();
+  } catch (error) {
+    console.error(error);
+  }
+}
 
-    if (!proveedoresMaestros.length) {
-      cuerpo.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#777">Sin proveedores</td></tr>';
-      return;
-    }
+function renderTablaProveedoresMaestros() {
+  const cuerpo = document.getElementById('cuerpoTablaProveedores');
+  if (!cuerpo) return;
 
-    cuerpo.innerHTML = proveedoresMaestros.map((p) => `
+  const termino = normalizarTextoBusqueda(proveedorFiltroTexto);
+  const lista = (Array.isArray(proveedoresMaestros) ? proveedoresMaestros : [])
+    .filter((p) => {
+      if (!termino) return true;
+      const nombre = normalizarTextoBusqueda(p?.nombre || '');
+      const telefono = normalizarTextoBusqueda(p?.telefono || '');
+      const correo = normalizarTextoBusqueda(p?.correo || '');
+      const formaPago = normalizarTextoBusqueda(p?.forma_pago || '');
+      const direccion = normalizarTextoBusqueda(p?.direccion || '');
+      return nombre.includes(termino)
+        || telefono.includes(termino)
+        || correo.includes(termino)
+        || formaPago.includes(termino)
+        || direccion.includes(termino);
+    });
+
+  if (!lista.length) {
+    cuerpo.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#777">Sin proveedores para ese filtro</td></tr>';
+    return;
+  }
+
+  cuerpo.innerHTML = lista.map((p) => `
       <tr>
         <td>
           <div>${escapeHtml(p.nombre || '')}</div>
           <div style="margin-top:4px;font-size:11px;color:#666;display:inline-flex;gap:8px;align-items:center;padding:2px 8px;border:1px solid #ddd;border-radius:999px;background:#f7f7f7">
-            <span>📦 ${Number(mapaUso.get(Number(p.id || 0))?.inventario || 0)}</span>
-            <span>🧰 ${Number(mapaUso.get(Number(p.id || 0))?.utensilios || 0)}</span>
+            <span>📦 ${Number(proveedoresUsoMapa.get(Number(p.id || 0))?.inventario || 0)}</span>
+            <span>🧰 ${Number(proveedoresUsoMapa.get(Number(p.id || 0))?.utensilios || 0)}</span>
           </div>
         </td>
         <td>${escapeHtml(p.telefono || '-')}</td>
@@ -1332,9 +1365,11 @@ async function cargarProveedoresMaestros() {
         </td>
       </tr>
     `).join('');
-  } catch (error) {
-    console.error(error);
-  }
+}
+
+function filtrarProveedoresMaestros(valor) {
+  proveedorFiltroTexto = texto(valor).trim();
+  renderTablaProveedoresMaestros();
 }
 
 function abrirModalProveedores() {
@@ -1684,19 +1719,74 @@ async function eliminarInsumo(id) {
   }
 }
 
-async function mostrarHistorialInsumo(id, nombre) {
+async function cambiarActivoConsumo(id, activo) {
+  const idInsumo = Number(id || 0);
+  const activoNormalizado = activo ? 1 : 0;
+  if (!Number.isFinite(idInsumo) || idInsumo <= 0) {
+    mostrarNotificacion('No se pudo actualizar switch de consumo: ID inválido', 'error');
+    return;
+  }
+
   try {
-    const historial = await fetchAPIJSON(`${API}/inventario/${id}/historial`);
-    const cuerpo = document.getElementById('cuerpoHistorialInsumo');
-    const titulo = document.getElementById('tituloHistorialInsumo');
-    if (!cuerpo || !titulo) return;
-    titulo.textContent = `Historial de: ${nombre}`;
-    cuerpo.innerHTML = !historial.length
-      ? '<tr><td colspan="3" style="text-align:center">Sin movimientos</td></tr>'
-      : historial.map((item) => `<tr><td>${new Date(item.fecha_cambio).toLocaleString()}</td><td>${Number(item.cambio_cantidad || 0).toFixed(2)}</td><td>$${Number(item.cambio_costo || 0).toFixed(2)}</td></tr>`).join('');
-    abrirModal('modalHistorialInsumo');
+    const respuesta = await fetchAPI(`${API}/inventario/${idInsumo}/activo-consumo`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activo_consumo: activoNormalizado })
+    });
+    if (!respuesta.ok) {
+      throw new Error('No se pudo guardar switch');
+    }
+    await cargarInventario();
+    if (!activoNormalizado) {
+      mostrarNotificacion('Lote desactivado para consumo en recetas', 'info');
+    } else {
+      mostrarNotificacion('Lote activado para consumo en recetas', 'exito');
+    }
   } catch (error) {
     console.error(error);
+    mostrarNotificacion('No se pudo actualizar el switch de consumo', 'error');
+  }
+}
+
+function mostrarHistorialInsumoDesdeBoton(id, boton) {
+  const nombre = texto(boton?.dataset?.nombre || '').trim() || 'Insumo';
+  return mostrarHistorialInsumo(id, nombre);
+}
+
+async function mostrarHistorialInsumo(id, nombre) {
+  const idInsumo = Number(id || 0);
+  const cuerpo = document.getElementById('cuerpoHistorialInsumo');
+  const titulo = document.getElementById('tituloHistorialInsumo');
+  if (!cuerpo || !titulo) return;
+
+  if (!Number.isFinite(idInsumo) || idInsumo <= 0) {
+    titulo.textContent = `Historial de: ${nombre || 'Insumo'}`;
+    cuerpo.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#b23c3c">No se pudo identificar el insumo</td></tr>';
+    abrirModal('modalHistorialInsumo');
+    mostrarNotificacion('No se pudo abrir historial: ID inválido', 'error');
+    return;
+  }
+
+  titulo.textContent = `Historial de: ${nombre}`;
+  cuerpo.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#666">Cargando historial...</td></tr>';
+  abrirModal('modalHistorialInsumo');
+
+  try {
+    const respuesta = await fetchAPI(`${API}/inventario/${idInsumo}/historial`);
+    if (!respuesta.ok) {
+      const textoError = await respuesta.text();
+      throw new Error(textoError || 'No se pudo cargar historial');
+    }
+
+    const historial = await respuesta.json();
+    const lista = Array.isArray(historial) ? historial : [];
+    cuerpo.innerHTML = !lista.length
+      ? '<tr><td colspan="3" style="text-align:center">Sin movimientos</td></tr>'
+      : lista.map((item) => `<tr><td>${new Date(item.fecha_cambio).toLocaleString()}</td><td>${Number(item.cambio_cantidad || 0).toFixed(2)}</td><td>$${Number(item.cambio_costo || 0).toFixed(2)}</td></tr>`).join('');
+  } catch (error) {
+    console.error(error);
+    cuerpo.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#b23c3c">No se pudo cargar el historial</td></tr>';
+    mostrarNotificacion('No se pudo cargar historial del insumo', 'error');
   }
 }
 
@@ -1840,6 +1930,8 @@ export default function Inventario() {
       editarInsumo,
       guardarEditarInsumo,
       eliminarInsumo,
+      cambiarActivoConsumo,
+      mostrarHistorialInsumoDesdeBoton,
       mostrarHistorialInsumo,
       mostrarPendientesInventario,
       cerrarModalPendientesInventario,
@@ -1896,7 +1988,7 @@ export default function Inventario() {
         </div>
         <table>
           <thead>
-            <tr><th>Código</th><th>Nombre</th><th>Proveedor</th><th>Unidad</th><th>Cantidad Total</th><th>Disponible</th><th>Costo Total</th><th>Costo/Unidad</th><th>Porcentaje</th><th>Acciones</th></tr>
+            <tr><th>Código</th><th>Nombre</th><th>Proveedor</th><th>Unidad</th><th>Cantidad Total</th><th>Disponible</th><th>Costo Total</th><th>Costo/Unidad</th><th>Activo en recetas</th><th>Porcentaje</th><th>Acciones</th></tr>
           </thead>
           <tbody id="cuerpoInventario"></tbody>
         </table>
@@ -1915,7 +2007,7 @@ export default function Inventario() {
         </div>
 
         <div className="bloqueOrdenCompraInventario">
-          <div className="filaOrdenCompraInventario">
+          <div id="barraBusquedaOrdenesGeneral" className="filaOrdenCompraInventario">
             <input id="buscarOrdenesGeneral" type="text" placeholder="Buscar por proveedor, código o insumo..." onChange={() => { renderListaInsumosOrden(); cargarOrdenesRegistradas(); cargarHistorialOrdenesSurtidas(); }} />
           </div>
 
@@ -1989,7 +2081,16 @@ export default function Inventario() {
             <h3>Proveedores</h3>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '10px' }}>
               <p style={{ margin: 0, color: '#555' }}>Lista de proveedores registrados</p>
-              <button className="boton" type="button" onClick={() => abrirModalProveedores()}>+ Nuevo proveedor</button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <input
+                  id="buscarProveedoresMaestros"
+                  type="text"
+                  placeholder="Buscar proveedor..."
+                  onChange={(e) => filtrarProveedoresMaestros(e.target.value)}
+                  style={{ minWidth: '220px' }}
+                />
+                <button className="boton" type="button" onClick={() => abrirModalProveedores()}>+ Nuevo proveedor</button>
+              </div>
             </div>
             <table>
               <thead><tr><th>Nombre</th><th>Teléfono</th><th>Correo</th><th>Forma de pago</th><th>Dirección</th><th></th></tr></thead>
@@ -2242,12 +2343,12 @@ export default function Inventario() {
             <p id="surtirOcSubtitulo" style={{ margin: '0 0 6px 0', color: '#555' }}></p>
             <p id="surtirOcEstadoLote" style={{ margin: '0 0 10px 0', color: '#666', fontSize: '12px' }}></p>
 
-            <div className="filaFormulario" style={{ display: 'grid', gap: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="filaFormulario surtirOcModoFila">
+              <label className="surtirOcModoOpcion">
                 <input id="surtirOcModoCompleto" name="surtirOcModo" type="radio" defaultChecked onChange={cambiarModoCantidadSurtido} />
                 Surtir cantidad faltante completa
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label className="surtirOcModoOpcion">
                 <input id="surtirOcModoOtro" name="surtirOcModo" type="radio" onChange={cambiarModoCantidadSurtido} />
                 Surtir otra cantidad
               </label>

@@ -32,6 +32,8 @@ const CLAVE_MP_CHECKOUT_PENDIENTE = 'chipactli:tienda:mp-checkout-pendiente';
 const CLAVE_VISITA_SESION_ID = 'chipactli:visita:sesion-id';
 const OCULTAR_MERCADO_PAGO = true;
 const EXPIRACION_CARRITO_INVITADO_MS = 24 * 60 * 60 * 1000;
+const SINCRONIZACION_CARRITO_DEBOUNCE_MS = 400;
+const SINCRONIZACION_CARRITO_PULL_MS = 9000;
 const SECCIONES_INFO_LINKS = [
   { idx: 2, titulo: 'Nosotros' },
   { idx: 4, titulo: 'Términos y condiciones' },
@@ -621,25 +623,26 @@ function pintarHojitas(calificacion = 0) {
 
 function cargarCarritoGuardado(esCliente) {
   if (typeof window === 'undefined') {
-    return { items: [], creadoEn: Date.now() };
+    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
   }
 
   try {
     const raw = localStorage.getItem(CLAVE_CARRITO_TIENDA);
-    if (!raw) return { items: [], creadoEn: Date.now() };
+    if (!raw) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
 
     const parsed = JSON.parse(raw);
     const items = Array.isArray(parsed?.items) ? parsed.items : [];
     const creadoEn = Number(parsed?.creadoEn) || Date.now();
-    if (!items.length) return { items: [], creadoEn: Date.now() };
+    const actualizadoEn = Number(parsed?.actualizadoEn) || Date.now();
+    if (!items.length) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
 
     if (!esCliente && (Date.now() - creadoEn > EXPIRACION_CARRITO_INVITADO_MS)) {
-      return { items: [], creadoEn: Date.now() };
+      return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
     }
 
-    return { items, creadoEn };
+    return { items, creadoEn, actualizadoEn };
   } catch {
-    return { items: [], creadoEn: Date.now() };
+    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
   }
 }
 
@@ -655,6 +658,46 @@ function guardarCarritoGuardado(items, creadoEn) {
     creadoEn: Number(creadoEn) || Date.now(),
     actualizadoEn: Date.now()
   }));
+}
+
+function normalizarItemCarritoCliente(item) {
+  const clave = String(item?.clave || '').trim();
+  const nombreReceta = String(item?.nombre_receta || '').trim();
+  if (!clave || !nombreReceta) return null;
+
+  const cantidad = Math.max(1, Math.min(999, Number(item?.cantidad) || 1));
+  const precioUnitario = Math.max(0, Number(item?.precio_unitario) || 0);
+  return {
+    clave,
+    nombre_receta: nombreReceta,
+    nombre_base: String(item?.nombre_base || '').trim(),
+    categoria_nombre: String(item?.categoria_nombre || '').trim(),
+    descripcion_mp: String(item?.descripcion_mp || '').trim(),
+    slug: String(item?.slug || '').trim(),
+    variante: String(item?.variante || '').trim(),
+    cantidad,
+    precio_unitario: precioUnitario,
+    subtotal: Number((cantidad * precioUnitario).toFixed(2))
+  };
+}
+
+function normalizarListaCarritoCliente(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => normalizarItemCarritoCliente(item))
+    .filter(Boolean)
+    .slice(0, 250);
+}
+
+function serializarCarritoCliente(items) {
+  return JSON.stringify(normalizarListaCarritoCliente(items));
+}
+
+function marcaTiempoMs(valor) {
+  if (typeof valor === 'number' && Number.isFinite(valor) && valor > 0) return valor;
+  if (!valor) return 0;
+  const ms = Date.parse(String(valor));
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function extraerIdClienteToken(token) {
@@ -814,6 +857,7 @@ export default function Tienda({
     diaConMasVisitas: { fecha: '', visitas: 0, eventos: 0 }
   });
   const [fechaVisitaSeleccionada, setFechaVisitaSeleccionada] = useState(() => fechaLocalIsoHoy());
+  const [paginaHorasResumen, setPaginaHorasResumen] = useState(0);
   const [metricasSubVista, setMetricasSubVista] = useState('visitas');
   const [comportamientoVisitasAdmin, setComportamientoVisitasAdmin] = useState({
     cargando: false,
@@ -835,6 +879,12 @@ export default function Tienda({
   const estadoOrdenesClienteRef = useRef(new Map());
   const estadoOrdenesInicializadoRef = useRef(false);
   const confirmandoPagoMpRef = useRef(false);
+  const hidratandoCarritoServidorRef = useRef(false);
+  const guardandoCarritoServidorRef = useRef(false);
+  const debounceCarritoServidorRef = useRef(null);
+  const snapshotCarritoServidorRef = useRef('[]');
+  const actualizadoCarritoServidorMsRef = useRef(0);
+  const ultimoCambioCarritoLocalMsRef = useRef(Date.now());
 
   const totalNoLeidasCliente = useMemo(() => (
     (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
@@ -917,18 +967,50 @@ export default function Tienda({
     return Boolean(fechaResumen) && fechaResumen === fechaLocalIsoHoy();
   }, [resumenVisitasAdmin?.fecha, fechaVisitaSeleccionada]);
 
-  const topHorasResumenVisitas = useMemo(() => {
+  const horasResumenCompletas = useMemo(() => {
     const horaActual = new Date().getHours();
-    return (resumenVisitasAdmin.porHora || [])
-      .filter((item) => Number(item?.total) > 0)
-      .filter((item) => {
-        if (!esFechaResumenHoy) return true;
-        const hora = Number(String(item?.hora || '00').slice(0, 2));
-        return Number.isFinite(hora) && hora <= horaActual;
-      })
-      .sort((a, b) => Number(b?.total) - Number(a?.total))
-      .slice(0, 8);
+    const acumulado = new Map();
+
+    (resumenVisitasAdmin.porHora || []).forEach((item) => {
+      const hora = Number(String(item?.hora || '00').slice(0, 2));
+      if (!Number.isFinite(hora) || hora < 0 || hora > 23) return;
+      const totalActual = Number(acumulado.get(hora) || 0);
+      const totalNuevo = Number(item?.total) || 0;
+      acumulado.set(hora, totalActual + totalNuevo);
+    });
+
+    return Array.from({ length: 24 }, (_, hora) => {
+      const futura = esFechaResumenHoy && hora > horaActual;
+      const totalBase = Number(acumulado.get(hora) || 0);
+      return {
+        hora,
+        horaInicio: `${String(hora).padStart(2, '0')}:00`,
+        horaFin: `${String(Math.min(23, hora)).padStart(2, '0')}:59`,
+        total: futura ? 0 : totalBase,
+        esHoraActual: esFechaResumenHoy && hora === horaActual,
+        esFutura: futura
+      };
+    });
   }, [resumenVisitasAdmin.porHora, esFechaResumenHoy]);
+
+  const totalPaginasHorasResumen = useMemo(
+    () => Math.max(1, Math.ceil(horasResumenCompletas.length / 6)),
+    [horasResumenCompletas]
+  );
+
+  const paginaHorasResumenSegura = Math.max(0, Math.min(paginaHorasResumen, totalPaginasHorasResumen - 1));
+
+  const horasResumenPaginadas = useMemo(() => {
+    const inicio = paginaHorasResumenSegura * 6;
+    return horasResumenCompletas.slice(inicio, inicio + 6);
+  }, [horasResumenCompletas, paginaHorasResumenSegura]);
+
+  const etiquetaRangoHorasPagina = useMemo(() => {
+    if (!horasResumenPaginadas.length) return '00:00 - 05:59';
+    const primero = horasResumenPaginadas[0];
+    const ultimo = horasResumenPaginadas[horasResumenPaginadas.length - 1];
+    return `${primero.horaInicio} - ${ultimo.horaFin}`;
+  }, [horasResumenPaginadas]);
 
   const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
   const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
@@ -1114,6 +1196,10 @@ export default function Tienda({
 
     return () => window.clearInterval(intervalo);
   }, [esVistaTrastienda, tokenInterno, adminVista, historialVisitasAdmin.rangoDias, fechaVisitaSeleccionada]);
+
+  useEffect(() => {
+    setPaginaHorasResumen(0);
+  }, [fechaVisitaSeleccionada]);
 
   useEffect(() => {
     if (esVistaTrastienda) return;
@@ -1873,6 +1959,14 @@ export default function Tienda({
       setCliente(null);
       setOrdenes([]);
       setDireccionesPerfil([]);
+      hidratandoCarritoServidorRef.current = false;
+      guardandoCarritoServidorRef.current = false;
+      snapshotCarritoServidorRef.current = '[]';
+      actualizadoCarritoServidorMsRef.current = 0;
+      if (debounceCarritoServidorRef.current) {
+        clearTimeout(debounceCarritoServidorRef.current);
+        debounceCarritoServidorRef.current = null;
+      }
       setMostrarPromptNotificacionesPedidos(false);
       setNotificacionesClientePedidos([]);
       estadoOrdenesClienteRef.current = new Map();
@@ -1885,6 +1979,7 @@ export default function Tienda({
     cargarMisOrdenes(clienteToken);
     cargarNotificacionesCliente(clienteToken);
     cargarDireccionesPerfil(clienteToken);
+    cargarCarritoServidor(clienteToken, { fusionarLocal: true, aplicarEstado: true, silencioso: true });
   }, [clienteToken]);
 
   useEffect(() => {
@@ -1901,9 +1996,45 @@ export default function Tienda({
   useEffect(() => {
     if (!clienteToken) return undefined;
 
+    const refrescar = async () => {
+      if (guardandoCarritoServidorRef.current) return;
+      const ultimoCambioLocal = Number(ultimoCambioCarritoLocalMsRef.current) || 0;
+      if (Date.now() - ultimoCambioLocal < 1200) return;
+
+      const data = await cargarCarritoServidor(clienteToken, {
+        fusionarLocal: false,
+        aplicarEstado: false,
+        silencioso: true
+      });
+      if (!data) return;
+
+      const snapshotRemoto = serializarCarritoCliente(data.items || []);
+      const snapshotLocal = serializarCarritoCliente(carrito);
+      if (snapshotRemoto === snapshotLocal) return;
+
+      hidratandoCarritoServidorRef.current = true;
+      setCarrito(normalizarListaCarritoCliente(data.items || []));
+      setCarritoCreadoEn(Number(data.creadoEn) || Date.now());
+      window.setTimeout(() => {
+        hidratandoCarritoServidorRef.current = false;
+      }, 0);
+    };
+
+    const intervalo = setInterval(refrescar, SINCRONIZACION_CARRITO_PULL_MS);
+    return () => clearInterval(intervalo);
+  }, [clienteToken, carrito]);
+
+  useEffect(() => {
+    if (!clienteToken) return undefined;
+
     const alVolverVisible = () => {
       if (document.visibilityState === 'visible') {
         cargarMisOrdenes(clienteToken);
+        cargarCarritoServidor(clienteToken, {
+          fusionarLocal: false,
+          aplicarEstado: true,
+          silencioso: true
+        });
       }
     };
 
@@ -1956,6 +2087,32 @@ export default function Tienda({
       return;
     }
     guardarCarritoGuardado(carrito, carritoCreadoEn);
+  }, [carrito, carritoCreadoEn, clienteToken]);
+
+  useEffect(() => {
+    ultimoCambioCarritoLocalMsRef.current = Date.now();
+    if (!clienteToken) return undefined;
+    if (hidratandoCarritoServidorRef.current) return undefined;
+
+    const snapshotLocal = serializarCarritoCliente(carrito);
+    if (snapshotLocal === snapshotCarritoServidorRef.current && !guardandoCarritoServidorRef.current) {
+      return undefined;
+    }
+
+    if (debounceCarritoServidorRef.current) {
+      clearTimeout(debounceCarritoServidorRef.current);
+    }
+
+    debounceCarritoServidorRef.current = setTimeout(() => {
+      guardarCarritoServidor(carrito, carritoCreadoEn, clienteToken, true);
+    }, SINCRONIZACION_CARRITO_DEBOUNCE_MS);
+
+    return () => {
+      if (debounceCarritoServidorRef.current) {
+        clearTimeout(debounceCarritoServidorRef.current);
+        debounceCarritoServidorRef.current = null;
+      }
+    };
   }, [carrito, carritoCreadoEn, clienteToken]);
 
   const productosFiltrados = useMemo(() => {
@@ -2602,6 +2759,93 @@ export default function Tienda({
     }
   }
 
+  async function guardarCarritoServidor(items, creadoEn, token = clienteToken, silencioso = true) {
+    if (!token) return null;
+
+    const itemsNormalizados = normalizarListaCarritoCliente(items);
+    guardandoCarritoServidorRef.current = true;
+    try {
+      const data = await fetchJson('/tienda/auth/carrito', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          items: itemsNormalizados,
+          creado_en: Number(creadoEn) || Date.now()
+        })
+      });
+
+      snapshotCarritoServidorRef.current = serializarCarritoCliente(data?.items || itemsNormalizados);
+      actualizadoCarritoServidorMsRef.current = marcaTiempoMs(data?.actualizado_en);
+      return data;
+    } catch (error) {
+      if (!silencioso) {
+        mostrarNotificacion(error?.message || 'No se pudo sincronizar el carrito', 'error');
+      }
+      return null;
+    } finally {
+      guardandoCarritoServidorRef.current = false;
+    }
+  }
+
+  async function cargarCarritoServidor(token = clienteToken, opciones = {}) {
+    if (!token) return null;
+
+    const fusionarLocal = Boolean(opciones?.fusionarLocal);
+    const aplicarEstado = opciones?.aplicarEstado !== false;
+    const silencioso = opciones?.silencioso !== false;
+
+    try {
+      const data = await fetchJson('/tienda/auth/carrito', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const itemsServidor = normalizarListaCarritoCliente(data?.items || []);
+      const creadoServidor = Number(data?.creado_en) || Date.now();
+      const actualizadoServidorMs = marcaTiempoMs(data?.actualizado_en);
+
+      let itemsFinales = itemsServidor;
+      let creadoFinal = creadoServidor;
+
+      if (fusionarLocal) {
+        const carritoLocal = cargarCarritoGuardado(true);
+        const itemsLocal = normalizarListaCarritoCliente(carritoLocal?.items || []);
+        const actualizadoLocalMs = marcaTiempoMs(carritoLocal?.actualizadoEn);
+        const sonIguales = serializarCarritoCliente(itemsLocal) === serializarCarritoCliente(itemsServidor);
+
+        if (!sonIguales && itemsLocal.length && (!itemsServidor.length || actualizadoLocalMs > actualizadoServidorMs)) {
+          itemsFinales = itemsLocal;
+          creadoFinal = Number(carritoLocal?.creadoEn) || Date.now();
+          await guardarCarritoServidor(itemsFinales, creadoFinal, token, true);
+        }
+      }
+
+      if (aplicarEstado) {
+        hidratandoCarritoServidorRef.current = true;
+        setCarrito(itemsFinales);
+        setCarritoCreadoEn(Number(creadoFinal) || Date.now());
+        window.setTimeout(() => {
+          hidratandoCarritoServidorRef.current = false;
+        }, 0);
+      }
+
+      snapshotCarritoServidorRef.current = serializarCarritoCliente(itemsFinales);
+      actualizadoCarritoServidorMsRef.current = Math.max(actualizadoServidorMs, actualizadoCarritoServidorMsRef.current);
+      return {
+        items: itemsFinales,
+        creadoEn: creadoFinal,
+        actualizadoMs: actualizadoServidorMs
+      };
+    } catch (error) {
+      if (!silencioso) {
+        mostrarNotificacion(error?.message || 'No se pudo cargar el carrito sincronizado', 'error');
+      }
+      return null;
+    }
+  }
+
   async function agregarDireccionPerfil() {
     if (!clienteToken || guardandoDireccionPerfil) return;
     const direccion = String(direccionPerfilNueva?.direccion || '').trim();
@@ -2877,6 +3121,17 @@ export default function Tienda({
             mensaje: mensajeDomicilio,
             tag: `tienda:domicilio:${Date.now()}`,
             sonido: sonidoNotificacionesPedidos
+          });
+        }
+      }
+
+      if (clienteToken && tipo === 'tienda_carrito_actualizado') {
+        const idClienteEvento = Number(event?.detail?.id_cliente) || 0;
+        if (!idClienteActual || !idClienteEvento || idClienteEvento === idClienteActual) {
+          cargarCarritoServidor(clienteToken, {
+            fusionarLocal: false,
+            aplicarEstado: true,
+            silencioso: true
           });
         }
       }
@@ -4675,16 +4930,52 @@ export default function Tienda({
                       </div>
 
                       <div className="tiendaMetricasBloque">
-                        <h4>Visitas por horario (hoy)</h4>
+                        <div className="tiendaMetricasHorasHeader">
+                          <h4>Visitas por horario (24 horas)</h4>
+                          <div className="tiendaMetricasHorasNavegacion">
+                            <button
+                              type="button"
+                              className="tiendaMetricasHorasFlecha"
+                              onClick={() => setPaginaHorasResumen((prev) => Math.max(0, prev - 1))}
+                              disabled={paginaHorasResumenSegura <= 0}
+                              aria-label="Ver bloque horario anterior"
+                            >
+                              ◀
+                            </button>
+                            <span className="tiendaMetricasHorasRango">
+                              {etiquetaRangoHorasPagina}
+                              {' · '}
+                              Pág. {paginaHorasResumenSegura + 1}/{totalPaginasHorasResumen}
+                            </span>
+                            <button
+                              type="button"
+                              className="tiendaMetricasHorasFlecha"
+                              onClick={() => setPaginaHorasResumen((prev) => Math.min(totalPaginasHorasResumen - 1, prev + 1))}
+                              disabled={paginaHorasResumenSegura >= totalPaginasHorasResumen - 1}
+                              aria-label="Ver bloque horario siguiente"
+                            >
+                              ▶
+                            </button>
+                          </div>
+                        </div>
                         <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
-                          {topHorasResumenVisitas
+                          {horasResumenPaginadas
                             .map((item, idx) => (
-                              <li key={`hora-top-${idx}-${item?.hora || '00:00'}`}>
-                                <span>{item?.hora || '00:00'} - {String(Math.min(23, (Number(String(item?.hora || '00').slice(0, 2)) || 0))).padStart(2, '0')}:59</span>
+                              <li
+                                key={`hora-pag-${idx}-${item?.horaInicio || '00:00'}`}
+                                className={[
+                                  item?.esHoraActual ? 'tiendaHoraActual' : '',
+                                  item?.esFutura ? 'tiendaHoraFutura' : ''
+                                ].filter(Boolean).join(' ')}
+                              >
+                                <span>
+                                  {item?.horaInicio || '00:00'} - {item?.horaFin || '00:59'}
+                                  {item?.esHoraActual ? ' (hora actual)' : ''}
+                                </span>
                                 <strong>{Number(item?.total) || 0}</strong>
                               </li>
                             ))}
-                          {!topHorasResumenVisitas.length && <li><span>Sin datos todavía</span></li>}
+                          {!horasResumenPaginadas.length && <li><span>Sin datos todavía</span></li>}
                         </ul>
                       </div>
                     </div>
@@ -5059,30 +5350,6 @@ export default function Tienda({
                     </div>
                   </div>
 
-                  <div className="tiendaAdminHorariosBox">
-                    <strong>Diagnóstico de correo</strong>
-                    <div className="tiendaAdminSubtexto" style={{ marginTop: '6px' }}>
-                      Envía una prueba SMTP para validar que Gmail está configurado correctamente.
-                    </div>
-                    <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
-                      <label htmlFor="cfgCorreoDiagnostico">Correo destino</label>
-                      <input
-                        id="cfgCorreoDiagnostico"
-                        type="email"
-                        placeholder="correo@dominio.com"
-                        value={correoDiagnosticoDestino}
-                        onChange={(e) => setCorreoDiagnosticoDestino(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="boton"
-                        onClick={enviarDiagnosticoCorreoAdmin}
-                        disabled={enviandoCorreoDiagnostico}
-                      >
-                        {enviandoCorreoDiagnostico ? 'Enviando prueba...' : 'Enviar correo de diagnóstico'}
-                      </button>
-                    </div>
-                  </div>
                 </>
               )}
 
@@ -5161,6 +5428,27 @@ export default function Tienda({
                       onChange={(e) => setConfigTiendaAdmin((p) => ({ ...p, correo_diagnostico_cuerpo: e.target.value }))}
                     />
                     <div className="tiendaAdminSubtexto">Variables sugeridas: {'{{nombre_admin}}'}, {'{{fecha}}'}, {'{{smtp_host}}'}, {'{{smtp_user}}'}, {'{{etiqueta_sufijo}}'}</div>
+                    <div className="tiendaAdminSubtexto" style={{ marginTop: '10px' }}>
+                      Envía una prueba SMTP para validar que Gmail está configurado correctamente.
+                    </div>
+                    <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
+                      <label htmlFor="cfgCorreoDiagnostico">Correo destino</label>
+                      <input
+                        id="cfgCorreoDiagnostico"
+                        type="email"
+                        placeholder="correo@dominio.com"
+                        value={correoDiagnosticoDestino}
+                        onChange={(e) => setCorreoDiagnosticoDestino(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="boton"
+                        onClick={enviarDiagnosticoCorreoAdmin}
+                        disabled={enviandoCorreoDiagnostico}
+                      >
+                        {enviandoCorreoDiagnostico ? 'Enviando prueba...' : 'Enviar correo de diagnóstico'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="tiendaAdminHorariosBox tiendaAdminHorariosBoxCampana">

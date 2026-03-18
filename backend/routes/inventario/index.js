@@ -4,6 +4,18 @@ function normalizarUnidadInsumo(unidad) {
   return normalizarUnidad(unidad);
 }
 
+function normalizarPrioridadConsumo(valor) {
+  const prioridad = String(valor || '').trim().toLowerCase();
+  if (prioridad === 'prioritario') return 'prioritario';
+  if (prioridad === 'reserva') return 'reserva';
+  return 'normal';
+}
+
+function normalizarActivoConsumo(valor) {
+  if (valor === false || Number(valor) === 0 || String(valor || '').trim().toLowerCase() === 'false') return 0;
+  return 1;
+}
+
 function dbRun(db, sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function onRun(err) {
@@ -49,7 +61,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
 
   app.get('/inventario', (req, res) => {
     const termino = (req.query.busqueda || '').trim();
-    const select = 'id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente';
+    const select = 'id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente, prioridad_consumo, activo_consumo';
     const consulta = `SELECT ${select} FROM inventario ORDER BY COALESCE(NULLIF(TRIM(proveedor), ''), 'ZZZ'), nombre`;
 
     bdInventario.all(consulta, (e, r) => {
@@ -485,13 +497,16 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
 
   app.post('/inventario/agregar', (req, res) => {
     const { codigo, nombre, proveedor, unidad, cantidad, costo, pendiente } = req.body;
+    const prioridadConsumo = normalizarPrioridadConsumo(req.body?.prioridad_consumo);
+    const activoConsumo = normalizarActivoConsumo(req.body?.activo_consumo);
+    const proveedorNormalizado = String(proveedor || '').trim();
     if (pendiente === true || pendiente === 1) {
       if (!nombre) return res.status(400).json({ error: 'Falta el nombre' });
       const codigoPendiente = codigo || (`PEND-${Date.now()}`);
       bdInventario.run(
-        `INSERT INTO inventario (codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
-         VALUES (?,?,?,?,?,?,?,?,1)`,
-        [codigoPendiente, nombre, String(proveedor || '').trim(), unidad || '', 0, 0, 0, 0],
+        `INSERT INTO inventario (codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente, prioridad_consumo, activo_consumo)
+         VALUES (?,?,?,?,?,?,?,?,1,?,?)`,
+        [codigoPendiente, nombre, proveedorNormalizado, unidad || '', 0, 0, 0, 0, prioridadConsumo, activoConsumo],
         function () {
           transmitir({ tipo: 'inventario_actualizado', accion: 'agregado', nombre_insumo: String(nombre || '').trim() });
           res.json({ ok: true, id: this.lastID });
@@ -505,13 +520,18 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
       return res.status(400).json({ error: 'Datos incompletos' });
     }
 
-    bdInventario.get('SELECT * FROM inventario WHERE codigo=?', [codigo], (e, insumo) => {
+    bdInventario.get(
+      `SELECT * FROM inventario
+       WHERE codigo=?
+         AND LOWER(TRIM(COALESCE(proveedor, ''))) = LOWER(TRIM(?))`,
+      [codigo, proveedorNormalizado],
+      (e, insumo) => {
       if (!insumo) {
         const costoPorUnidad = cantidad > 0 ? costo / cantidad : 0;
         bdInventario.run(
-          `INSERT INTO inventario (codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente)
-           VALUES (?,?,?,?,?,?,?,?,0)`,
-          [codigo, nombre, String(proveedor || '').trim(), unidadNormalizada, cantidad, cantidad, costo, costoPorUnidad],
+          `INSERT INTO inventario (codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente, prioridad_consumo, activo_consumo)
+           VALUES (?,?,?,?,?,?,?,?,0,?,?)`,
+          [codigo, nombre, proveedorNormalizado, unidadNormalizada, cantidad, cantidad, costo, costoPorUnidad, prioridadConsumo, activoConsumo],
           function () {
             const idInv = this.lastID;
             bdInventario.run(
@@ -529,10 +549,16 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
         const nuevaCantidadDisponible = (insumo.cantidad_disponible || 0) + cantidad;
         const nuevoCostoTotal = (insumo.costo_total || 0) + costo;
         const costoPorUnidad = nuevaCantidadTotal > 0 ? nuevoCostoTotal / nuevaCantidadTotal : 0;
+        const prioridadFinal = req.body?.prioridad_consumo == null
+          ? normalizarPrioridadConsumo(insumo?.prioridad_consumo)
+          : prioridadConsumo;
+        const activoConsumoFinal = req.body?.activo_consumo == null
+          ? normalizarActivoConsumo(insumo?.activo_consumo)
+          : activoConsumo;
 
         bdInventario.run(
-          'UPDATE inventario SET nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=? WHERE id=?',
-          [nombre, String(proveedor || insumo.proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaCantidadDisponible, nuevoCostoTotal, costoPorUnidad, insumo.id],
+          'UPDATE inventario SET nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=?, prioridad_consumo=?, activo_consumo=? WHERE id=?',
+          [nombre, String(proveedor || insumo.proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaCantidadDisponible, nuevoCostoTotal, costoPorUnidad, prioridadFinal, activoConsumoFinal, insumo.id],
           () => {
             bdInventario.run(
               'INSERT INTO historial_inventario (id_inventario, fecha_cambio, cambio_cantidad, cambio_costo) VALUES (?,?,?,?)',
@@ -545,7 +571,8 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
           }
         );
       }
-    });
+    }
+    );
   });
 
   app.post('/inventario/aumentar', (req, res) => {
@@ -1062,7 +1089,7 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
 
   app.get('/inventario/:id', (req, res) => {
     bdInventario.get(
-      'SELECT id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente FROM inventario WHERE id=?',
+      'SELECT id, codigo, nombre, proveedor, unidad, cantidad_total, cantidad_disponible, costo_total, costo_por_unidad, pendiente, prioridad_consumo, activo_consumo FROM inventario WHERE id=?',
       [req.params.id],
       (e, r) => {
         if (!r) return res.status(404).json({ error: 'No encontrado' });
@@ -1078,6 +1105,12 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
 
     bdInventario.get('SELECT * FROM inventario WHERE id=?', [id], (e, insumo) => {
       if (!insumo) return res.status(404).json({ error: 'No encontrado' });
+      const prioridadConsumo = req.body?.prioridad_consumo == null
+        ? normalizarPrioridadConsumo(insumo?.prioridad_consumo)
+        : normalizarPrioridadConsumo(req.body?.prioridad_consumo);
+      const activoConsumo = req.body?.activo_consumo == null
+        ? normalizarActivoConsumo(insumo?.activo_consumo)
+        : normalizarActivoConsumo(req.body?.activo_consumo);
 
       const nuevaCantidadTotal = Number(cantidad_total) || 0;
       const nuevoCostoTotal = Number(costo_total) || 0;
@@ -1089,11 +1122,11 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
       let updateQuery;
       let updateParams;
       if (insumo.pendiente && codigo && codigo !== insumo.codigo) {
-        updateQuery = 'UPDATE inventario SET codigo=?, nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=?, pendiente=0 WHERE id=?';
-        updateParams = [codigo, nombre, String(proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, id];
+        updateQuery = 'UPDATE inventario SET codigo=?, nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=?, prioridad_consumo=?, activo_consumo=?, pendiente=0 WHERE id=?';
+        updateParams = [codigo, nombre, String(proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, prioridadConsumo, activoConsumo, id];
       } else {
-        updateQuery = 'UPDATE inventario SET nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=? WHERE id=?';
-        updateParams = [nombre, String(proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, id];
+        updateQuery = 'UPDATE inventario SET nombre=?, proveedor=?, unidad=?, cantidad_total=?, cantidad_disponible=?, costo_total=?, costo_por_unidad=?, prioridad_consumo=?, activo_consumo=? WHERE id=?';
+        updateParams = [nombre, String(proveedor || '').trim(), unidadNormalizada, nuevaCantidadTotal, nuevaDisponible, nuevoCostoTotal, costoPorUnidad, prioridadConsumo, activoConsumo, id];
       }
 
       bdInventario.run(updateQuery, updateParams, () => {
@@ -1118,6 +1151,38 @@ export function registrarRutasInventario(app, bdInventario, bdRecetas = null, bd
         }
       });
     });
+  });
+
+  app.patch('/inventario/:id/prioridad-consumo', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    const prioridad = normalizarPrioridadConsumo(req.body?.prioridad_consumo);
+    bdInventario.run(
+      'UPDATE inventario SET prioridad_consumo=? WHERE id=?',
+      [prioridad, id],
+      function () {
+        if (!this.changes) return res.status(404).json({ error: 'No encontrado' });
+        transmitir({ tipo: 'inventario_actualizado' });
+        res.json({ ok: true, prioridad_consumo: prioridad });
+      }
+    );
+  });
+
+  app.patch('/inventario/:id/activo-consumo', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'ID inválido' });
+
+    const activo = normalizarActivoConsumo(req.body?.activo_consumo);
+    bdInventario.run(
+      'UPDATE inventario SET activo_consumo=? WHERE id=?',
+      [activo, id],
+      function () {
+        if (!this.changes) return res.status(404).json({ error: 'No encontrado' });
+        transmitir({ tipo: 'inventario_actualizado' });
+        res.json({ ok: true, activo_consumo: activo });
+      }
+    );
   });
 
   app.delete('/inventario/:id', (req, res) => {

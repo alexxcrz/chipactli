@@ -672,6 +672,7 @@ function normalizarItemCarritoCliente(item) {
     nombre_receta: nombreReceta,
     nombre_base: String(item?.nombre_base || '').trim(),
     categoria_nombre: String(item?.categoria_nombre || '').trim(),
+    image_url: String(item?.image_url || '').trim(),
     descripcion_mp: String(item?.descripcion_mp || '').trim(),
     slug: String(item?.slug || '').trim(),
     variante: String(item?.variante || '').trim(),
@@ -4224,6 +4225,7 @@ export default function Tienda({
           nombre_receta: recetaReal,
           nombre_base: producto?.nombre_receta,
           categoria_nombre: String(producto?.categoria_nombre || '').trim(),
+          image_url: String(producto?.image_url || '').trim(),
           descripcion_mp: `${String(producto?.categoria_nombre || '').trim()} - ${String(producto?.nombre_receta || recetaReal).trim()}`.replace(/^\s*-\s*/, '').trim(),
           slug: producto?.slug,
           variante,
@@ -4761,10 +4763,19 @@ export default function Tienda({
             <div className="tiendaCarritoLista">
               {carrito.map((item) => (
                 <div key={item.clave} className="tiendaCarritoItem">
-                  <div>
-                    <div className="tiendaCarritoCategoria">{item.categoria_nombre || 'Producto'}</div>
-                    <strong>{item.nombre_base || item.nombre_receta}</strong>
-                    {item.variante ? <small> · {item.variante}</small> : null}
+                  <div className="tiendaCarritoInfo">
+                    <div className="tiendaCarritoThumb">
+                      {item.image_url ? (
+                        <img src={item.image_url} alt={item.nombre_base || item.nombre_receta} loading="lazy" />
+                      ) : (
+                        <span className="tiendaCarritoThumbPlaceholder">Sin foto</span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="tiendaCarritoCategoria">{item.categoria_nombre || 'Producto'}</div>
+                      <strong className="tiendaCarritoNombre">{item.nombre_base || item.nombre_receta}</strong>
+                      {item.variante ? <small> · {item.variante}</small> : null}
+                    </div>
                   </div>
                   <div className="tiendaCarritoControles">
                     <button type="button" className="tiendaQtyBtn" onClick={() => cambiarCantidadPorDelta(item.clave, -1)}>-</button>

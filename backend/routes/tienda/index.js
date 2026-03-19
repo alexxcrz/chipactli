@@ -527,6 +527,7 @@ function normalizarItemsCarrito(items = []) {
         nombre_receta: nombreReceta,
         nombre_base: textoCarrito(item?.nombre_base, 180),
         categoria_nombre: textoCarrito(item?.categoria_nombre, 120),
+        image_url: textoCarrito(item?.image_url, 420),
         descripcion_mp: textoCarrito(item?.descripcion_mp, 220),
         slug: textoCarrito(item?.slug, 180),
         variante: textoCarrito(item?.variante, 120),

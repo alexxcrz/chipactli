@@ -1062,7 +1062,7 @@
   right: 12px;
   width: min(470px, 92vw);
   height: calc(100vh - 24px);
-  overflow-y: auto;
+  overflow: hidden;
   z-index: 3301;
   transform: translateX(110%);
   transition: transform 0.25s ease;
@@ -1101,6 +1101,27 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.tiendaLateralCuerpo {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tiendaCarritoPaso {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tiendaCheckoutPie {
+  flex: 0 0 auto;
+  margin-top: auto;
 }
 
 .tiendaPaso,
@@ -1803,11 +1824,19 @@
 
 .tiendaCarritoLista,
 .tiendaOrdenes {
-  max-height: 220px;
   overflow: auto;
   border: 1px solid #dde6e0;
   border-radius: 12px;
   padding: 8px;
+}
+
+.tiendaCarritoLista {
+  flex: 1;
+  min-height: 0;
+}
+
+.tiendaOrdenes {
+  max-height: 220px;
 }
 
 .tiendaCarritoItem,

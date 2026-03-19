@@ -885,6 +885,21 @@ export default function Tienda({
   const snapshotCarritoServidorRef = useRef('[]');
   const actualizadoCarritoServidorMsRef = useRef(0);
   const ultimoCambioCarritoLocalMsRef = useRef(Date.now());
+  const carritoActualRef = useRef(carrito);
+  const carritoCreadoEnActualRef = useRef(carritoCreadoEn);
+  const clienteTokenActualRef = useRef(clienteToken);
+
+  useEffect(() => {
+    carritoActualRef.current = carrito;
+  }, [carrito]);
+
+  useEffect(() => {
+    carritoCreadoEnActualRef.current = carritoCreadoEn;
+  }, [carritoCreadoEn]);
+
+  useEffect(() => {
+    clienteTokenActualRef.current = clienteToken;
+  }, [clienteToken]);
 
   const totalNoLeidasCliente = useMemo(() => (
     (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
@@ -2035,6 +2050,11 @@ export default function Tienda({
           aplicarEstado: true,
           silencioso: true
         });
+        return;
+      }
+
+      if (document.visibilityState === 'hidden') {
+        sincronizarCarritoPendienteAntesDeSalir(clienteToken);
       }
     };
 
@@ -2114,6 +2134,10 @@ export default function Tienda({
       }
     };
   }, [carrito, carritoCreadoEn, clienteToken]);
+
+  useEffect(() => () => {
+    sincronizarCarritoPendienteAntesDeSalir();
+  }, []);
 
   const productosFiltrados = useMemo(() => {
     const termino = filtro.trim().toLowerCase();
@@ -2788,6 +2812,44 @@ export default function Tienda({
     } finally {
       guardandoCarritoServidorRef.current = false;
     }
+  }
+
+  function guardarCarritoServidorKeepAlive(items, creadoEn, token = clienteToken) {
+    if (!token) return;
+    const itemsNormalizados = normalizarListaCarritoCliente(items);
+
+    fetch(apiUrl('/tienda/auth/carrito'), {
+      method: 'PUT',
+      keepalive: true,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        items: itemsNormalizados,
+        creado_en: Number(creadoEn) || Date.now()
+      })
+    }).catch(() => {});
+
+    snapshotCarritoServidorRef.current = serializarCarritoCliente(itemsNormalizados);
+  }
+
+  function sincronizarCarritoPendienteAntesDeSalir(tokenForzado = '') {
+    const tokenActual = String(tokenForzado || clienteTokenActualRef.current || '').trim();
+    if (!tokenActual) return;
+    if (guardandoCarritoServidorRef.current) return;
+
+    if (debounceCarritoServidorRef.current) {
+      clearTimeout(debounceCarritoServidorRef.current);
+      debounceCarritoServidorRef.current = null;
+    }
+
+    const itemsActuales = normalizarListaCarritoCliente(carritoActualRef.current || []);
+    const snapshotLocal = serializarCarritoCliente(itemsActuales);
+    if (snapshotLocal === snapshotCarritoServidorRef.current) return;
+
+    const creadoEnActual = Number(carritoCreadoEnActualRef.current) || Date.now();
+    guardarCarritoServidorKeepAlive(itemsActuales, creadoEnActual, tokenActual);
   }
 
   async function cargarCarritoServidor(token = clienteToken, opciones = {}) {
@@ -4692,8 +4754,10 @@ export default function Tienda({
           <span className={pasoCheckout === 3 ? 'tiendaPasoActivo' : 'tiendaPaso'}>3. Pago</span>
         </div>
 
+        <div className="tiendaLateralCuerpo">
+
         {pasoCheckout === 1 && (
-          <>
+          <div className="tiendaCarritoPaso">
             <div className="tiendaCarritoLista">
               {carrito.map((item) => (
                 <div key={item.clave} className="tiendaCarritoItem">
@@ -4719,13 +4783,13 @@ export default function Tienda({
               {!carrito.length && <div className="tiendaVacio">Aún no agregas productos.</div>}
             </div>
 
-            <div className="tiendaCheckout">
+            <div className="tiendaCheckout tiendaCheckoutPie">
               <div className="tiendaTotal">Total: {precio(totalCarrito)}</div>
               <button type="button" className="boton botonExito" onClick={continuarPasoEntrega}>
                 Continuar con la entrega
               </button>
             </div>
-          </>
+          </div>
         )}
 
         {pasoCheckout === 2 && (
@@ -4811,6 +4875,7 @@ export default function Tienda({
             </div>
           </div>
         )}
+        </div>
       </section>
       )}
 

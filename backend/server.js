@@ -1975,6 +1975,12 @@ function dbAllAsync(db, sql, params = []) {
   });
 }
 
+function dbGetAsync(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row || null)));
+  });
+}
+
 function dbRunAsync(db, sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function onRun(err) {

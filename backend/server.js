@@ -578,6 +578,43 @@ const visitasDbReady = (async () => {
       )`
     );
 
+    const columnasEventosEsperadas = [
+      ['dia_clave', 'TEXT'],
+      ['session_id', 'TEXT'],
+      ['accion', 'TEXT'],
+      ['producto', 'TEXT'],
+      ['seccion', 'TEXT'],
+      ['ruta', 'TEXT'],
+      ['creado_en', 'TEXT DEFAULT CURRENT_TIMESTAMP']
+    ];
+    for (const [columna, tipo] of columnasEventosEsperadas) {
+      try {
+        await dbRunAsync(
+          bdVentas,
+          `ALTER TABLE tienda_visitas_eventos ADD COLUMN ${columna} ${tipo}`
+        );
+      } catch (errorColumna) {
+        const msgColumna = String(errorColumna?.message || '').toLowerCase();
+        const esDuplicada =
+          msgColumna.includes('duplicate column')
+          || msgColumna.includes('already exists')
+          || msgColumna.includes('duplicada');
+        if (!esDuplicada) throw errorColumna;
+      }
+    }
+
+    if (bdVentas && bdVentas._esPgCompat) {
+      await dbRunAsync(bdVentas, 'CREATE SEQUENCE IF NOT EXISTS tienda_visitas_eventos_id_seq').catch(() => {});
+      await dbRunAsync(
+        bdVentas,
+        "ALTER TABLE tienda_visitas_eventos ALTER COLUMN id SET DEFAULT nextval('tienda_visitas_eventos_id_seq')"
+      ).catch(() => {});
+      await dbRunAsync(
+        bdVentas,
+        "SELECT setval('tienda_visitas_eventos_id_seq', COALESCE((SELECT MAX(id) FROM tienda_visitas_eventos), 0), true)"
+      ).catch(() => {});
+    }
+
     await dbRunAsync(
       bdVentas,
       `CREATE INDEX IF NOT EXISTS idx_tienda_visitas_diarias_actualizado
@@ -1487,34 +1524,25 @@ app.get(['/api/visitas/comportamiento', '/visitas/comportamiento'], async (req, 
         total: Number(item?.total) || 0
       }))
     });
-  } catch (error) {
-    const msg = String(error?.message || '').toLowerCase();
-    const faltaTablaEventos =
-      msg.includes('tienda_visitas_eventos')
-      && (msg.includes('no such table') || msg.includes('does not exist') || msg.includes('relation'));
+  } catch {
+    const fallbackVisitas = await dbGetAsync(
+      bdVentas,
+      `SELECT COALESCE(SUM(total_eventos), 0) AS total
+       FROM tienda_visitas_diarias
+       WHERE dia_clave >= ?`,
+      [desdeClave]
+    ).catch(() => ({ total: 0 }));
 
-    if (faltaTablaEventos) {
-      const fallbackVisitas = await dbGetAsync(
-        bdVentas,
-        `SELECT COALESCE(SUM(total_eventos), 0) AS total
-         FROM tienda_visitas_diarias
-         WHERE dia_clave >= ?`,
-        [desdeClave]
-      ).catch(() => ({ total: 0 }));
-
-      const totalFallback = Number(fallbackVisitas?.total) || 0;
-      return res.json({
-        ok: true,
-        rangoDias: dias,
-        desde: desdeClave,
-        hasta: hoyClave,
-        totalEventos: totalFallback,
-        topAcciones: totalFallback > 0 ? [{ accion: 'visita_pagina', total: totalFallback }] : [],
-        topProductos: []
-      });
-    }
-
-    return res.status(500).json({ ok: false, error: 'No se pudo cargar comportamiento de visitas' });
+    const totalFallback = Number(fallbackVisitas?.total) || 0;
+    return res.json({
+      ok: true,
+      rangoDias: dias,
+      desde: desdeClave,
+      hasta: hoyClave,
+      totalEventos: totalFallback,
+      topAcciones: totalFallback > 0 ? [{ accion: 'visita_pagina', total: totalFallback }] : [],
+      topProductos: []
+    });
   }
 });
 

@@ -235,6 +235,7 @@ html, body {
 }
 
 .loginCard{
+  position:relative;
   width:min(430px, 92vw);
   background:rgba(245,241,232,0.9);
   border:2px solid #2a2a2a;
@@ -295,6 +296,108 @@ html, body {
   border-radius:12px;
   font-size:13px;
   padding:8px 10px;
+}
+
+.loginSuccess{
+  background:rgba(74,124,89,0.15);
+  color:#24593f;
+  border:1px solid rgba(74,124,89,0.42);
+  border-radius:12px;
+  font-size:13px;
+  padding:8px 10px;
+}
+
+.linkRecuperarPassword{
+  border:none;
+  background:transparent;
+  color:#214a35;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+  border-radius:0;
+  padding:2px 0 0;
+  width:auto;
+  align-self:center;
+  text-align:center;
+  letter-spacing:0.1px;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+
+.linkRecuperarPassword:hover{
+  color:#2f5f46;
+  background:transparent;
+}
+
+.loginCerrarX{
+  position:absolute;
+  top:10px;
+  right:10px;
+  width:34px;
+  height:34px;
+  border:2px solid #2a2a2a;
+  border-radius:999px;
+  background:#ffffff;
+  color:#1f1f1f;
+  font-size:24px;
+  line-height:1;
+  font-weight:800;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  z-index:2;
+}
+
+.loginCerrarX:hover{
+  background:#c75550;
+  color:#fff;
+  border-color:#a5433f;
+}
+
+.loginCerrarX:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.miniModalRecuperarPassword{
+  position:fixed;
+  inset:0;
+  background:rgba(16,18,14,0.5);
+  z-index:4200;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:12px;
+}
+
+.miniModalRecuperarPasswordCard{
+  width:min(410px, 94vw);
+  background:#fff;
+  border:2px solid #2a2a2a;
+  border-radius:18px;
+  box-shadow:0 18px 40px rgba(0,0,0,0.25);
+  padding:16px;
+  text-align:left;
+}
+
+.miniModalRecuperarPasswordCard h3{
+  margin:0 0 6px;
+  color:#2f5f46;
+  font-size:18px;
+}
+
+.miniModalRecuperarPasswordCard p{
+  margin:0 0 10px;
+  color:#60584d;
+  font-size:13px;
+  line-height:1.45;
+}
+
+.miniModalRecuperarPasswordAcciones{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
 }
 
 .loginBoton{
@@ -393,7 +496,7 @@ html, body {
   inset:0;
   background:rgba(0,0,0,0.45);
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   justify-content:center;
   z-index:2600;
   padding:20px;
@@ -401,7 +504,7 @@ html, body {
 }
 
 .accesoSistemaOverlay .loginCard{
-  margin:16px 0;
+  margin:0;
   max-height:calc(100vh - 32px);
   overflow-y:auto;
 }
@@ -1167,7 +1270,7 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   position: fixed;
   right: 10px;
   bottom: 10px;
-  z-index: 2200;
+  z-index: 5600;
   align-items: flex-end;
   justify-content: flex-end;
   padding: 0;

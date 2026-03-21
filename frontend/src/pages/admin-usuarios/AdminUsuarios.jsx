@@ -59,6 +59,27 @@ const DEFINICION_PERMISOS = {
       { key: 'importar', label: 'Importar ventas' }
     ]
   },
+  tienda: {
+    label: 'Tienda (cliente)',
+    acciones: [
+      { key: 'ver', label: 'Ver tienda cliente' }
+    ]
+  },
+  trastienda: {
+    label: 'Trastienda',
+    acciones: [
+      { key: 'ver', label: 'Entrar a trastienda' },
+      { key: 'editar', label: 'Editar datos en trastienda' },
+      { key: 'pedidos', label: 'Ver pestaña Pedidos' },
+      { key: 'clientes', label: 'Ver pestaña Clientes' },
+      { key: 'puntos', label: 'Ver pestaña Puntos de entrega' },
+      { key: 'catalogo', label: 'Ver pestaña Catálogo' },
+      { key: 'descuentos', label: 'Ver pestaña Descuentos' },
+      { key: 'cupones', label: 'Ver pestaña Cupones' },
+      { key: 'config', label: 'Ver pestaña Configuración' },
+      { key: 'metricas', label: 'Ver pestaña Métricas' }
+    ]
+  },
   utensilios: {
     label: 'Utensilios',
     acciones: [
@@ -172,7 +193,7 @@ function renderTextoResaltado(texto, filtro) {
 
 export default function AdminUsuarios() {
   const [usuarios, setUsuarios] = useState([]);
-  const [form, setForm] = useState({ username: '', nombre: '', rol: 'usuario' });
+  const [form, setForm] = useState({ username: '', nombre: '', correo: '', rol: 'usuario' });
   const [modalEditar, setModalEditar] = useState(null);
   const [tabModal, setTabModal] = useState('general');
   const [expandirPermisos, setExpandirPermisos] = useState({});
@@ -207,6 +228,7 @@ export default function AdminUsuarios() {
       originalUsername: usuario.username,
       username: usuario.username,
       nombre: usuario.nombre || '',
+      correo: usuario.correo || '',
       rol: usuario.rol,
       permisos: normalizarPermisos(usuario.permisos, usuario.rol),
       passwordTemporal: ''
@@ -273,7 +295,8 @@ export default function AdminUsuarios() {
         headers: { Authorization: 'Bearer ' + token },
         body: {
           username: modalEditar.username,
-          nombre: modalEditar.nombre
+          nombre: modalEditar.nombre,
+          correo: modalEditar.correo
         }
       });
 
@@ -335,13 +358,14 @@ export default function AdminUsuarios() {
         body: {
           username: form.username,
           nombre: form.nombre,
+          correo: form.correo,
           rol: form.rol,
           permisos: normalizarPermisos(null, form.rol)
         }
       });
       if (res.exito) {
         mostrarNotificacion(`Usuario creado. Password temporal: ${res.passwordTemporal || 'N/D'}`, 'exito');
-        setForm({ username: '', nombre: '', rol: 'usuario' });
+        setForm({ username: '', nombre: '', correo: '', rol: 'usuario' });
         cargarUsuarios();
       }
     } catch (err) {
@@ -430,6 +454,7 @@ export default function AdminUsuarios() {
       <form onSubmit={submit} style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:18 }}>
         <input placeholder="Usuario" required value={form.username} onChange={e=>setForm({...form,username:e.target.value})} style={{flex:'1 1 120px'}} />
         <input placeholder="Nombre" value={form.nombre} onChange={e=>setForm({...form,nombre:e.target.value})} style={{flex:'2 1 180px'}} />
+        <input placeholder="Correo" type="email" value={form.correo} onChange={e=>setForm({...form,correo:e.target.value})} style={{flex:'2 1 220px'}} />
         <select value={form.rol} onChange={e=>setForm({...form,rol:e.target.value})} style={{flex:'1 1 100px'}}>
           <option value="usuario">Usuario</option>
           <option value="admin">Admin</option>
@@ -438,12 +463,13 @@ export default function AdminUsuarios() {
       </form>
       <div>
         <table className="tablaUsuariosAdmin" style={{width:'100%',borderCollapse:'collapse'}}>
-          <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Usuario</th><th>Nombre</th><th>Correo</th><th>Rol</th><th>Acciones</th></tr></thead>
           <tbody>
             {usuarios.map(u=>(
               <tr key={u.username}>
                 <td>{u.username}</td>
                 <td>{u.nombre}</td>
+                <td>{u.correo || '—'}</td>
                 <td>{u.rol}</td>
                 <td>
                   <button className="botonPequeno" onClick={() => abrirModalModificar(u)}>Modificar</button>
@@ -490,9 +516,17 @@ export default function AdminUsuarios() {
                   onChange={(e) => actualizarCampoModal('nombre', e.target.value)}
                   disabled={modalEditar.rol === 'ceo'}
                 />
+                <label htmlFor="adminUsuarioCorreo">Correo de recuperación</label>
+                <input
+                  id="adminUsuarioCorreo"
+                  type="email"
+                  value={modalEditar.correo}
+                  onChange={(e) => actualizarCampoModal('correo', e.target.value)}
+                  placeholder="correo@ejemplo.com"
+                />
                 <label htmlFor="adminUsuarioRol">Rol</label>
                 <input id="adminUsuarioRol" value={modalEditar.rol} disabled />
-                <button className="boton" onClick={guardarDatosUsuario} disabled={modalEditar.rol === 'ceo'}>Guardar datos</button>
+                <button className="boton" onClick={guardarDatosUsuario}>Guardar datos</button>
               </div>
             )}
 

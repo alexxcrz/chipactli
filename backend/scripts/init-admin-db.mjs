@@ -16,6 +16,7 @@ const createUsuariosSql = `CREATE TABLE IF NOT EXISTS usuarios (
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   nombre TEXT,
+  correo TEXT,
   rol TEXT DEFAULT 'usuario',
   permisos TEXT,
   debe_cambiar_password INTEGER DEFAULT 1,
@@ -120,6 +121,29 @@ adminDb.serialize(() => {
       adminDb.run('ALTER TABLE usuarios ADD COLUMN permisos TEXT', [], (alterErr) => {
         if (alterErr) {
           console.error('Error agregando columna permisos:', alterErr.message);
+          closeAll();
+          process.exit(1);
+        }
+        if (!cols.some(col => col.name === 'correo')) {
+          adminDb.run('ALTER TABLE usuarios ADD COLUMN correo TEXT', [], (correoErr) => {
+            if (correoErr) {
+              console.error('Error agregando columna correo:', correoErr.message);
+              closeAll();
+              process.exit(1);
+            }
+            continuar();
+          });
+          return;
+        }
+        continuar();
+      });
+      return;
+    }
+
+    if (!cols.some(col => col.name === 'correo')) {
+      adminDb.run('ALTER TABLE usuarios ADD COLUMN correo TEXT', [], (correoErr) => {
+        if (correoErr) {
+          console.error('Error agregando columna correo:', correoErr.message);
           closeAll();
           process.exit(1);
         }

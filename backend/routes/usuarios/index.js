@@ -10,7 +10,7 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     }
 
     try {
-      const rows = await dbAll(bdAdmin, "SELECT id, username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios");
+      const rows = await dbAll(bdAdmin, "SELECT id, username, nombre, correo, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios");
       const usuarios = (rows || []).map((u) => ({
         ...u,
         permisos: normalizarPermisosUsuario(u.permisos, u.rol)
@@ -26,15 +26,16 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     if (!req.usuario) {
       return res.status(403).json({ exito: false, mensaje: "No autorizado" });
     }
-    const { username, nombre, rol, permisos } = req.body;
+    const { username, nombre, correo, rol, permisos } = req.body;
     if (!username || !rol) return res.status(400).json({ exito: false, mensaje: "Faltan datos" });
+    const correoNormalizado = String(correo || '').trim().toLowerCase();
     const passwordTemporal = Math.random().toString(36).slice(-8) + "!";
     const hash = await bcrypt.hash(passwordTemporal, 10);
     try {
       const resultado = await dbRun(
         bdAdmin,
-        "INSERT INTO usuarios (username, password_hash, nombre, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, 1)",
-        [username, hash, nombre || '', rol, serializarPermisos(permisos, rol)]
+        "INSERT INTO usuarios (username, password_hash, nombre, correo, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        [username, hash, nombre || '', correoNormalizado, rol, serializarPermisos(permisos, rol)]
       );
 
       let idCreado = resultado?.lastID ?? null;
@@ -43,7 +44,7 @@ export function registrarRutasUsuarios(app, bdAdmin) {
         idCreado = creado?.id ?? null;
       }
 
-      return res.json({ exito: true, id: idCreado, username, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
+      return res.json({ exito: true, id: idCreado, username, correo: correoNormalizado, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
     } catch {
       return res.status(400).json({ exito: false, mensaje: "Usuario ya existe" });
     }
@@ -56,7 +57,7 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     }
 
     const usernameActual = req.params.username;
-    const { username: usernameNuevo, nombre } = req.body;
+    const { username: usernameNuevo, nombre, correo } = req.body;
 
     if (!usernameActual) {
       return res.status(400).json({ exito: false, mensaje: "Username inválido" });
@@ -65,7 +66,7 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     try {
       const user = await dbGet(
         bdAdmin,
-        "SELECT username, nombre, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios WHERE username = ?",
+        "SELECT username, nombre, correo, rol, permisos, debe_cambiar_password, creado_en, actualizado_en FROM usuarios WHERE username = ?",
         [usernameActual]
       );
 
@@ -73,12 +74,24 @@ export function registrarRutasUsuarios(app, bdAdmin) {
         return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
 
-      if (user.rol === 'ceo') {
-        return res.status(400).json({ exito: false, mensaje: "No se puede modificar el usuario CEO" });
-      }
+      const usernameSolicitado = (usernameNuevo || '').trim();
+      const usernameFinal = user.rol === 'ceo'
+        ? usernameActual
+        : (usernameSolicitado || usernameActual || '').trim();
+      const nombreFinal = user.rol === 'ceo'
+        ? (user.nombre || '')
+        : (typeof nombre === 'string' ? nombre : (user.nombre || ''));
+      const correoFinal = typeof correo === 'string' ? correo.trim().toLowerCase() : (user.correo || '');
 
-      const usernameFinal = (usernameNuevo || usernameActual || '').trim();
-      const nombreFinal = typeof nombre === 'string' ? nombre : (user.nombre || '');
+      if (
+        user.rol === 'ceo'
+        && (
+          (usernameSolicitado && usernameSolicitado !== usernameActual)
+          || (typeof nombre === 'string' && nombre !== (user.nombre || ''))
+        )
+      ) {
+        return res.status(400).json({ exito: false, mensaje: "Para CEO solo se puede editar el correo de recuperación" });
+      }
 
       if (!usernameFinal) {
         return res.status(400).json({ exito: false, mensaje: "El username no puede estar vacío" });
@@ -86,8 +99,8 @@ export function registrarRutasUsuarios(app, bdAdmin) {
 
       const resultado = await dbRun(
         bdAdmin,
-        "UPDATE usuarios SET username = ?, nombre = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-        [usernameFinal, nombreFinal, usernameActual]
+        "UPDATE usuarios SET username = ?, nombre = ?, correo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [usernameFinal, nombreFinal, correoFinal, usernameActual]
       );
 
       if (!Number(resultado?.changes || 0)) {
@@ -99,6 +112,7 @@ export function registrarRutasUsuarios(app, bdAdmin) {
         usuario: {
           username: usernameFinal,
           nombre: nombreFinal,
+          correo: correoFinal,
           rol: user.rol,
           permisos: normalizarPermisosUsuario(user.permisos, user.rol)
         }

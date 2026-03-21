@@ -35,10 +35,9 @@ function descargarJson(datos, tipo) {
 function limpiarPayloadImportacionTodo(datos) {
   const payload = (datos && typeof datos === 'object' && !Array.isArray(datos)) ? { ...datos } : datos;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
-  if (Object.prototype.hasOwnProperty.call(payload, 'archivos_uploads_tienda')) {
-    delete payload.archivos_uploads_tienda;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'incluye_uploads_tienda')) {
+    payload.incluye_uploads_tienda = Array.isArray(payload.archivos_uploads_tienda) && payload.archivos_uploads_tienda.length > 0;
   }
-  payload.incluye_uploads_tienda = false;
   return payload;
 }
 
@@ -52,10 +51,10 @@ export async function exportarDatos(tipo) {
       throw new Error('Solo está habilitado exportar TODO');
     }
 
-    const endpointTodo = `${obtenerURLAPI()}/api/exportar/todo?include_uploads=0`;
+    const endpointTodo = `${obtenerURLAPI()}/api/exportar/todo`;
     const datosTodo = await fetchAPIJSON(endpointTodo);
     descargarJson(datosTodo, tipo);
-    mostrarNotificacion('✅ Respaldo TOTAL exportado correctamente', 'exito');
+    mostrarNotificacion('✅ Respaldo TOTAL (incluyendo tienda) exportado correctamente', 'exito');
   } catch (error) {
     console.error('Error al exportar:', error);
     mostrarNotificacion(`❌ Error al exportar ${tipo}: ${error.message}`, 'error');
@@ -95,7 +94,6 @@ export async function importarDatos(tipo, input) {
     }
 
     const payload = limpiarPayloadImportacionTodo(datos);
-
     await fetchAPIJSON(`${obtenerURLAPI()}/api/importar/todo`, {
       method: 'POST',
       body: payload
@@ -127,7 +125,10 @@ export function recargarSeccion(tipo) {
       'produccion_actualizado',
       'ventas_actualizado',
       'categorias_actualizado',
-      'tienda_catalogo_actualizado'
+      'tienda_catalogo_actualizado',
+      'tienda_descuentos_actualizados',
+      'tienda_cupones_actualizados',
+      'tienda_orden_actualizada'
     ].forEach((eventoTipo) => {
       window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: { tipo: eventoTipo } }));
     });

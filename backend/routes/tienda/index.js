@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import crypto from "crypto";
 import { convertirCantidadDetallada } from "../../utils/index.js";
 import { transmitir } from "../../utils/index.js";
 
@@ -9,8 +10,11 @@ const PREFIJO_FOLIO_TIENDA_WEB = 'CHIVT';
 const PREFIJO_FOLIO_TIENDA_APP = 'CHIAPP';
 const LONGITUD_CONSECUTIVO_TIENDA = 6;
 const ESTADOS_PAGO_PERMITIDOS = new Set(['pendiente', 'pendiente_manual', 'pagado', 'rechazado', 'reembolsado']);
+const DIAS_RECORDATORIO_RESENA = Math.max(1, Number(process.env.TIENDA_DIAS_RECORDATORIO_RESENA || 15));
+const INTERVALO_RECORDATORIO_RESENA_MS = Math.max(60 * 60 * 1000, Number(process.env.TIENDA_RECORDATORIO_INTERVALO_MS || (6 * 60 * 60 * 1000)));
 
 let mailTransporter = null;
+let schedulerRecordatorioResenaIniciado = false;
 
 function obtenerConfigCorreo() {
   const mailEnabled = String(process.env.MAIL_ENABLED || '1').trim() !== '0';
@@ -374,6 +378,74 @@ function construirCorreoCampana({ nombreCliente, emailCliente, tituloCampana, co
   return { subject, text, html };
 }
 
+function resolverBasePublicaTienda() {
+  return String(
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.WEB_BASE_URL
+    || process.env.RENDER_EXTERNAL_URL
+    || 'https://chipactli.onrender.com'
+  ).trim().replace(/\/+$/, '');
+}
+
+function construirLinkProductoResena(slugProducto = '') {
+  const base = resolverBasePublicaTienda();
+  const slug = String(slugProducto || '').trim();
+  if (!slug) return `${base}/#/tienda`;
+  return `${base}/#/tienda?producto=${encodeURIComponent(slug)}`;
+}
+
+function construirCorreoRecordatorioResena({
+  nombreCliente = '',
+  folio = '',
+  productoNombre = '',
+  productoVariante = '',
+  linkProducto = '',
+  diasDesdeCompra = DIAS_RECORDATORIO_RESENA
+}) {
+  const nombre = String(nombreCliente || 'cliente').trim() || 'cliente';
+  const producto = String(productoNombre || 'tu producto').trim() || 'tu producto';
+  const variante = String(productoVariante || '').trim();
+  const folioTxt = String(folio || '').trim();
+  const enlace = String(linkProducto || '').trim() || construirLinkProductoResena('');
+  const nombreCompletoProducto = variante ? `${producto} (${variante})` : producto;
+
+  const subject = `Cuéntanos cómo te fue con ${producto} | CHIPACTLI`;
+  const text = [
+    `Hola ${nombre},`,
+    '',
+    `Han pasado ${diasDesdeCompra} días desde tu compra${folioTxt ? ` (${folioTxt})` : ''}.`,
+    `¿Nos ayudas calificando y comentando tu experiencia con ${nombreCompletoProducto}?`,
+    '',
+    `Abrir producto: ${enlace}`,
+    '',
+    'Tu opinión nos ayuda a mejorar y orienta a otros clientes.',
+    '',
+    'Gracias por confiar en CHIPACTLI.'
+  ].join('\n');
+
+  const bloquesHtml = `
+    <div style="background:#f3f7f2;border:1px solid #dce8dc;border-radius:10px;padding:12px 14px;margin:0 0 12px 0;">
+      <div><strong>Producto:</strong> ${escaparHtml(nombreCompletoProducto)}</div>
+      ${folioTxt ? `<div><strong>Pedido:</strong> ${escaparHtml(folioTxt)}</div>` : ''}
+      <div style="margin-top:8px;">Tu opinión es muy importante para nosotros.</div>
+      <div style="margin-top:10px;">
+        <a href="${escaparHtml(enlace)}" target="_blank" rel="noreferrer" style="display:inline-block;background:#24593f;color:#ffffff;text-decoration:none;padding:9px 12px;border-radius:8px;font-weight:700;">Calificar este producto</a>
+      </div>
+    </div>
+  `;
+
+  const html = layoutCorreoChipactli({
+    titulo: 'Recordatorio de reseña',
+    saludo: `Hola ${nombre},`,
+    intro: `Han pasado ${diasDesdeCompra} días desde tu compra.`,
+    bloquesHtml,
+    cierre: 'Gracias por confiar en CHIPACTLI.'
+  });
+
+  return { subject, text, html };
+}
+
 async function enviarCorreoCliente({ to, subject, text, html }) {
   const cfg = obtenerConfigCorreo();
   const correoDestino = String(to || '').trim();
@@ -623,11 +695,17 @@ function crearTokenCliente(cliente) {
       tipo: "tienda_cliente",
       id: cliente.id,
       nombre: cliente.nombre,
-      email: cliente.email
+      email: cliente.email,
+      token_version: Number(cliente?.token_version || 0)
     },
     TIENDA_JWT_SECRET,
     { expiresIn: "30d" }
   );
+}
+
+function generarPasswordTemporalCliente() {
+  const base = crypto.randomBytes(7).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
+  return `${base}A!`;
 }
 
 function authCliente(req, res, next) {
@@ -759,6 +837,256 @@ function aplicarDescuentoRedondeado(precio, porcentaje) {
   const pct = Math.max(0, Number(porcentaje) || 0);
   if (base <= 0 || pct <= 0) return base;
   return Math.max(0, Math.floor(base * (1 - (pct / 100))));
+}
+
+function normalizarCodigoCupon(codigo = '') {
+  return String(codigo || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '');
+}
+
+function normalizarFechaCupon(valor = '') {
+  const txt = String(valor || '').trim();
+  if (!txt) return '';
+  const dt = new Date(txt);
+  if (Number.isNaN(dt.getTime())) return '';
+  return dt.toISOString();
+}
+
+function calcularSubtotalItemsPlano(items = []) {
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => {
+    const cantidad = Math.max(1, Number(item?.cantidad) || 1);
+    const subtotalDirecto = Number(item?.subtotal);
+    if (Number.isFinite(subtotalDirecto) && subtotalDirecto >= 0) {
+      return sum + subtotalDirecto;
+    }
+    const precioUnitario = Math.max(0, Number(item?.precio_unitario) || 0);
+    return sum + (cantidad * precioUnitario);
+  }, 0);
+}
+
+async function validarCuponParaMonto({ bdVentas, codigoCupon = '', idCliente = 0, subtotal = 0, items = [] }) {
+  const codigo = normalizarCodigoCupon(codigoCupon);
+  const montoBase = Math.max(0, Number(subtotal) || 0);
+  if (!codigo) {
+    return { ok: false, error: 'Ingresa un codigo de cupon valido' };
+  }
+  if (montoBase <= 0) {
+    return { ok: false, error: 'No hay monto para aplicar cupon' };
+  }
+
+  const cupon = await dbGet(
+    bdVentas,
+    `SELECT id, codigo, nombre, tipo, influencer_nombre, influencer_handle,
+          alcance_tipo, alcance_clave,
+            tipo_descuento, valor_descuento, monto_minimo, max_descuento,
+            usos_maximos_total, usos_maximos_por_cliente, un_solo_uso_por_cliente,
+            valido_desde, valido_hasta, vigente_indefinido, activo
+     FROM tienda_cupones
+     WHERE UPPER(TRIM(codigo)) = ?
+     LIMIT 1`,
+    [codigo]
+  );
+
+  if (!cupon) {
+    return { ok: false, error: 'El codigo no existe' };
+  }
+  if (Number(cupon?.activo) !== 1) {
+    return { ok: false, error: 'Este cupon esta inactivo' };
+  }
+
+  const ahora = Date.now();
+  const esIndefinido = Number(cupon?.vigente_indefinido) === 1;
+  const desdeIso = normalizarFechaCupon(cupon?.valido_desde);
+  const hastaIso = normalizarFechaCupon(cupon?.valido_hasta);
+
+  if (!esIndefinido) {
+    if (desdeIso && nowMsSafe(desdeIso) > ahora) {
+      return { ok: false, error: 'Este cupon aun no esta vigente' };
+    }
+    if (hastaIso && nowMsSafe(hastaIso) < ahora) {
+      return { ok: false, error: 'Este cupon ya vencio' };
+    }
+  }
+
+  const montoMinimo = Math.max(0, Number(cupon?.monto_minimo) || 0);
+  if (montoBase < montoMinimo) {
+    return { ok: false, error: `Este cupon requiere un minimo de ${formatearMonedaMXN(montoMinimo)}` };
+  }
+
+  const alcanceTipo = String(cupon?.alcance_tipo || 'todos').trim().toLowerCase();
+  const alcanceClave = String(cupon?.alcance_clave || '').trim().toLowerCase();
+  if (alcanceTipo !== 'todos' && alcanceClave) {
+    const coincide = (Array.isArray(items) ? items : []).some((item) => {
+      const nombre = String(item?.nombre_receta || '').trim().toLowerCase();
+      const categoria = String(item?.categoria_nombre || '').trim().toLowerCase();
+      if (alcanceTipo === 'producto') return nombre === alcanceClave;
+      if (alcanceTipo === 'categoria') return categoria === alcanceClave;
+      return true;
+    });
+    if (!coincide) {
+      return {
+        ok: false,
+        error: alcanceTipo === 'producto'
+          ? 'Este cupon aplica solo a un producto especifico'
+          : 'Este cupon aplica solo a una categoria especifica'
+      };
+    }
+  }
+
+  const idCupon = Number(cupon?.id) || 0;
+  const usosGlobalesRow = await dbGet(
+    bdVentas,
+    `SELECT COUNT(*) AS total
+     FROM tienda_cupones_uso
+     WHERE id_cupon = ?`,
+    [idCupon]
+  );
+  const usosGlobales = Number(usosGlobalesRow?.total) || 0;
+  const usosMaximosTotal = Math.max(0, Number(cupon?.usos_maximos_total) || 0);
+  if (usosMaximosTotal > 0 && usosGlobales >= usosMaximosTotal) {
+    return { ok: false, error: 'Este cupon ya alcanzo su limite de usos' };
+  }
+
+  const idClienteNum = Number(idCliente) || 0;
+  if (idClienteNum > 0) {
+    const usosClienteRow = await dbGet(
+      bdVentas,
+      `SELECT COUNT(*) AS total
+       FROM tienda_cupones_uso
+       WHERE id_cupon = ? AND id_cliente = ?`,
+      [idCupon, idClienteNum]
+    );
+    const usosCliente = Number(usosClienteRow?.total) || 0;
+    const unSoloUso = Number(cupon?.un_solo_uso_por_cliente) === 1;
+    const usosMaximosPorCliente = Math.max(0, Number(cupon?.usos_maximos_por_cliente) || 0);
+
+    if (unSoloUso && usosCliente >= 1) {
+      return { ok: false, error: 'Este cupon es de un solo uso por cliente' };
+    }
+    if (usosMaximosPorCliente > 0 && usosCliente >= usosMaximosPorCliente) {
+      return { ok: false, error: 'Alcanzaste el limite de usos de este cupon' };
+    }
+  }
+
+  const tipoDescuento = String(cupon?.tipo_descuento || 'porcentaje').trim().toLowerCase();
+  const valorDescuento = Math.max(0, Number(cupon?.valor_descuento) || 0);
+  let montoDescuento = 0;
+  if (tipoDescuento === 'monto_fijo') {
+    montoDescuento = valorDescuento;
+  } else {
+    montoDescuento = montoBase * (valorDescuento / 100);
+  }
+
+  const maxDescuento = Math.max(0, Number(cupon?.max_descuento) || 0);
+  if (maxDescuento > 0) {
+    montoDescuento = Math.min(montoDescuento, maxDescuento);
+  }
+  montoDescuento = Math.max(0, Math.min(montoBase, Number(montoDescuento.toFixed(2))));
+
+  if (montoDescuento <= 0) {
+    return { ok: false, error: 'Este cupon no aplica para el total actual' };
+  }
+
+  const totalFinal = Math.max(0, Number((montoBase - montoDescuento).toFixed(2)));
+  const tipoCupon = String(cupon?.tipo || 'general').trim().toLowerCase();
+
+  return {
+    ok: true,
+    subtotal: Number(montoBase.toFixed(2)),
+    descuento_total: montoDescuento,
+    total: totalFinal,
+    cupon: {
+      id: idCupon,
+      codigo,
+      nombre: String(cupon?.nombre || codigo).trim(),
+      tipo: tipoCupon,
+      alcance_tipo: alcanceTipo,
+      alcance_clave: alcanceClave,
+      influencer_nombre: String(cupon?.influencer_nombre || '').trim(),
+      influencer_handle: String(cupon?.influencer_handle || '').trim(),
+      tipo_descuento: tipoDescuento,
+      valor_descuento: valorDescuento,
+      monto_descuento: montoDescuento
+    }
+  };
+}
+
+function normalizarListaCodigosCupones(codigos = [], codigoUnico = '') {
+  const listaBase = Array.isArray(codigos) ? codigos : [];
+  const candidatos = [...listaBase, codigoUnico];
+  const unicos = [];
+  const vistos = new Set();
+  for (const item of candidatos) {
+    const codigo = normalizarCodigoCupon(item || '');
+    if (!codigo || vistos.has(codigo)) continue;
+    vistos.add(codigo);
+    unicos.push(codigo);
+  }
+  return unicos;
+}
+
+async function validarCuponesApiladosParaMonto({ bdVentas, codigosCupones = [], idCliente = 0, subtotal = 0, items = [] }) {
+  const codigos = normalizarListaCodigosCupones(codigosCupones);
+  const subtotalBase = Math.max(0, Number(subtotal) || 0);
+  if (!codigos.length) {
+    return { ok: true, subtotal: Number(subtotalBase.toFixed(2)), descuento_total: 0, total: Number(subtotalBase.toFixed(2)), cupones: [] };
+  }
+
+  let montoRestante = subtotalBase;
+  let descuentoAcumulado = 0;
+  const cuponesAplicados = [];
+
+  for (const codigo of codigos) {
+    if (montoRestante <= 0) break;
+
+    const validacion = await validarCuponParaMonto({
+      bdVentas,
+      codigoCupon: codigo,
+      idCliente,
+      subtotal: montoRestante,
+      items
+    });
+
+    if (!validacion?.ok) {
+      return {
+        ok: false,
+        error: validacion?.error || `El cupon ${codigo} no es valido`,
+        codigo_fallido: codigo
+      };
+    }
+
+    const descuentoCupon = Math.max(0, Math.min(montoRestante, Number(validacion?.descuento_total) || 0));
+    if (descuentoCupon <= 0) continue;
+
+    const siguienteRestante = Math.max(0, Number((montoRestante - descuentoCupon).toFixed(2)));
+    cuponesAplicados.push({
+      ...(validacion?.cupon || {}),
+      codigo,
+      monto_descuento: descuentoCupon,
+      subtotal_aplicado: Number(montoRestante.toFixed(2)),
+      total_post: siguienteRestante
+    });
+    descuentoAcumulado += descuentoCupon;
+    montoRestante = siguienteRestante;
+  }
+
+  descuentoAcumulado = Number(Math.max(0, Math.min(subtotalBase, descuentoAcumulado)).toFixed(2));
+  const totalFinal = Number(Math.max(0, subtotalBase - descuentoAcumulado).toFixed(2));
+
+  return {
+    ok: true,
+    subtotal: Number(subtotalBase.toFixed(2)),
+    descuento_total: descuentoAcumulado,
+    total: totalFinal,
+    cupones: cuponesAplicados
+  };
+}
+
+function nowMsSafe(iso = '') {
+  const value = Date.parse(String(iso || '').trim());
+  return Number.isFinite(value) ? value : 0;
 }
 
 async function aplicarDescuentosProductos(productos = [], bdVentas) {
@@ -1308,7 +1636,7 @@ async function obtenerProductosDisponibles(bdProduccion, bdRecetas, bdVentas, op
   return aplicarDescuentosProductos(todo, bdVentas);
 }
 
-async function crearPreferenciaMercadoPago({ orden, items, returnUrls = {} }) {
+async function crearPreferenciaMercadoPago({ orden, items, returnUrls = {}, montoTotalOverride = null }) {
   const accessToken = String(process.env.MP_ACCESS_TOKEN || "").trim();
   if (!accessToken) {
     return { ok: false, mensaje: "Mercado Pago no configurado (falta MP_ACCESS_TOKEN)" };
@@ -1342,13 +1670,41 @@ async function crearPreferenciaMercadoPago({ orden, items, returnUrls = {} }) {
     }
   })();
 
+  const itemsMercadoPago = (() => {
+    const base = (Array.isArray(items) ? items : []).map((item) => {
+      const quantity = Math.max(1, Number(item?.cantidad) || 1);
+      const unitPrice = Math.max(0, Number(item?.precio_unitario) || 0);
+      return {
+        title: String(item?.descripcion_mp || `${String(item?.categoria_nombre || '').trim()} - ${String(item?.nombre_receta || 'Producto').trim()}`).replace(/^\s*-\s*/, '').trim() || String(item?.nombre_receta || 'Producto'),
+        quantity,
+        unit_price: unitPrice,
+        currency_id: 'MXN'
+      };
+    });
+
+    const subtotal = base.reduce((sum, item) => sum + ((Number(item?.unit_price) || 0) * (Number(item?.quantity) || 0)), 0);
+    const totalObjetivo = Math.max(0, Number(montoTotalOverride));
+    const aplicaAjuste = Number.isFinite(totalObjetivo) && totalObjetivo > 0 && subtotal > 0 && totalObjetivo < subtotal;
+    if (!aplicaAjuste) return base;
+
+    let restante = Number(totalObjetivo.toFixed(2));
+    const ajustados = base.map((item, idx) => {
+      const original = (Number(item?.unit_price) || 0) * (Number(item?.quantity) || 0);
+      if (idx === base.length - 1) {
+        const unit = Number(item?.quantity) > 0 ? Math.max(0, Number((restante / Number(item.quantity)).toFixed(2))) : 0;
+        return { ...item, unit_price: unit };
+      }
+      const proporcion = subtotal > 0 ? (original / subtotal) : 0;
+      const totalItem = Math.max(0, Number((totalObjetivo * proporcion).toFixed(2)));
+      restante = Math.max(0, Number((restante - totalItem).toFixed(2)));
+      const unit = Number(item?.quantity) > 0 ? Math.max(0, Number((totalItem / Number(item.quantity)).toFixed(2))) : 0;
+      return { ...item, unit_price: unit };
+    });
+    return ajustados;
+  })();
+
   const body = {
-    items: items.map((item) => ({
-      title: String(item.descripcion_mp || `${String(item.categoria_nombre || '').trim()} - ${String(item.nombre_receta || 'Producto').trim()}`).replace(/^\s*-\s*/, '').trim() || String(item.nombre_receta || "Producto"),
-      quantity: Number(item.cantidad) || 1,
-      unit_price: Number(item.precio_unitario) || 0,
-      currency_id: "MXN"
-    })),
+    items: itemsMercadoPago,
     external_reference: orden.folio,
     statement_descriptor: "CHIPACTLI",
     back_urls: {
@@ -1649,16 +2005,34 @@ async function crearOrdenTiendaDesdeItems({
   direccionEntrega,
   notas,
   folio,
+  cuponesAplicados = [],
+  cuponAplicado = null,
   checkout = null
 }) {
-  const total = (itemsFinales || []).reduce((sum, item) => sum + (Number(item?.subtotal) || 0), 0);
+  const subtotal = (itemsFinales || []).reduce((sum, item) => sum + (Number(item?.subtotal) || 0), 0);
+  const cuponesLista = (Array.isArray(cuponesAplicados) && cuponesAplicados.length)
+    ? cuponesAplicados
+    : (cuponAplicado ? [cuponAplicado] : []);
+  const descuentoTotal = Math.max(0, Math.min(
+    subtotal,
+    (cuponesLista || []).reduce((sum, cup) => sum + (Math.max(0, Number(cup?.monto_descuento) || 0)), 0)
+  ));
+  const total = Math.max(0, Number((subtotal - descuentoTotal).toFixed(2)));
+  const cuponPrincipal = cuponesLista[0] || null;
+  const codigosCupon = cuponesLista
+    .map((cup) => normalizarCodigoCupon(cup?.codigo || ''))
+    .filter(Boolean);
+  const codigoCupon = codigosCupon.join(', ');
+  const idCupon = Number(cuponPrincipal?.id) || 0;
+  const tipoCupon = String(cuponPrincipal?.tipo || '').trim().toLowerCase();
+  const influencerNombre = String(cuponPrincipal?.influencer_nombre || '').trim();
   const estadoPagoInicial = metodoPago.toLowerCase() === 'mercado_pago' ? 'pendiente' : 'pendiente_manual';
 
   const insertOrden = await dbRun(
     bdVentas,
     `INSERT INTO tienda_ordenes
-     (folio, origen_pedido, id_cliente, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago, total, moneda, referencia_externa, detalle_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, creado_en)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, 'MXN', '', '', ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+     (folio, origen_pedido, id_cliente, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago, subtotal, descuento_total, total_sin_descuento, total, codigo_cupon, id_cupon, tipo_cupon, influencer_nombre, moneda, referencia_externa, detalle_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, creado_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'MXN', '', '', ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     [
       folio,
       origenPedido,
@@ -1668,7 +2042,14 @@ async function crearOrdenTiendaDesdeItems({
       cliente.telefono || '',
       metodoPago,
       estadoPagoInicial,
+      subtotal,
+      descuentoTotal,
+      subtotal,
       total,
+      codigoCupon || '',
+      idCupon || null,
+      tipoCupon || '',
+      influencerNombre || '',
       puntoEntrega.id,
       String(puntoEntrega.nombre || ''),
       direccionEntrega,
@@ -1683,6 +2064,34 @@ async function crearOrdenTiendaDesdeItems({
        VALUES (?, ?, ?, ?, ?, ?)`,
       [insertOrden.lastID, item.nombre_receta, item.cantidad, item.precio_unitario, item.subtotal, item.variante]
     );
+  }
+
+  if (cuponesLista.length && descuentoTotal > 0) {
+    const cantidadItems = (Array.isArray(itemsFinales) ? itemsFinales : [])
+      .reduce((sum, item) => sum + Math.max(0, Number(item?.cantidad) || 0), 0);
+    for (const cuponUso of cuponesLista) {
+      const idCuponUso = Number(cuponUso?.id) || 0;
+      const codigoCuponUso = normalizarCodigoCupon(cuponUso?.codigo || '');
+      const descuentoCuponUso = Math.max(0, Number(cuponUso?.monto_descuento) || 0);
+      if (!idCuponUso || !codigoCuponUso || descuentoCuponUso <= 0) continue;
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_cupones_uso
+         (id_cupon, codigo_cupon, id_cliente, id_orden, folio, monto_descuento, total_orden, items_cantidad_total, creado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [
+          idCuponUso,
+          codigoCuponUso,
+          Number(cliente?.id) || 0,
+          Number(insertOrden?.lastID) || 0,
+          folio,
+          descuentoCuponUso,
+          total,
+          cantidadItems
+        ]
+      );
+    }
   }
 
   let cantidadAutoVendida = 0;
@@ -1718,6 +2127,11 @@ async function crearOrdenTiendaDesdeItems({
     id_cliente: Number(cliente.id) || 0,
     folio,
     total,
+    subtotal,
+    descuento_total: descuentoTotal,
+    codigo_cupon: codigoCupon || '',
+    tipo_cupon: tipoCupon || '',
+    influencer_nombre: influencerNombre || '',
     cliente: cliente.nombre,
     metodo_pago: metodoPago
   });
@@ -1764,7 +2178,13 @@ async function crearOrdenTiendaDesdeItems({
     id: insertOrden.lastID,
     folio,
     origen_pedido: origenPedido,
+    subtotal,
+    descuento_total: descuentoTotal,
     total,
+    codigo_cupon: codigoCupon || '',
+    codigos_cupones: codigosCupon,
+    tipo_cupon: tipoCupon || '',
+    influencer_nombre: influencerNombre || '',
     metodo_pago: metodoPago,
     estado_pago: estadoPagoInicial,
     estado: 'pendiente'
@@ -1772,6 +2192,186 @@ async function crearOrdenTiendaDesdeItems({
 }
 
 export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario, bdAdmin = null) {
+  async function asegurarTablaRecordatoriosResena() {
+    await dbRun(
+      bdVentas,
+      `CREATE TABLE IF NOT EXISTS tienda_recordatorios_resena (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_orden INTEGER,
+        id_cliente INTEGER,
+        receta_nombre TEXT,
+        slug_producto TEXT,
+        email_cliente TEXT,
+        enviado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(id_orden, receta_nombre)
+      )`
+    );
+
+    await dbRun(
+      bdVentas,
+      `CREATE INDEX IF NOT EXISTS idx_tienda_recordatorios_resena_enviado
+       ON tienda_recordatorios_resena (enviado_en DESC)`
+    );
+  }
+
+  async function enviarRecordatoriosResenaPendientes() {
+    await asegurarTablaRecordatoriosResena();
+
+    const filas = await dbAll(
+      bdVentas,
+      `SELECT o.id AS id_orden,
+              o.id_cliente,
+              o.folio,
+              o.nombre_cliente,
+              o.email_cliente,
+              o.creado_en,
+              oi.receta_nombre,
+              oi.variante
+       FROM tienda_ordenes o
+       JOIN tienda_orden_items oi ON oi.id_orden = o.id
+       LEFT JOIN tienda_recordatorios_resena rr
+              ON rr.id_orden = o.id
+             AND LOWER(TRIM(rr.receta_nombre)) = LOWER(TRIM(oi.receta_nombre))
+       WHERE rr.id IS NULL
+         AND COALESCE(TRIM(o.email_cliente), '') <> ''
+         AND LOWER(TRIM(COALESCE(o.estado, ''))) <> 'cancelado'
+       ORDER BY o.id ASC, oi.id ASC`
+    );
+
+    if (!Array.isArray(filas) || !filas.length) return;
+
+    const catalogo = await dbAll(
+      bdVentas,
+      `SELECT receta_nombre, slug
+       FROM tienda_catalogo
+       WHERE COALESCE(TRIM(slug), '') <> ''`
+    );
+    const mapaSlugPorReceta = new Map();
+    (catalogo || []).forEach((row) => {
+      const receta = String(row?.receta_nombre || '').trim().toLowerCase();
+      const slug = String(row?.slug || '').trim();
+      if (!receta || !slug) return;
+      if (!mapaSlugPorReceta.has(receta)) mapaSlugPorReceta.set(receta, slug);
+    });
+
+    const ahora = Date.now();
+    const umbralMs = DIAS_RECORDATORIO_RESENA * 24 * 60 * 60 * 1000;
+    const enviadosEnLote = new Set();
+
+    for (const fila of filas) {
+      const idOrden = Number(fila?.id_orden) || 0;
+      const idCliente = Number(fila?.id_cliente) || 0;
+      const recetaNombre = String(fila?.receta_nombre || '').trim();
+      const emailCliente = String(fila?.email_cliente || '').trim();
+      if (!idOrden || !recetaNombre || !emailCliente) continue;
+
+      const claveLote = `${idOrden}::${recetaNombre.toLowerCase()}`;
+      if (enviadosEnLote.has(claveLote)) continue;
+
+      const creadoMs = Date.parse(String(fila?.creado_en || ''));
+      if (!Number.isFinite(creadoMs) || creadoMs <= 0) continue;
+      if ((ahora - creadoMs) < umbralMs) continue;
+
+      const recetaClave = recetaNombre.toLowerCase();
+      const slugProducto = String(mapaSlugPorReceta.get(recetaClave) || slugify(recetaNombre)).trim();
+      const linkProducto = construirLinkProductoResena(slugProducto);
+      const correo = construirCorreoRecordatorioResena({
+        nombreCliente: String(fila?.nombre_cliente || 'cliente').trim(),
+        folio: String(fila?.folio || '').trim(),
+        productoNombre: recetaNombre,
+        productoVariante: String(fila?.variante || '').trim(),
+        linkProducto,
+        diasDesdeCompra: DIAS_RECORDATORIO_RESENA
+      });
+
+      const resultado = await enviarCorreoCliente({
+        to: emailCliente,
+        subject: correo.subject,
+        text: correo.text,
+        html: correo.html
+      });
+
+      if (!resultado?.ok) continue;
+
+      enviadosEnLote.add(claveLote);
+      await dbRun(
+        bdVentas,
+        `INSERT OR IGNORE INTO tienda_recordatorios_resena
+         (id_orden, id_cliente, receta_nombre, slug_producto, email_cliente, enviado_en)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [idOrden, idCliente || null, recetaNombre, slugProducto, emailCliente]
+      );
+    }
+  }
+
+  async function iniciarSchedulerRecordatoriosResena() {
+    if (schedulerRecordatorioResenaIniciado) return;
+    schedulerRecordatorioResenaIniciado = true;
+
+    try {
+      await enviarRecordatoriosResenaPendientes();
+    } catch (error) {
+      console.error('[tienda] Error inicial de recordatorio reseña:', error?.message || error);
+    }
+
+    setInterval(() => {
+      enviarRecordatoriosResenaPendientes().catch((error) => {
+        console.error('[tienda] Error en scheduler de recordatorio reseña:', error?.message || error);
+      });
+    }, INTERVALO_RECORDATORIO_RESENA_MS);
+  }
+
+  iniciarSchedulerRecordatoriosResena().catch((error) => {
+    console.error('[tienda] No se pudo iniciar scheduler de recordatorio reseña:', error?.message || error);
+  });
+
+  async function authClienteConVersion(req, res, next) {
+    const auth = req.get("Authorization") || "";
+    if (!auth.startsWith("Bearer ")) {
+      return res.status(401).json({ exito: false, mensaje: "No autenticado" });
+    }
+
+    const token = auth.replace("Bearer ", "");
+    let decoded = null;
+    try {
+      decoded = jwt.verify(token, TIENDA_JWT_SECRET);
+    } catch {
+      return res.status(401).json({ exito: false, mensaje: "Token inválido" });
+    }
+
+    if (decoded?.tipo !== "tienda_cliente" || !decoded?.id) {
+      return res.status(401).json({ exito: false, mensaje: "Token inválido" });
+    }
+
+    try {
+      const cliente = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, email, COALESCE(token_version, 0) AS token_version FROM tienda_clientes WHERE id = ? LIMIT 1',
+        [decoded.id]
+      );
+
+      if (!cliente) {
+        return res.status(401).json({ exito: false, mensaje: "Sesión no válida" });
+      }
+
+      const versionToken = Number(decoded?.token_version || 0);
+      const versionActual = Number(cliente?.token_version || 0);
+      if (versionToken !== versionActual) {
+        return res.status(401).json({ exito: false, mensaje: "Tu sesión fue cerrada. Inicia sesión nuevamente." });
+      }
+
+      req.cliente = {
+        ...decoded,
+        nombre: cliente.nombre,
+        email: cliente.email,
+        token_version: versionActual
+      };
+      next();
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudo validar sesión" });
+    }
+  }
+
   async function validarContrasenaAdminActual(passwordPlano = '', usuarioActual = null) {
     if (!bdAdmin) {
       return { ok: false, status: 500, error: 'Base administrativa no disponible' };
@@ -2047,7 +2647,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const ordenesRaw = await dbAll(
         bdVentas,
-        `SELECT id, folio, origen_pedido, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago, total, moneda,
+        `SELECT id, folio, origen_pedido, nombre_cliente, email_cliente, telefono_cliente, metodo_pago, estado, estado_pago,
+                subtotal, descuento_total, total_sin_descuento, total, codigo_cupon, tipo_cupon, influencer_nombre, moneda,
                 id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas,
                 paqueteria, numero_guia, creado_en
          FROM tienda_ordenes
@@ -2082,6 +2683,11 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     await dbRun(
       bdVentas,
       `DELETE FROM tienda_orden_items WHERE id_orden IN (${placeholders})`,
+      idsValidos
+    );
+    await dbRun(
+      bdVentas,
+      `DELETE FROM tienda_cupones_uso WHERE id_orden IN (${placeholders})`,
       idsValidos
     );
     const resultado = await dbRun(
@@ -2139,6 +2745,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
         await dbRun(bdVentas, 'DELETE FROM tienda_notificaciones_cliente WHERE id_orden IS NOT NULL');
         await dbRun(bdVentas, 'DELETE FROM tienda_orden_items');
+        await dbRun(bdVentas, 'DELETE FROM tienda_cupones_uso');
         await dbRun(bdVentas, 'DELETE FROM tienda_ordenes');
         await dbRun(bdVentas, 'DELETE FROM tienda_checkout_intentos');
 
@@ -2146,7 +2753,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         try {
           await dbRun(
             bdVentas,
-            "DELETE FROM sqlite_sequence WHERE name IN ('tienda_ordenes', 'tienda_orden_items', 'tienda_checkout_intentos')"
+            "DELETE FROM sqlite_sequence WHERE name IN ('tienda_ordenes', 'tienda_orden_items', 'tienda_checkout_intentos', 'tienda_cupones_uso')"
           );
         } catch {
           // En Postgres no existe sqlite_sequence.
@@ -2591,6 +3198,241 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
+  app.get('/tienda/admin/cupones', authInterno, async (_req, res) => {
+    try {
+      const rows = await dbAll(
+        bdVentas,
+        `SELECT id, codigo, nombre, tipo, alcance_tipo, alcance_clave, influencer_nombre, influencer_handle,
+                tipo_descuento, valor_descuento, monto_minimo, max_descuento,
+                usos_maximos_total, usos_maximos_por_cliente, un_solo_uso_por_cliente,
+                valido_desde, valido_hasta, vigente_indefinido, activo,
+                metadata_json, creado_en, actualizado_en
+         FROM tienda_cupones
+         ORDER BY activo DESC, actualizado_en DESC, codigo ASC`
+      );
+
+      const stats = await dbAll(
+        bdVentas,
+        `SELECT id_cupon,
+                COUNT(*) AS usos,
+                SUM(COALESCE(monto_descuento, 0)) AS descuento_total,
+                SUM(COALESCE(total_orden, 0)) AS total_ventas,
+                SUM(COALESCE(items_cantidad_total, 0)) AS productos_vendidos
+         FROM tienda_cupones_uso
+         GROUP BY id_cupon`
+      );
+      const mapaStats = new Map((stats || []).map((row) => [Number(row?.id_cupon) || 0, {
+        usos: Number(row?.usos) || 0,
+        descuento_total: Number(row?.descuento_total) || 0,
+        total_ventas: Number(row?.total_ventas) || 0,
+        productos_vendidos: Number(row?.productos_vendidos) || 0
+      }]));
+
+      const salida = (rows || []).map((row) => {
+        const id = Number(row?.id) || 0;
+        const estadistica = mapaStats.get(id) || {
+          usos: 0,
+          descuento_total: 0,
+          total_ventas: 0,
+          productos_vendidos: 0
+        };
+        return {
+          ...row,
+          codigo: normalizarCodigoCupon(row?.codigo || ''),
+          estadistica
+        };
+      });
+
+      const resumenGeneral = {
+        cupones_totales: salida.length,
+        cupones_activos: salida.filter((item) => Number(item?.activo) === 1).length,
+        usos_totales: salida.reduce((sum, item) => sum + (Number(item?.estadistica?.usos) || 0), 0),
+        ventas_totales: salida.reduce((sum, item) => sum + (Number(item?.estadistica?.total_ventas) || 0), 0),
+        descuentos_totales: salida.reduce((sum, item) => sum + (Number(item?.estadistica?.descuento_total) || 0), 0),
+        productos_vendidos_totales: salida.reduce((sum, item) => sum + (Number(item?.estadistica?.productos_vendidos) || 0), 0)
+      };
+
+      res.json({ cupones: salida, resumen_general: resumenGeneral });
+    } catch {
+      res.status(500).json({ error: 'No se pudieron cargar cupones' });
+    }
+  });
+
+  app.post('/tienda/admin/cupones/upsert', authInterno, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const codigo = normalizarCodigoCupon(body?.codigo || '');
+      const nombre = String(body?.nombre || codigo).trim();
+      const tipo = String(body?.tipo || 'general').trim().toLowerCase();
+      const alcanceTipo = String(body?.alcance_tipo || 'todos').trim().toLowerCase();
+      const alcanceClave = String(body?.alcance_clave || '').trim().toLowerCase();
+      const influencerNombre = String(body?.influencer_nombre || '').trim();
+      const influencerHandle = String(body?.influencer_handle || '').trim();
+      const tipoDescuento = String(body?.tipo_descuento || 'porcentaje').trim().toLowerCase();
+      const valorDescuento = Math.max(0, Number(body?.valor_descuento) || 0);
+      const montoMinimo = Math.max(0, Number(body?.monto_minimo) || 0);
+      const maxDescuento = Math.max(0, Number(body?.max_descuento) || 0);
+      const usosMaximosTotal = Math.max(0, Number(body?.usos_maximos_total) || 0);
+      const usosMaximosPorCliente = Math.max(0, Number(body?.usos_maximos_por_cliente) || 0);
+      const unSoloUsoPorCliente = boolToInt(body?.un_solo_uso_por_cliente);
+      const vigenteIndefinido = boolToInt(body?.vigente_indefinido ?? true);
+      const activo = boolToInt(body?.activo ?? true);
+      const validoDesde = vigenteIndefinido === 1 ? '' : normalizarFechaCupon(body?.valido_desde);
+      const validoHasta = vigenteIndefinido === 1 ? '' : normalizarFechaCupon(body?.valido_hasta);
+
+      if (!codigo) return res.status(400).json({ error: 'Codigo obligatorio' });
+      if (!['general', 'influencer'].includes(tipo)) {
+        return res.status(400).json({ error: 'tipo invalido (general|influencer)' });
+      }
+      if (!['todos', 'categoria', 'producto'].includes(alcanceTipo)) {
+        return res.status(400).json({ error: 'alcance_tipo invalido (todos|categoria|producto)' });
+      }
+      if ((alcanceTipo === 'categoria' || alcanceTipo === 'producto') && !alcanceClave) {
+        return res.status(400).json({ error: 'alcance_clave es obligatoria para categoria/producto' });
+      }
+      if (!['porcentaje', 'monto_fijo'].includes(tipoDescuento)) {
+        return res.status(400).json({ error: 'tipo_descuento invalido (porcentaje|monto_fijo)' });
+      }
+      if (tipo === 'influencer' && !influencerNombre) {
+        return res.status(400).json({ error: 'influencer_nombre es obligatorio para cupones influencer' });
+      }
+      if (tipoDescuento === 'porcentaje' && valorDescuento > 95) {
+        return res.status(400).json({ error: 'El descuento porcentual no puede ser mayor a 95' });
+      }
+
+      await dbRun(
+        bdVentas,
+        `INSERT INTO tienda_cupones
+         (codigo, nombre, tipo, alcance_tipo, alcance_clave, influencer_nombre, influencer_handle, tipo_descuento, valor_descuento, monto_minimo,
+          max_descuento, usos_maximos_total, usos_maximos_por_cliente, un_solo_uso_por_cliente,
+          valido_desde, valido_hasta, vigente_indefinido, activo, metadata_json, actualizado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(codigo) DO UPDATE SET
+           nombre = excluded.nombre,
+           tipo = excluded.tipo,
+           alcance_tipo = excluded.alcance_tipo,
+           alcance_clave = excluded.alcance_clave,
+           influencer_nombre = excluded.influencer_nombre,
+           influencer_handle = excluded.influencer_handle,
+           tipo_descuento = excluded.tipo_descuento,
+           valor_descuento = excluded.valor_descuento,
+           monto_minimo = excluded.monto_minimo,
+           max_descuento = excluded.max_descuento,
+           usos_maximos_total = excluded.usos_maximos_total,
+           usos_maximos_por_cliente = excluded.usos_maximos_por_cliente,
+           un_solo_uso_por_cliente = excluded.un_solo_uso_por_cliente,
+           valido_desde = excluded.valido_desde,
+           valido_hasta = excluded.valido_hasta,
+           vigente_indefinido = excluded.vigente_indefinido,
+           activo = excluded.activo,
+           metadata_json = excluded.metadata_json,
+           actualizado_en = CURRENT_TIMESTAMP`,
+        [
+          codigo,
+          nombre,
+          tipo,
+          alcanceTipo,
+          alcanceTipo === 'todos' ? '' : alcanceClave,
+          influencerNombre,
+          influencerHandle,
+          tipoDescuento,
+          valorDescuento,
+          montoMinimo,
+          maxDescuento,
+          usosMaximosTotal,
+          usosMaximosPorCliente,
+          unSoloUsoPorCliente,
+          validoDesde,
+          validoHasta,
+          vigenteIndefinido,
+          activo,
+          JSON.stringify(body?.metadata || {})
+        ]
+      );
+
+      transmitir({ tipo: 'tienda_cupones_actualizados', codigo });
+      res.json({ ok: true, codigo });
+    } catch {
+      res.status(500).json({ error: 'No se pudo guardar cupon' });
+    }
+  });
+
+  app.patch('/tienda/admin/cupones/:id/activo', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      const activo = boolToInt(req.body?.activo);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Cupon invalido' });
+
+      const row = await dbGet(
+        bdVentas,
+        'SELECT id, codigo FROM tienda_cupones WHERE id = ? LIMIT 1',
+        [id]
+      );
+      if (!row) return res.status(404).json({ error: 'Cupon no encontrado' });
+
+      await dbRun(
+        bdVentas,
+        'UPDATE tienda_cupones SET activo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?',
+        [activo, id]
+      );
+
+      transmitir({ tipo: 'tienda_cupones_actualizados', codigo: normalizarCodigoCupon(row?.codigo || '') });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'No se pudo actualizar el estado del cupon' });
+    }
+  });
+
+  app.get('/tienda/admin/cupones/historial', authInterno, async (_req, res) => {
+    try {
+      const usos = await dbAll(
+        bdVentas,
+        `SELECT u.id, u.id_cupon, u.codigo_cupon, u.id_cliente, u.id_orden, u.folio,
+                u.monto_descuento, u.total_orden, u.items_cantidad_total, u.creado_en,
+                c.tipo AS cupon_tipo, c.nombre AS cupon_nombre, c.influencer_nombre, c.influencer_handle,
+                o.estado, o.estado_pago, o.total AS orden_total
+         FROM tienda_cupones_uso u
+         LEFT JOIN tienda_cupones c ON c.id = u.id_cupon
+         LEFT JOIN tienda_ordenes o ON o.id = u.id_orden
+         ORDER BY u.id DESC
+         LIMIT 2000`
+      );
+
+      const influencerRows = await dbAll(
+        bdVentas,
+        `SELECT c.id,
+                c.codigo,
+                c.nombre,
+                c.influencer_nombre,
+                c.influencer_handle,
+                COUNT(DISTINCT u.id_orden) AS ordenes,
+                SUM(COALESCE(oi.cantidad, 0)) AS productos_vendidos,
+                SUM(COALESCE(u.monto_descuento, 0)) AS descuento_otorgado,
+                SUM(COALESCE(u.total_orden, 0)) AS total_ventas
+         FROM tienda_cupones c
+         LEFT JOIN tienda_cupones_uso u ON u.id_cupon = c.id
+         LEFT JOIN tienda_orden_items oi ON oi.id_orden = u.id_orden
+         WHERE LOWER(COALESCE(c.tipo, '')) = 'influencer'
+         GROUP BY c.id, c.codigo, c.nombre, c.influencer_nombre, c.influencer_handle
+         ORDER BY ordenes DESC, productos_vendidos DESC, total_ventas DESC`
+      );
+
+      res.json({
+        historial: usos || [],
+        influencers: (influencerRows || []).map((row) => ({
+          ...row,
+          codigo: normalizarCodigoCupon(row?.codigo || ''),
+          ordenes: Number(row?.ordenes) || 0,
+          productos_vendidos: Number(row?.productos_vendidos) || 0,
+          descuento_otorgado: Number(row?.descuento_otorgado) || 0,
+          total_ventas: Number(row?.total_ventas) || 0
+        }))
+      });
+    } catch {
+      res.status(500).json({ error: 'No se pudo cargar historial de cupones' });
+    }
+  });
+
   app.get('/tienda/admin/paquetes', authInterno, async (req, res) => {
     try {
       const paquetes = await dbAll(
@@ -2740,8 +3582,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const hash = await bcrypt.hash(password, 10);
       const creado = await dbRun(
         bdVentas,
-        `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones, creado_en, actualizado_en)
-         VALUES (?, '', '', ?, ?, ?, '', '', '', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones, debe_cambiar_password, creado_en, actualizado_en)
+         VALUES (?, '', '', ?, ?, ?, '', '', '', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [nombre, email, hash, telefono, recibePromociones]
       );
 
@@ -2766,7 +3608,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         // El registro no debe fallar si el correo de bienvenida no se envía.
       }
 
-      const cliente = { id: creado.lastID, nombre, email, recibe_promociones: recibePromociones };
+      const cliente = { id: creado.lastID, nombre, email, recibe_promociones: recibePromociones, token_version: 0 };
       const token = crearTokenCliente(cliente);
       return res.json({ exito: true, token, cliente });
     } catch (error) {
@@ -2796,6 +3638,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       return res.json({
         exito: true,
         token,
+        debe_cambiar_password: Number(cliente?.debe_cambiar_password || 0) === 1,
+        token_version: Number(cliente?.token_version || 0),
         cliente: {
           id: cliente.id,
           nombre: cliente.nombre,
@@ -2814,7 +3658,147 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.get('/tienda/auth/carrito', authCliente, async (req, res) => {
+  app.post('/tienda/auth/olvide-password', async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({ exito: false, mensaje: 'Debes escribir tu correo' });
+      }
+
+      const cliente = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, email FROM tienda_clientes WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1',
+        [email]
+      );
+
+      if (!cliente) {
+        return res.status(404).json({ exito: false, mensaje: 'El correo no está registrado' });
+      }
+
+      if (!correoConfigurado()) {
+        return res.status(503).json({ exito: false, mensaje: 'El servicio de correo no está configurado' });
+      }
+
+      const passwordTemporal = generarPasswordTemporalCliente();
+      const hashTemporal = await bcrypt.hash(passwordTemporal, 10);
+
+      await dbRun(
+        bdVentas,
+        'UPDATE tienda_clientes SET password_hash = ?, debe_cambiar_password = 1, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?',
+        [hashTemporal, cliente.id]
+      );
+
+      const nombreCliente = String(cliente?.nombre || '').trim() || 'Cliente';
+      const asunto = 'CHIPACTLI | Recuperación de contraseña';
+      const text = [
+        `Hola ${nombreCliente},`,
+        '',
+        'Recibimos una solicitud para restablecer tu contraseña.',
+        `Tu contraseña temporal es: ${passwordTemporal}`,
+        '',
+        'Inicia sesión con esa contraseña temporal y el sistema te pedirá cambiarla de inmediato.',
+        '',
+        'Si no solicitaste este cambio, ignora este mensaje.'
+      ].join('\n');
+      const html = layoutCorreoChipactli({
+        titulo: 'Recuperación de contraseña',
+        saludo: `Hola ${nombreCliente},`,
+        intro: 'Recibimos una solicitud para restablecer tu contraseña.',
+        bloquesHtml: `<div style="margin:12px 0;padding:12px;border-radius:10px;border:1px dashed #cad8cf;background:#f5faf6;"><strong>Contraseña temporal:</strong> ${escaparHtml(passwordTemporal)}</div>`,
+        cierre: 'Inicia sesión con esa contraseña y cámbiala de inmediato por seguridad.'
+      });
+
+      const resultadoCorreo = await enviarCorreoCliente({
+        to: cliente.email,
+        subject: asunto,
+        text,
+        html
+      });
+
+      if (!resultadoCorreo?.ok) {
+        return res.status(500).json({ exito: false, mensaje: 'No se pudo enviar el correo de recuperación' });
+      }
+
+      return res.json({
+        exito: true,
+        mensaje: 'Te enviamos una contraseña temporal a tu correo. Revisa bandeja y spam.'
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo procesar la recuperación' });
+    }
+  });
+
+  app.post('/tienda/auth/cambiar-password', authClienteConVersion, async (req, res) => {
+    try {
+      const passwordNueva = String(req.body?.password_nueva || '');
+      const cerrarSesiones = Boolean(req.body?.cerrar_sesiones);
+      if (!passwordNueva || passwordNueva.length < 8) {
+        return res.status(400).json({ exito: false, mensaje: 'La nueva contraseña debe tener al menos 8 caracteres' });
+      }
+
+      const hash = await bcrypt.hash(passwordNueva, 10);
+      const clienteActual = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, email, COALESCE(token_version, 0) AS token_version FROM tienda_clientes WHERE id = ? LIMIT 1',
+        [req.cliente.id]
+      );
+      if (!clienteActual) {
+        return res.status(404).json({ exito: false, mensaje: 'Cliente no encontrado' });
+      }
+
+      let tokenVersionNuevo = Number(clienteActual?.token_version || 0);
+      if (cerrarSesiones) tokenVersionNuevo += 1;
+
+      await dbRun(
+        bdVentas,
+        'UPDATE tienda_clientes SET password_hash = ?, debe_cambiar_password = 0, token_version = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?',
+        [hash, tokenVersionNuevo, req.cliente.id]
+      );
+
+      const nombreCliente = String(clienteActual?.nombre || '').trim() || 'Cliente';
+      const mensajeCierre = cerrarSesiones
+        ? 'Elegiste cerrar sesión en todos tus dispositivos.'
+        : 'Tus sesiones actuales se mantuvieron abiertas.';
+      const asunto = 'CHIPACTLI | Contraseña actualizada con éxito';
+      const text = [
+        `Hola ${nombreCliente},`,
+        '',
+        'Tu contraseña fue actualizada con éxito.',
+        mensajeCierre,
+        '',
+        'Si no reconoces este cambio, contáctanos de inmediato.'
+      ].join('\n');
+      const html = layoutCorreoChipactli({
+        titulo: 'Contraseña actualizada',
+        saludo: `Hola ${nombreCliente},`,
+        intro: 'Tu contraseña fue actualizada con éxito.',
+        bloquesHtml: `<div style="margin:12px 0;padding:12px;border-radius:10px;border:1px solid #d5e2d7;background:#f5faf6;">${escaparHtml(mensajeCierre)}</div>`,
+        cierre: 'Si no reconoces este cambio, contáctanos de inmediato.'
+      });
+      await enviarCorreoCliente({ to: clienteActual.email, subject: asunto, text, html });
+
+      const tokenRefrescado = cerrarSesiones
+        ? crearTokenCliente({
+            id: clienteActual.id,
+            nombre: clienteActual.nombre,
+            email: clienteActual.email,
+            token_version: tokenVersionNuevo
+          })
+        : '';
+
+      return res.json({
+        exito: true,
+        mensaje: 'Contraseña actualizada',
+        cerrar_sesiones_aplicado: cerrarSesiones,
+        token_version: tokenVersionNuevo,
+        token: tokenRefrescado
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo actualizar la contraseña' });
+    }
+  });
+
+  app.get('/tienda/auth/carrito', authClienteConVersion, async (req, res) => {
     try {
       const row = await dbGet(
         bdVentas,
@@ -2847,7 +3831,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.put('/tienda/auth/carrito', authCliente, async (req, res) => {
+  app.put('/tienda/auth/carrito', authClienteConVersion, async (req, res) => {
     try {
       const items = normalizarItemsCarrito(Array.isArray(req.body?.items) ? req.body.items : []);
       const creadoEn = Math.max(0, Number(req.body?.creado_en) || 0) || Date.now();
@@ -2904,7 +3888,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.get("/tienda/auth/perfil", authCliente, async (req, res) => {
+  app.get("/tienda/auth/perfil", authClienteConVersion, async (req, res) => {
     try {
       const cliente = await dbGet(
         bdVentas,
@@ -2919,7 +3903,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.patch("/tienda/auth/perfil", authCliente, async (req, res) => {
+  app.patch("/tienda/auth/perfil", authClienteConVersion, async (req, res) => {
     try {
       const nombre = String(req.body?.nombre || "").trim();
       const apellidoPaterno = String(req.body?.apellido_paterno || "").trim();
@@ -2975,7 +3959,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.get('/tienda/auth/direcciones', authCliente, async (req, res) => {
+  app.get('/tienda/auth/direcciones', authClienteConVersion, async (req, res) => {
     try {
       const rows = await dbAll(
         bdVentas,
@@ -2991,7 +3975,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/auth/direcciones', authCliente, async (req, res) => {
+  app.post('/tienda/auth/direcciones', authClienteConVersion, async (req, res) => {
     try {
       const alias = String(req.body?.alias || '').trim();
       const direccion = String(req.body?.direccion || '').trim();
@@ -3041,7 +4025,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.patch('/tienda/auth/direcciones/:id', authCliente, async (req, res) => {
+  app.patch('/tienda/auth/direcciones/:id', authClienteConVersion, async (req, res) => {
     try {
       const idDireccion = Number(req.params.id);
       if (!Number.isFinite(idDireccion) || idDireccion <= 0) {
@@ -3107,7 +4091,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.delete('/tienda/auth/direcciones/:id', authCliente, async (req, res) => {
+  app.delete('/tienda/auth/direcciones/:id', authClienteConVersion, async (req, res) => {
     try {
       const idDireccion = Number(req.params.id);
       if (!Number.isFinite(idDireccion) || idDireccion <= 0) {
@@ -3175,7 +4159,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/auth/atencion', authCliente, async (req, res) => {
+  app.post('/tienda/auth/atencion', authClienteConVersion, async (req, res) => {
     try {
       const asunto = String(req.body?.asunto || '').trim();
       const mensaje = String(req.body?.mensaje || '').trim();
@@ -3286,7 +4270,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/resenas', authCliente, async (req, res) => {
+  app.post('/tienda/resenas', authClienteConVersion, async (req, res) => {
     try {
       const recetaNombre = String(req.body?.receta_nombre || '').trim();
       const comentario = String(req.body?.comentario || '').trim();
@@ -3435,12 +4419,73 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/checkout/mercado-pago/preferencia', authCliente, async (req, res) => {
+  app.post('/tienda/cupones/validar', authClienteConVersion, async (req, res) => {
+    try {
+      const codigoCupon = normalizarCodigoCupon(req.body?.codigo_cupon || '');
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const subtotalBody = Number(req.body?.subtotal);
+      const subtotal = Number.isFinite(subtotalBody) && subtotalBody > 0
+        ? subtotalBody
+        : calcularSubtotalItemsPlano(items);
+
+      const validacion = await validarCuponParaMonto({
+        bdVentas,
+        codigoCupon,
+        idCliente: req.cliente.id,
+        subtotal,
+        items
+      });
+
+      if (!validacion?.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: validacion?.error || 'Cupon invalido'
+        });
+      }
+
+      return res.json({ ok: true, ...validacion });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo validar el cupon' });
+    }
+  });
+
+  app.post('/tienda/cupones/validar-publico', async (req, res) => {
+    try {
+      const codigoCupon = normalizarCodigoCupon(req.body?.codigo_cupon || '');
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      const subtotalBody = Number(req.body?.subtotal);
+      const subtotal = Number.isFinite(subtotalBody) && subtotalBody > 0
+        ? subtotalBody
+        : calcularSubtotalItemsPlano(items);
+
+      const validacion = await validarCuponParaMonto({
+        bdVentas,
+        codigoCupon,
+        idCliente: 0,
+        subtotal,
+        items
+      });
+
+      if (!validacion?.ok) {
+        return res.status(400).json({
+          ok: false,
+          error: validacion?.error || 'Cupon invalido'
+        });
+      }
+
+      return res.json({ ok: true, ...validacion });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo validar el cupon' });
+    }
+  });
+
+  app.post('/tienda/checkout/mercado-pago/preferencia', authClienteConVersion, async (req, res) => {
     try {
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const origenPedido = normalizarOrigenPedido(req.body?.origen_pedido, 'web');
       const idPuntoEntrega = Number(req.body?.id_punto_entrega);
       const notas = String(req.body?.notas || "").trim();
+      const codigosCuponBody = normalizarListaCodigosCupones(req.body?.codigos_cupones, req.body?.codigo_cupon || '');
       const urlRetornoBase = String(req.body?.url_retorno_base || '').trim();
 
       if (!items.length) return res.status(400).json({ error: 'El carrito está vacío' });
@@ -3533,9 +4578,34 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       ].filter(Boolean).join(' · ');
 
       const folio = await generarFolioOrdenTienda(bdVentas, origenPedido);
+      let cuponAplicado = null;
+      let cuponesAplicados = [];
+      let subtotalFinal = Number(total.toFixed(2));
+      let descuentoTotal = 0;
+      let totalFinal = subtotalFinal;
+
+      if (codigosCuponBody.length) {
+        const validacionCupones = await validarCuponesApiladosParaMonto({
+          bdVentas,
+          codigosCupones: codigosCuponBody,
+          idCliente: req.cliente.id,
+          subtotal: subtotalFinal,
+          items: itemsFinales
+        });
+        if (!validacionCupones?.ok) {
+          return res.status(400).json({ error: validacionCupones?.error || 'Cupon invalido' });
+        }
+        cuponesAplicados = Array.isArray(validacionCupones?.cupones) ? validacionCupones.cupones : [];
+        cuponAplicado = cuponesAplicados[0] || null;
+        subtotalFinal = Number(validacionCupones.subtotal) || subtotalFinal;
+        descuentoTotal = Number(validacionCupones.descuento_total) || 0;
+        totalFinal = Number(validacionCupones.total) || totalFinal;
+      }
+
       const preferenciaMercadoPago = await crearPreferenciaMercadoPago({
         orden: { folio, id: 0 },
         items: itemsFinales,
+        montoTotalOverride: totalFinal,
         returnUrls: {
           success: successUrl,
           pending: pendingUrl,
@@ -3550,14 +4620,21 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         proveedor: 'mercado_pago',
         preference_id: preferenciaMercadoPago.id,
         init_point: preferenciaMercadoPago.init_point,
-        sandbox_init_point: preferenciaMercadoPago.sandbox_init_point
+        sandbox_init_point: preferenciaMercadoPago.sandbox_init_point,
+        subtotal: subtotalFinal,
+        descuento_total: descuentoTotal,
+        total: totalFinal,
+        codigo_cupon: cuponAplicado?.codigo || '',
+        codigos_cupones: cuponesAplicados.map((cup) => String(cup?.codigo || '').trim()).filter(Boolean),
+        cupon: cuponAplicado || null,
+        cupones: cuponesAplicados
       };
 
       await dbRun(
         bdVentas,
         `INSERT INTO tienda_checkout_intentos
-         (folio, id_cliente, origen_pedido, metodo_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, total, items_json, preference_id, payment_status, detalle_pago, creado_en, actualizado_en)
-         VALUES (?, ?, ?, 'mercado_pago', ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+         (folio, id_cliente, origen_pedido, metodo_pago, id_punto_entrega, nombre_punto_entrega, direccion_entrega, notas, subtotal, descuento_total, total, codigo_cupon, cupon_json, items_json, preference_id, payment_status, detalle_pago, creado_en, actualizado_en)
+         VALUES (?, ?, ?, 'mercado_pago', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [
           folio,
           Number(cliente.id) || 0,
@@ -3566,7 +4643,11 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           String(puntoEntrega.nombre || ''),
           direccionEntrega,
           notas,
-          total,
+          subtotalFinal,
+          descuentoTotal,
+          totalFinal,
+          cuponAplicado?.codigo || '',
+          (cuponesAplicados.length ? JSON.stringify(cuponesAplicados) : (cuponAplicado ? JSON.stringify(cuponAplicado) : '')),
           JSON.stringify(itemsFinales),
           String(preferenciaMercadoPago.id || ''),
           JSON.stringify(checkout)
@@ -3697,6 +4778,35 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       return { status: 400, payload: { error: 'No se pudo reconstruir el carrito pagado' } };
     }
 
+    const cuponIntentoRaw = parseJSON(intento?.cupon_json, null);
+    const cuponesIntento = Array.isArray(cuponIntentoRaw)
+      ? cuponIntentoRaw
+      : (cuponIntentoRaw ? [cuponIntentoRaw] : []);
+    const codigosCuponIntento = normalizarListaCodigosCupones(
+      cuponesIntento.map((cup) => cup?.codigo || ''),
+      intento?.codigo_cupon || ''
+    );
+    let cuponesAplicados = [];
+    let cuponAplicado = null;
+    if (codigosCuponIntento.length) {
+      const subtotalIntento = Math.max(0, Number(intento?.subtotal) || calcularSubtotalItemsPlano(itemsFinales));
+      const validacionCupones = await validarCuponesApiladosParaMonto({
+        bdVentas,
+        codigosCupones: codigosCuponIntento,
+        idCliente,
+        subtotal: subtotalIntento,
+        items: itemsFinales
+      });
+      if (!validacionCupones?.ok) {
+        return {
+          status: 400,
+          payload: { error: validacionCupones?.error || 'El cupon aplicado ya no es valido' }
+        };
+      }
+      cuponesAplicados = Array.isArray(validacionCupones?.cupones) ? validacionCupones.cupones : [];
+      cuponAplicado = cuponesAplicados[0] || null;
+    }
+
     const checkout = {
       proveedor: 'mercado_pago',
       preference_id: String(intento.preference_id || pagoMp?.mp_preference_id || preferenceIdTxt || ''),
@@ -3719,6 +4829,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       direccionEntrega,
       notas: String(intento.notas || '').trim(),
       folio: String(intento.folio || '').trim(),
+      cuponesAplicados,
+      cuponAplicado,
       checkout
     });
 
@@ -3759,7 +4871,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     };
   }
 
-  app.post('/tienda/checkout/mercado-pago/reconciliar', authCliente, async (req, res) => {
+  app.post('/tienda/checkout/mercado-pago/reconciliar', authClienteConVersion, async (req, res) => {
     try {
       const preferenceId = String(req.body?.preference_id || '').trim();
       const intentos = [];
@@ -3820,7 +4932,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/checkout/mercado-pago/confirmar', authCliente, async (req, res) => {
+  app.post('/tienda/checkout/mercado-pago/confirmar', authClienteConVersion, async (req, res) => {
     try {
       const resultado = await confirmarCheckoutMercadoPagoCliente({
         idCliente: req.cliente.id,
@@ -3834,13 +4946,14 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post("/tienda/ordenes", authCliente, async (req, res) => {
+  app.post("/tienda/ordenes", authClienteConVersion, async (req, res) => {
     try {
       const items = Array.isArray(req.body?.items) ? req.body.items : [];
       const metodoPago = String(req.body?.metodo_pago || "").trim() || "efectivo";
       const origenPedido = normalizarOrigenPedido(req.body?.origen_pedido, 'web');
       const idPuntoEntrega = Number(req.body?.id_punto_entrega);
       const notas = String(req.body?.notas || "").trim();
+      const codigosCupon = normalizarListaCodigosCupones(req.body?.codigos_cupones, req.body?.codigo_cupon || '');
 
       if (!items.length) return res.status(400).json({ error: "El carrito está vacío" });
 
@@ -3921,6 +5034,23 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       ].filter(Boolean).join(' · ');
 
       const folio = await generarFolioOrdenTienda(bdVentas, origenPedido);
+      let cuponAplicado = null;
+      let cuponesAplicados = [];
+      if (codigosCupon.length) {
+        const validacionCupones = await validarCuponesApiladosParaMonto({
+          bdVentas,
+          codigosCupones: codigosCupon,
+          idCliente: req.cliente.id,
+          subtotal: total,
+          items: itemsFinales
+        });
+        if (!validacionCupones?.ok) {
+          return res.status(400).json({ error: validacionCupones?.error || 'Cupon invalido' });
+        }
+        cuponesAplicados = Array.isArray(validacionCupones?.cupones) ? validacionCupones.cupones : [];
+        cuponAplicado = cuponesAplicados[0] || null;
+      }
+
       const orden = await crearOrdenTiendaDesdeItems({
         bdProduccion,
         bdVentas,
@@ -3933,6 +5063,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         direccionEntrega,
         notas,
         folio,
+        cuponesAplicados,
+        cuponAplicado,
         checkout: null
       });
 
@@ -3945,11 +5077,13 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.get("/tienda/ordenes/mis", authCliente, async (req, res) => {
+  app.get("/tienda/ordenes/mis", authClienteConVersion, async (req, res) => {
     try {
       const ordenesRaw = await dbAll(
         bdVentas,
-        `SELECT id, folio, origen_pedido, metodo_pago, estado, estado_pago, total, moneda, referencia_externa, detalle_pago,
+        `SELECT id, folio, origen_pedido, metodo_pago, estado, estado_pago,
+                subtotal, descuento_total, total_sin_descuento, total, codigo_cupon, tipo_cupon, influencer_nombre,
+                moneda, referencia_externa, detalle_pago,
           paqueteria, numero_guia, creado_en, actualizado_en
          FROM tienda_ordenes
          WHERE id_cliente = ?
@@ -3966,7 +5100,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.get('/tienda/auth/notificaciones', authCliente, async (req, res) => {
+  app.get('/tienda/auth/notificaciones', authClienteConVersion, async (req, res) => {
     try {
       const rows = await dbAll(
         bdVentas,
@@ -3983,7 +5117,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/auth/notificaciones/marcar-leidas', authCliente, async (req, res) => {
+  app.post('/tienda/auth/notificaciones/marcar-leidas', authClienteConVersion, async (req, res) => {
     try {
       await dbRun(
         bdVentas,
@@ -3998,7 +5132,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.post('/tienda/auth/notificaciones/:id/marcar-leida', authCliente, async (req, res) => {
+  app.post('/tienda/auth/notificaciones/:id/marcar-leida', authClienteConVersion, async (req, res) => {
     try {
       const idNotificacion = Number(req.params.id);
       if (!Number.isFinite(idNotificacion) || idNotificacion <= 0) {
@@ -4023,7 +5157,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
-  app.delete('/tienda/auth/notificaciones', authCliente, async (req, res) => {
+  app.delete('/tienda/auth/notificaciones', authClienteConVersion, async (req, res) => {
     try {
       await dbRun(
         bdVentas,

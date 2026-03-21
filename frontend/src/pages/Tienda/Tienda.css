@@ -428,6 +428,9 @@
 .tiendaPerfil input:not([type='checkbox']),
 .tiendaPerfil select,
 .tiendaPerfil textarea,
+.tiendaCuponModal input:not([type='checkbox']),
+.tiendaCuponModal select,
+.tiendaCuponModal textarea,
 .tiendaAdminForm input:not([type='checkbox']),
 .tiendaAdminForm select,
 .tiendaAdminForm textarea,
@@ -455,6 +458,9 @@
 .tiendaPerfil input:not([type='checkbox']):focus,
 .tiendaPerfil select:focus,
 .tiendaPerfil textarea:focus,
+.tiendaCuponModal input:not([type='checkbox']):focus,
+.tiendaCuponModal select:focus,
+.tiendaCuponModal textarea:focus,
 .tiendaAdminForm input:not([type='checkbox']):focus,
 .tiendaAdminForm select:focus,
 .tiendaAdminForm textarea:focus,
@@ -798,7 +804,7 @@
 
 .tiendaProductos {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -830,18 +836,24 @@
 .tiendaProductoCard {
   border: 1px solid #d8dfdb;
   border-radius: 16px;
-  padding: 10px;
+  padding: 9px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   background: #fff;
   height: 100%;
 }
 
+.tiendaProductoCard h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+}
+
 .tiendaCardFooter {
-  margin-top: auto;
+  margin-top: 2px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tiendaCalificacionCard {
@@ -854,6 +866,17 @@
   background: #f8fcf9;
   padding: 6px 8px;
   min-width: 0;
+}
+
+.tiendaCalificacionCard.sinTexto {
+  justify-content: center;
+}
+
+.tiendaCalificacionCard.sinTexto .tiendaHojitasFila {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 0;
 }
 
 .tiendaHojitasFila {
@@ -900,7 +923,10 @@
 .tiendaImagenWrap {
   border-radius: 12px;
   overflow: hidden;
-  height: 130px;
+  aspect-ratio: 1 / 1;
+  width: 92%;
+  height: auto;
+  margin: 0 auto;
   background: #f2f5f3;
   display: flex;
   align-items: center;
@@ -921,11 +947,28 @@
 .tiendaDescripcion {
   font-size: 13px;
   color: #4b5752;
-  min-height: 36px;
+  min-height: 30px;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .tiendaVariantesCard {
   margin-top: -2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  align-items: center;
+  gap: 6px;
+}
+
+.tiendaVariantesLista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
 }
 
 .tiendaChipVariante {
@@ -945,6 +988,7 @@
   justify-content: center;
   gap: 8px;
   align-items: center;
+  margin-top: 0;
 }
 
 .tiendaMetaSolo,
@@ -964,12 +1008,26 @@
 .tiendaMetaSolo {
   color: #375145;
   background: #eef4f1;
+  min-width: 78px;
+  justify-content: center;
 }
 
 .tiendaMetaPrecio {
   color: #24593f;
   background: rgba(74, 124, 89, 0.14);
   justify-self: start;
+}
+
+.tiendaMetaPrecioInline {
+  width: 82px;
+  padding-left: 6px;
+  padding-right: 6px;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.tiendaMetaFallback {
+  justify-content: flex-end;
 }
 
 .tiendaMetaDisponibilidad {
@@ -1001,6 +1059,46 @@
 .tiendaAccionesCard {
   display: flex;
   gap: 8px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 0;
+}
+
+.tiendaAccionesCard .boton {
+  margin-right: 0;
+  min-width: 102px;
+}
+
+.tiendaShareIconRow {
+  margin-top: 4px;
+  margin-bottom: 2px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tiendaShareIconBtn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+  cursor: pointer;
+  color: #6b7b73;
+  opacity: 0.9;
+}
+
+.tiendaShareIconBtn:hover {
+  opacity: 1;
+  color: #3f5e50;
+}
+
+.tiendaShareIconBtn svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  fill: currentColor;
 }
 
 .tiendaSwitchCard {
@@ -1124,6 +1222,52 @@
   margin-top: auto;
 }
 
+.tiendaCuponInput {
+  border: 2px solid #2a2a2a;
+}
+
+.tiendaCuponInput.invalido {
+  border-color: #c75550 !important;
+  box-shadow: 0 0 0 2px rgba(199, 85, 80, 0.16);
+}
+
+.tiendaCuponInput.valido {
+  border-color: #4a7c59 !important;
+  box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.16);
+}
+
+.tiendaCuponAplicadoBar {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  border: 1px solid #cfe0d3;
+  border-radius: 10px;
+  background: #f4faf5;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #2f4f3f;
+  font-size: 12px;
+}
+
+.tiendaCuponAplicadoLista {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tiendaCuponAplicadoChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  border: 1px solid #bcd3c2;
+  background: #ffffff;
+}
+
 .tiendaPaso,
 .tiendaPasoActivo {
   border: 1px solid #d0dad4;
@@ -1160,13 +1304,25 @@
 }
 
 .tiendaCheckoutResumen {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  gap: 4px;
   border: 1px dashed #ced9d3;
   border-radius: 10px;
   padding: 10px 12px;
   color: #2f2f2f;
+}
+
+.tiendaCheckoutResumenFilas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tiendaCheckoutResumenTotal {
+  border-top: 1px dashed #d6ded9;
+  padding-top: 6px;
+  margin-top: 3px;
 }
 
 .tiendaMetodoPagoGrid {
@@ -1613,8 +1769,8 @@
 
 .tiendaFooterPagosLogos {
   display: block;
-  width: min(340px, 100%);
-  height: auto;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -1622,13 +1778,22 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+}
+
+.tiendaFooterPagoLogoItem {
+  width: 88px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .tiendaFooterPagosLogosWrap .tiendaFooterPagosLogos {
-  width: auto;
-  max-width: 150px;
-  max-height: 34px;
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .tiendaFooterPagoTextoItem {
@@ -1706,19 +1871,31 @@
 .tiendaAdminMetodoPagoSwitch input {
   width: 16px;
   height: 16px;
+}
+
 .tiendaAdminImagenMiniWrap {
   display: grid;
   gap: 8px;
-}
-.tiendaAdminImagenMini {
-  width: 100%;
-  max-height: 84px;
-  object-fit: contain;
   border: 1px solid #dce6df;
   border-radius: 10px;
   background: #f8fcf9;
-  padding: 6px;
+  padding: 8px;
+  overflow: hidden;
 }
+
+.tiendaAdminImagenMini {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 96px;
+  max-height: 96px;
+  object-fit: contain;
+  object-position: center;
+  border: 1px solid #dce6df;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 6px;
+  overflow: hidden;
 }
 
 .tiendaAdminLogosPagoHint {
@@ -1727,6 +1904,10 @@
 }
 
 .tiendaAdminLogosPagoHintWarn {
+  font-size: 12px;
+  color: #8a5a1f;
+}
+
 .tiendaAdminImagenCampanaAcciones {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1756,9 +1937,11 @@
   .tiendaAdminImagenCampanaAcciones {
     grid-template-columns: 1fr;
   }
-}
-  font-size: 12px;
-  color: #8a5a1f;
+
+  .tiendaAdminImagenMini {
+    height: 88px;
+    max-height: 88px;
+  }
 }
 
 .tiendaInputOculto {
@@ -1967,6 +2150,295 @@
   font-size: 20px;
   font-weight: 800;
   color: #1f6b46;
+}
+
+.tiendaCuponBox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.tiendaCheckoutTotales {
+  display: grid;
+  gap: 2px;
+  color: #334840;
+  font-size: 13px;
+}
+
+.tiendaCheckoutTotalFinal {
+  color: #1f6b46;
+}
+
+.tiendaCuponesAdminWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaCuponesResumenGrid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.tiendaCuponResumenCard {
+  border: 1px solid #d7e1db;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: #fbfdfb;
+  display: grid;
+  gap: 2px;
+}
+
+.tiendaCuponResumenCard span {
+  font-size: 12px;
+  color: #466155;
+}
+
+.tiendaCuponResumenCard strong {
+  font-size: 16px;
+  color: #1e4336;
+}
+
+.tiendaCuponesAdminGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.2fr 1fr;
+}
+
+.tiendaCuponesEditorCard,
+.tiendaCuponesListaCard,
+.tiendaCuponesInfluencersCard {
+  border: 1px solid #d7e1db;
+  border-radius: 12px;
+  padding: 8px 6px;
+  background: #fbfdfb;
+}
+
+.tiendaCuponesCampos2,
+.tiendaCuponesCampos4 {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tiendaCuponesCampos3 {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tiendaCuponesCampos2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tiendaCuponesCampos4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tiendaCuponesEditorAcciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tiendaCuponesListaHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tiendaCuponesListaAcciones {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tiendaCuponesListaTabla {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-height: 380px;
+  overflow: auto;
+}
+
+.tiendaCuponFila {
+  border: 1px solid #dce5df;
+  border-radius: 10px;
+  padding: 6px 5px;
+  background: #fff;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.tiendaCuponFila > div {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.tiendaCuponFilaAcciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tiendaCuponFilaStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 6px;
+  font-size: 11px;
+  color: #3b5247;
+}
+
+.tiendaCuponesInfluencersGrid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.tiendaCuponInfluencerItem {
+  border: 1px solid #dce5df;
+  border-radius: 10px;
+  padding: 8px;
+  background: #fff;
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  color: #30463b;
+}
+
+.tiendaCuponModal {
+  width: min(660px, 90vw);
+  max-width: min(660px, 90vw);
+  align-self: center;
+  max-height: min(600px, 80vh);
+  overflow: auto;
+  padding-bottom: 6px;
+}
+
+.tiendaCuponModal .tiendaPerfilHeaderPro {
+  min-height: auto;
+  padding: 10px 14px !important;
+  text-align: center;
+}
+
+.tiendaCuponModal .tiendaPerfilHeaderPro h3 {
+  font-size: clamp(18px, 1.7vw, 24px);
+  width: 100%;
+  text-align: center;
+}
+
+.tiendaCuponModal .tiendaCuponWizardPasos,
+.tiendaCuponModal .tiendaCuponWizardPanel,
+.tiendaCuponModal .tiendaCuponesEditorAcciones {
+  width: min(620px, calc(100% - 28px));
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.tiendaCuponModal .tiendaCuponWizardPanel {
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.tiendaCuponModal .tiendaCuponesEditorAcciones {
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.tiendaCuponModal .tiendaCuponesCampos2,
+.tiendaCuponModal .tiendaCuponesCampos4,
+.tiendaCuponModal .tiendaCuponesCampos3 {
+  margin-bottom: 8px;
+}
+
+.tiendaCuponSwitchTop {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
+}
+
+.tiendaCuponModal,
+.tiendaCuponModal * {
+  transition: none !important;
+  animation: none !important;
+}
+
+.tiendaCuponModal *:hover,
+.tiendaCuponModal *:active {
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.tiendaCuponModal .tiendaCuponWizardPaso:hover,
+.tiendaCuponModal input:hover,
+.tiendaCuponModal select:hover,
+.tiendaCuponModal label:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+.tiendaCuponWizardPasos {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 16px;
+}
+
+.tiendaCuponWizardPaso {
+  border: 1px solid #d4dce6;
+  background: #f7fafc;
+  color: #5a6573;
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.tiendaCuponWizardPaso.activo {
+  border-color: #0f766e;
+  background: #e6fffa;
+  color: #0f5f58;
+  box-shadow: none;
+}
+
+.tiendaCuponWizardPanel {
+  border: 1px solid #dce6f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.tiendaCuponWizardPanel h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #123a53;
+}
+
+@media (min-width: 1400px) {
+  .tiendaProductos {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1180px) and (max-width: 1399px) {
+  .tiendaProductos {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .tiendaPerfilAcciones {
@@ -2515,7 +2987,10 @@
   }
 
   .tiendaImagenWrap {
-    height: 90px;
+    aspect-ratio: 1 / 1;
+    width: 94%;
+    height: auto;
+    margin: 0 auto;
     border-radius: 10px;
   }
 
@@ -2527,6 +3002,16 @@
     padding: 4px 6px;
     gap: 3px;
     border-radius: 8px;
+  }
+
+  .tiendaCalificacionCard.sinTexto {
+    justify-items: stretch;
+  }
+
+  .tiendaCalificacionCard.sinTexto .tiendaHojitasFila {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0;
   }
 
   .tiendaHojita {
@@ -2555,6 +3040,17 @@
     padding: 2px 7px;
   }
 
+  .tiendaVariantesCard {
+    grid-template-columns: minmax(0, 1fr) 68px;
+    gap: 6px;
+  }
+
+  .tiendaMetaPrecioInline {
+    width: 68px;
+    font-size: 11px;
+    padding: 4px 5px;
+  }
+
   .tiendaMeta {
     font-size: 11px;
     gap: 6px;
@@ -2562,6 +3058,7 @@
 
   .tiendaAccionesCard {
     gap: 5px;
+    justify-content: center;
   }
 
   .tiendaAccionesCard .boton {
@@ -2656,6 +3153,21 @@
   position: relative;
   z-index: 1;
   pointer-events: auto;
+}
+
+.tiendaAdminPanel.soloLectura .tiendaAdminForm :is(.tiendaSwitch, .botonExito, .botonEliminar, .botonAdvertencia) {
+  pointer-events: none;
+  opacity: 0.65;
+}
+
+.tiendaAdminSoloLecturaAviso {
+  border: 1px solid #f1d4a2;
+  background: #fff6e8;
+  color: #6b4d1f;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .tiendaAdminForm {
@@ -3180,6 +3692,17 @@
   padding-top: max(4px, env(safe-area-inset-top, 0px));
   padding-bottom: max(4px, env(safe-area-inset-bottom, 0px));
   background: rgba(0, 0, 0, 0.55);
+}
+
+.tiendaCuponOverlay {
+  align-items: center;
+  padding-top: max(10px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}
+
+.tiendaCuponOverlay .tiendaCuponModal {
+  margin: 0 auto;
+  top: 0;
 }
 
 .tiendaPerfilModalPro {
@@ -4218,38 +4741,46 @@
 }
 
 .tiendaAuthModal {
-  width: min(520px, 95vw);
+  width: min(430px, 92vw);
+}
+
+.contenidoModal.tiendaAuthModal.tiendaCuponModal {
+  width: min(500px, 88vw) !important;
+  max-width: min(500px, 88vw) !important;
 }
 
 .tiendaAuthModalLogin {
-  width: min(560px, 94vw);
-  background: linear-gradient(180deg, rgba(248, 244, 236, 0.98) 0%, rgba(240, 232, 218, 0.97) 100%);
-  border: 1px solid #d6c7b2;
-  border-radius: 30px;
-  box-shadow: 0 26px 56px rgba(19, 15, 10, 0.26);
-  overflow: hidden;
+  width: min(430px, 92vw);
+  background: rgba(245, 241, 232, 0.9);
+  border: 2px solid #2a2a2a;
+  border-radius: 28px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.22);
+  overflow: visible;
   position: relative;
   backdrop-filter: blur(3px);
+  text-align: center;
+  padding: 24px 22px;
 }
 
 .tiendaAuthHeader {
-  position: relative;
+  position: static;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 18px 20px 10px;
+  padding: 0 0 12px;
   gap: 6px;
 }
 
 .tiendaAuthLogo {
-  width: 190px;
-  height: 190px;
+  width: 84px;
+  height: 84px;
   border-radius: 999px;
   border: 3px solid #2a2a2a;
   background: #fff;
   object-fit: cover;
+  margin: 0 auto 12px;
 }
 
 .tiendaAuthTitulo {
@@ -4260,30 +4791,44 @@
 }
 
 .tiendaAuthSubtitulo {
-  margin: 0;
+  margin: 8px 0 18px;
   color: #6b6b6b;
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .tiendaAuthCerrar {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
 }
 
 .tiendaAuthModalLogin .cerrarModal {
-  border: 2px solid #8d8478;
+  border: 2px solid #2a2a2a;
   border-radius: 999px;
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  background: #ffffff;
+  color: #1f1f1f;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tiendaAuthModalLogin .cerrarModal:hover {
+  background: #c75550;
+  color: #ffffff;
+  border-color: #a5433f;
 }
 
 .tiendaAuthModalLogin .tiendaAuth {
   border: none;
-  padding: 14px 20px 20px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .tiendaAuthModalLogin .tiendaAuth input:not([type='checkbox']),
@@ -4302,10 +4847,12 @@
 .tiendaPreviewCorreoModal input:not([type='checkbox']),
 .tiendaPreviewCorreoModal select,
 .tiendaPreviewCorreoModal textarea {
-  border-radius: 16px;
-  border-color: #d7dfda;
+  border-radius: 14px;
+  border: 1px solid #9d9387;
   background: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  box-shadow: none;
+  padding: 11px 12px;
+  font-size: 14px;
 }
 
 .tiendaAuthModalLogin .tiendaAuth input:not([type='checkbox']):focus,
@@ -4324,8 +4871,8 @@
 .tiendaPreviewCorreoModal input:not([type='checkbox']):focus,
 .tiendaPreviewCorreoModal select:focus,
 .tiendaPreviewCorreoModal textarea:focus {
-  border-color: #6fa57a;
-  box-shadow: 0 0 0 4px rgba(111, 165, 122, 0.16);
+  border-color: #4a7c59;
+  box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.16);
 }
 
 .tiendaRegistroPasos {
@@ -4360,6 +4907,101 @@
 .tiendaAuthAccionesRegistro .boton:first-child:nth-last-child(2),
 .tiendaAuthAccionesRegistro .boton:first-child:nth-last-child(2) ~ .boton {
   grid-column: span 1;
+}
+
+.tiendaAuthRecuperarBtn,
+.tiendaAuthModalLogin .tiendaAuth .tiendaAuthRecuperarBtn {
+  width: auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #2f5f46;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  margin: 2px auto 0;
+  align-self: center;
+  display: block;
+  text-align: center;
+  max-width: fit-content;
+  appearance: none;
+  box-shadow: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(47, 95, 70, 0.45);
+  text-underline-offset: 2px;
+}
+
+.tiendaAuthRecuperarBtn:hover,
+.tiendaAuthModalLogin .tiendaAuth .tiendaAuthRecuperarBtn:hover {
+  color: #1f4b35;
+  text-decoration-color: rgba(31, 75, 53, 0.75);
+}
+
+.tiendaAuthRecuperarPanel {
+  border: 1px dashed #b9cfc1;
+  border-radius: 14px;
+  background: #f8fcf9;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaAuthRecuperarForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.tiendaAuthRecuperarForm .boton {
+  min-width: 130px;
+}
+
+.tiendaAuthRecuperarMsg {
+  font-size: 12px;
+  color: #365b46;
+  background: rgba(74, 124, 89, 0.12);
+  border: 1px solid rgba(74, 124, 89, 0.35);
+  border-radius: 10px;
+  padding: 7px 9px;
+}
+
+.tiendaCambioPasswordModal {
+  width: min(520px, 94vw);
+}
+
+.tiendaCambioPasswordPregunta {
+  border: 1px dashed #b9cfc1;
+  border-radius: 12px;
+  background: #f7fbf8;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaCambioPasswordPreguntaTitulo {
+  font-size: 13px;
+  font-weight: 800;
+  color: #355846;
+}
+
+.tiendaCambioPasswordOpciones {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaCambioPasswordOpcion {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #2f3f36;
+}
+
+.tiendaCambioPasswordOpcion input[type='radio'] {
+  width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 1080px) {
@@ -4456,9 +5098,58 @@
   .tiendaGridAdminFull .tiendaCatalogo {
     min-height: auto;
   }
+
+  .tiendaCuponesAdminGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaCuponesCampos2,
+  .tiendaCuponesCampos4,
+  .tiendaCuponesCampos3,
+  .tiendaCuponFilaStats {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaCuponesListaTabla {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaCuponesListaHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tiendaCuponesListaAcciones,
+  .tiendaCuponFilaAcciones {
+    width: 100%;
+  }
+
+  .tiendaCuponWizardPasos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaCuponModal {
+    width: min(620px, 90vw);
+    max-width: min(620px, 90vw);
+    max-height: min(560px, 84vh);
+  }
+
+  .tiendaCuponModal .tiendaCuponWizardPasos,
+  .tiendaCuponModal .tiendaCuponWizardPanel,
+  .tiendaCuponModal .tiendaCuponesEditorAcciones {
+    width: calc(100% - 16px);
+  }
+
+  .tiendaCuponBox {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
+  .tiendaCuponesListaTabla {
+    grid-template-columns: 1fr;
+  }
+
   .tiendaPerfilModalPro {
     width: 99vw;
     max-width: 99vw;

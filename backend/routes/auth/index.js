@@ -1,7 +1,56 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import nodemailer from "nodemailer";
 import { normalizarPermisosUsuario } from "../../utils/permisos/index.js";
 import { dbGet, dbRun } from "../../utils/db-adapter/index.js";
+
+let authMailTransporter = null;
+
+function obtenerConfigCorreo() {
+  const mailEnabled = String(process.env.MAIL_ENABLED || '1').trim() !== '0';
+  const host = String(process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+  const port = Number(process.env.SMTP_PORT || 465);
+  const secure = String(process.env.SMTP_SECURE || (port === 465 ? '1' : '0')).trim() !== '0';
+  const user = String(process.env.SMTP_USER || '').trim();
+  const pass = String(process.env.SMTP_PASS || '').trim();
+  const from = String(process.env.SMTP_FROM || user || '').trim();
+
+  return {
+    MAIL_ENABLED: mailEnabled,
+    SMTP_HOST: host,
+    SMTP_PORT: port,
+    SMTP_SECURE: secure,
+    SMTP_USER: user,
+    SMTP_PASS: pass,
+    SMTP_FROM: from
+  };
+}
+
+function correoConfigurado() {
+  const cfg = obtenerConfigCorreo();
+  return Boolean(cfg.MAIL_ENABLED && cfg.SMTP_HOST && cfg.SMTP_PORT && cfg.SMTP_USER && cfg.SMTP_PASS && cfg.SMTP_FROM);
+}
+
+function obtenerMailTransporter() {
+  if (authMailTransporter) return authMailTransporter;
+  const cfg = obtenerConfigCorreo();
+  authMailTransporter = nodemailer.createTransport({
+    host: cfg.SMTP_HOST,
+    port: cfg.SMTP_PORT,
+    secure: cfg.SMTP_SECURE,
+    auth: {
+      user: cfg.SMTP_USER,
+      pass: cfg.SMTP_PASS
+    }
+  });
+  return authMailTransporter;
+}
+
+function generarPasswordTemporal() {
+  const base = crypto.randomBytes(7).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 10);
+  return `${base}A!`;
+}
 
 export function registrarRutasAuth(app, bdAdmin) {
   // Login
@@ -168,6 +217,77 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
 
       return res.status(500).json({ exito: false, mensaje: "No se pudo completar la configuracion inicial" });
+    }
+  });
+
+  app.post("/api/auth/olvide-password", async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ exito: false, mensaje: "Debes capturar tu correo" });
+    }
+
+    try {
+      const user = await dbGet(
+        bdAdmin,
+        `SELECT id, username, nombre, correo, password_hash, debe_cambiar_password
+         FROM usuarios
+         WHERE LOWER(COALESCE(correo, '')) = ? OR LOWER(COALESCE(username, '')) = ?
+         LIMIT 1`,
+        [email, email]
+      );
+
+      if (!user) {
+        return res.status(404).json({ exito: false, mensaje: "El correo no está registrado" });
+      }
+
+      if (!correoConfigurado()) {
+        return res.status(503).json({ exito: false, mensaje: "El servicio de correo no está configurado" });
+      }
+
+      const passwordTemporal = generarPasswordTemporal();
+      const passwordHashTemporal = await bcrypt.hash(passwordTemporal, 10);
+      const correoDestino = String(user.correo || email).trim().toLowerCase();
+      const nombreUsuario = String(user.nombre || user.username || '').trim() || 'Usuario';
+
+      await dbRun(
+        bdAdmin,
+        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 1, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
+        [passwordHashTemporal, user.id]
+      );
+
+      try {
+        const transporter = obtenerMailTransporter();
+        const cfg = obtenerConfigCorreo();
+        await transporter.sendMail({
+          from: cfg.SMTP_FROM,
+          to: correoDestino,
+          subject: "CHIPACTLI | Recuperación de contraseña",
+          text: [
+            `Hola ${nombreUsuario},`,
+            '',
+            'Recibimos una solicitud para restablecer tu contraseña.',
+            `Tu contraseña temporal es: ${passwordTemporal}`,
+            '',
+            'Inicia sesión con esa contraseña y el sistema te pedirá cambiarla de inmediato.',
+            '',
+            'Si no solicitaste este cambio, ignora este mensaje.'
+          ].join('\n')
+        });
+      } catch (errorCorreo) {
+        await dbRun(
+          bdAdmin,
+          "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
+          [user.password_hash, user.debe_cambiar_password ? 1 : 0, user.id]
+        );
+        return res.status(500).json({ exito: false, mensaje: "No se pudo enviar el correo de recuperación" });
+      }
+
+      return res.json({
+        exito: true,
+        mensaje: "Te enviamos una contraseña temporal a tu correo. Revisa tu bandeja y spam."
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudo procesar la recuperación" });
     }
   });
 

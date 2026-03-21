@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './Tienda.css';
 import { API } from '../../utils/config.jsx';
 import {
@@ -21,6 +22,7 @@ const API_TIENDA = import.meta.env.DEV
 
 const CLAVE_TOKEN_CLIENTE = 'tienda_cliente_token';
 const CLAVE_CARRITO_TIENDA = 'tienda_carrito_v2';
+const CLAVE_CUPONES_CARRITO_TIENDA = 'tienda_carrito_cupones_v2';
 const CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT = 'tienda_notif_pedidos_ultimo_prompt';
 const CLAVE_TIENDA_VISTA_ACTIVA = 'chipactli:tienda:vistaActiva';
 const CLAVE_TIENDA_SECCION_ACTIVA = 'chipactli:tienda:seccionActiva';
@@ -28,6 +30,16 @@ const CLAVE_TIENDA_CATEGORIA_ACTIVA = 'chipactli:tienda:categoriaActiva';
 const CLAVE_TRASTIENDA_VISTA_ADMIN = 'chipactli:trastienda:adminVista';
 const CLAVE_TRASTIENDA_CONFIG_TAB = 'chipactli:trastienda:configAdminTab';
 const CLAVE_TRASTIENDA_DESCUENTOS_TAB = 'chipactli:trastienda:descuentoTabInterna';
+const TRASTIENDA_VISTAS = [
+  { id: 'pedidos', label: 'Pedidos', accion: 'pedidos' },
+  { id: 'clientes', label: 'Clientes', accion: 'clientes' },
+  { id: 'puntos', label: 'Puntos de entrega', accion: 'puntos' },
+  { id: 'catalogo', label: 'Catalogo', accion: 'catalogo' },
+  { id: 'descuentos', label: 'Descuentos', accion: 'descuentos' },
+  { id: 'cupones', label: 'Cupones', accion: 'cupones' },
+  { id: 'metricas', label: 'Metricas', accion: 'metricas' },
+  { id: 'config', label: 'Configuracion', accion: 'config' }
+];
 const CLAVE_MP_CHECKOUT_PENDIENTE = 'chipactli:tienda:mp-checkout-pendiente';
 const CLAVE_VISITA_SESION_ID = 'chipactli:visita:sesion-id';
 const OCULTAR_MERCADO_PAGO = true;
@@ -130,6 +142,26 @@ const CONFIG_DEFAULT = {
 
 const PUNTO_ENTREGA_DEFAULT = { nombre: '', direccion: '', horario: '', activo: true };
 const DIRECCION_CLIENTE_DEFAULT = { alias: 'Casa', direccion: '', referencias: '', es_preferida: true };
+const CUPON_ADMIN_DEFAULT = {
+  codigo: '',
+  nombre: '',
+  tipo: 'general',
+  alcance_tipo: 'todos',
+  alcance_clave: '',
+  influencer_nombre: '',
+  influencer_handle: '',
+  tipo_descuento: 'porcentaje',
+  valor_descuento: 0,
+  monto_minimo: 0,
+  max_descuento: 0,
+  usos_maximos_total: 0,
+  usos_maximos_por_cliente: 0,
+  un_solo_uso_por_cliente: false,
+  vigente_indefinido: true,
+  valido_desde: '',
+  valido_hasta: '',
+  activo: true
+};
 const ATENCION_ASUNTOS = [
   'Consulta de pedido',
   'Cambio de dirección',
@@ -210,6 +242,49 @@ function guardarValorPersistido(clave, valor) {
     localStorage.setItem(clave, String(valor || ''));
   } catch {
   }
+}
+
+function leerSlugProductoDesdeHash() {
+  if (typeof window === 'undefined') return '';
+  const hashRaw = String(window.location.hash || '').trim();
+  if (!hashRaw.startsWith('#/tienda')) return '';
+  const idxQuery = hashRaw.indexOf('?');
+  if (idxQuery < 0) return '';
+  const params = new URLSearchParams(hashRaw.slice(idxQuery + 1));
+  return String(params.get('producto') || '').trim();
+}
+
+function actualizarHashProductoDetalle(slugProducto = '') {
+  if (typeof window === 'undefined') return;
+  const hashRaw = String(window.location.hash || '#/tienda').trim() || '#/tienda';
+  if (!hashRaw.startsWith('#/tienda')) return;
+
+  const idxQuery = hashRaw.indexOf('?');
+  const rutaBase = idxQuery >= 0 ? hashRaw.slice(0, idxQuery) : hashRaw;
+  const params = new URLSearchParams(idxQuery >= 0 ? hashRaw.slice(idxQuery + 1) : '');
+
+  const slug = String(slugProducto || '').trim();
+  if (slug) params.set('producto', slug);
+  else params.delete('producto');
+
+  const hashSiguiente = `${rutaBase}${params.toString() ? `?${params.toString()}` : ''}`;
+  if (hashSiguiente === hashRaw) return;
+
+  const url = new URL(window.location.href);
+  const siguiente = `${url.pathname}${url.search}${hashSiguiente}`;
+  window.history.replaceState({}, document.title, siguiente);
+}
+
+function construirLinkCompartirProducto(producto = null) {
+  if (typeof window === 'undefined') return '';
+  const slugRaw = String(producto?.slug || producto?.nombre_receta || '').trim();
+  const slug = slugRaw.includes('%')
+    ? slugRaw
+    : (slugPestanaMenu(slugRaw) || slugRaw);
+  if (!slug) return '';
+
+  const base = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  return `${base}#/tienda?producto=${encodeURIComponent(slug)}`;
 }
 
 function obtenerSesionVisitaId() {
@@ -489,7 +564,7 @@ function esLogoPng(ruta = '') {
 
 async function removerFondoBlancoPng(url = '', umbral = 245) {
   const src = String(url || '').trim();
-  if (!src || !esLogoPng(src)) return '';
+  if (!src) return '';
 
   const imagen = await new Promise((resolve, reject) => {
     const img = new Image();
@@ -527,7 +602,43 @@ async function removerFondoBlancoPng(url = '', umbral = 245) {
   }
 
   ctx.putImageData(frame, 0, 0);
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = ((y * width) + x) * 4;
+      const alpha = px[idx + 3];
+      if (alpha <= 8) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  let outputCanvas = canvas;
+  if (maxX >= minX && maxY >= minY) {
+    const padding = 2;
+    const cropX = Math.max(0, minX - padding);
+    const cropY = Math.max(0, minY - padding);
+    const cropW = Math.min(width - cropX, (maxX - minX + 1) + (padding * 2));
+    const cropH = Math.min(height - cropY, (maxY - minY + 1) + (padding * 2));
+
+    const recorte = document.createElement('canvas');
+    recorte.width = Math.max(1, cropW);
+    recorte.height = Math.max(1, cropH);
+    const recorteCtx = recorte.getContext('2d');
+    if (recorteCtx) {
+      recorteCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      outputCanvas = recorte;
+    }
+  }
+
+  const blob = await new Promise((resolve) => outputCanvas.toBlob(resolve, 'image/png'));
   if (!blob) return '';
   return URL.createObjectURL(blob);
 }
@@ -623,33 +734,39 @@ function pintarHojitas(calificacion = 0) {
 
 function cargarCarritoGuardado(esCliente) {
   if (typeof window === 'undefined') {
-    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
+    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now(), cuponesAplicados: [] };
   }
 
   try {
     const raw = localStorage.getItem(CLAVE_CARRITO_TIENDA);
-    if (!raw) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
+    const rawCupones = localStorage.getItem(CLAVE_CUPONES_CARRITO_TIENDA);
+    const cuponesRaw = rawCupones ? JSON.parse(rawCupones) : [];
+    const cuponesAplicados = Array.isArray(cuponesRaw)
+      ? cuponesRaw
+      : (cuponesRaw && String(cuponesRaw?.codigo || '').trim() ? [cuponesRaw] : []);
+    if (!raw) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now(), cuponesAplicados };
 
     const parsed = JSON.parse(raw);
     const items = Array.isArray(parsed?.items) ? parsed.items : [];
     const creadoEn = Number(parsed?.creadoEn) || Date.now();
     const actualizadoEn = Number(parsed?.actualizadoEn) || Date.now();
-    if (!items.length) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
+    if (!items.length) return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now(), cuponesAplicados: [] };
 
     if (!esCliente && (Date.now() - creadoEn > EXPIRACION_CARRITO_INVITADO_MS)) {
-      return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
+      return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now(), cuponesAplicados: [] };
     }
 
-    return { items, creadoEn, actualizadoEn };
+    return { items, creadoEn, actualizadoEn, cuponesAplicados };
   } catch {
-    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now() };
+    return { items: [], creadoEn: Date.now(), actualizadoEn: Date.now(), cuponesAplicados: [] };
   }
 }
 
-function guardarCarritoGuardado(items, creadoEn) {
+function guardarCarritoGuardado(items, creadoEn, cuponesAplicados = []) {
   if (typeof window === 'undefined') return;
   if (!Array.isArray(items) || !items.length) {
     localStorage.removeItem(CLAVE_CARRITO_TIENDA);
+    localStorage.removeItem(CLAVE_CUPONES_CARRITO_TIENDA);
     return;
   }
 
@@ -658,6 +775,14 @@ function guardarCarritoGuardado(items, creadoEn) {
     creadoEn: Number(creadoEn) || Date.now(),
     actualizadoEn: Date.now()
   }));
+
+  const cuponesValidos = (Array.isArray(cuponesAplicados) ? cuponesAplicados : [])
+    .filter((cup) => String(cup?.codigo || '').trim());
+  if (cuponesValidos.length) {
+    localStorage.setItem(CLAVE_CUPONES_CARRITO_TIENDA, JSON.stringify(cuponesValidos));
+  } else {
+    localStorage.removeItem(CLAVE_CUPONES_CARRITO_TIENDA);
+  }
 }
 
 function normalizarItemCarritoCliente(item) {
@@ -745,6 +870,11 @@ export default function Tienda({
   const [procesandoPagoMp, setProcesandoPagoMp] = useState(false);
   const [modoAuth, setModoAuth] = useState('login');
   const [mostrarModalAuthCliente, setMostrarModalAuthCliente] = useState(false);
+  const [mostrarPanelRecuperarCliente, setMostrarPanelRecuperarCliente] = useState(false);
+  const [recuperarClienteEmail, setRecuperarClienteEmail] = useState('');
+  const [enviandoRecuperacionCliente, setEnviandoRecuperacionCliente] = useState(false);
+  const [recuperacionClienteMensaje, setRecuperacionClienteMensaje] = useState('');
+  const [modalCambioPasswordCliente, setModalCambioPasswordCliente] = useState({ visible: false, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
   const [mostrarModalPerfilCliente, setMostrarModalPerfilCliente] = useState(false);
   const [pasoRegistro, setPasoRegistro] = useState(1);
   const [credenciales, setCredenciales] = useState({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
@@ -780,7 +910,7 @@ export default function Tienda({
   const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
   const [procesandoPedidosAdmin, setProcesandoPedidosAdmin] = useState(false);
   const [modalResetContadoresAdmin, setModalResetContadoresAdmin] = useState({ visible: false, password: '' });
-  const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'config', 'metricas'], 'pedidos'));
+  const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'cupones', 'config', 'metricas'], 'pedidos'));
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
   const [busquedaAdmin, setBusquedaAdmin] = useState('');
   const [ordenObjetivoAdmin, setOrdenObjetivoAdmin] = useState({ id: '', folio: '' });
@@ -807,6 +937,29 @@ export default function Tienda({
   const [filtroDescuentoProducto, setFiltroDescuentoProducto] = useState('');
   const [filtroExclusionGlobal, setFiltroExclusionGlobal] = useState('');
   const [descuentoDrafts, setDescuentoDrafts] = useState({});
+  const [codigoCuponInput, setCodigoCuponInput] = useState('');
+  const [validandoCupon, setValidandoCupon] = useState(false);
+  const [cuponesAplicados, setCuponesAplicados] = useState(
+    Array.isArray(carritoInicial?.cuponesAplicados) ? carritoInicial.cuponesAplicados : []
+  );
+  const [estadoInputCupon, setEstadoInputCupon] = useState('neutral');
+  const [cuponesAdmin, setCuponesAdmin] = useState([]);
+  const [cuponAdminDraft, setCuponAdminDraft] = useState(CUPON_ADMIN_DEFAULT);
+  const [guardandoCuponAdmin, setGuardandoCuponAdmin] = useState(false);
+  const [mostrandoModalCuponAdmin, setMostrandoModalCuponAdmin] = useState(false);
+  const [pasoModalCuponAdmin, setPasoModalCuponAdmin] = useState(1);
+  const [editandoCuponAdminId, setEditandoCuponAdminId] = useState(0);
+  const [actualizandoActivoCuponId, setActualizandoActivoCuponId] = useState(0);
+  const [resumenCuponesAdmin, setResumenCuponesAdmin] = useState({
+    cupones_totales: 0,
+    cupones_activos: 0,
+    usos_totales: 0,
+    ventas_totales: 0,
+    descuentos_totales: 0,
+    productos_vendidos_totales: 0
+  });
+  const [historialCuponesAdmin, setHistorialCuponesAdmin] = useState({ historial: [], influencers: [] });
+  const [cargandoHistorialCuponesAdmin, setCargandoHistorialCuponesAdmin] = useState(false);
   const [tabsNavegacionAdmin, setTabsNavegacionAdmin] = useState([]);
   const [tabsBaseEliminadasAdmin, setTabsBaseEliminadasAdmin] = useState([]);
   const [resenasDetalle, setResenasDetalle] = useState([]);
@@ -889,6 +1042,62 @@ export default function Tienda({
   const carritoActualRef = useRef(carrito);
   const carritoCreadoEnActualRef = useRef(carritoCreadoEn);
   const clienteTokenActualRef = useRef(clienteToken);
+  const cuponesAplicadosRef = useRef(cuponesAplicados);
+
+  const usuarioInterno = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('usuario') || 'null');
+    } catch {
+      return null;
+    }
+  }, [tokenInterno]);
+
+  const esRolInternoTotal = useMemo(() => {
+    const rol = String(usuarioInterno?.rol || '').trim().toLowerCase();
+    return rol === 'ceo' || rol === 'admin';
+  }, [usuarioInterno]);
+
+  const permisosTrastiendaNodo = useMemo(() => {
+    const permisos = usuarioInterno?.permisos;
+    if (!permisos || typeof permisos !== 'object') return null;
+    return permisos?.trastienda || permisos?.ventas || null;
+  }, [usuarioInterno]);
+
+  const vistasTrastiendaDisponibles = useMemo(() => {
+    if (!tokenInterno) return [];
+    if (esRolInternoTotal) return TRASTIENDA_VISTAS;
+    const nodo = permisosTrastiendaNodo;
+    if (!nodo || typeof nodo !== 'object') return [];
+
+    const accesoGeneral = Boolean(nodo?.ver);
+    return TRASTIENDA_VISTAS.filter((item) => {
+      const acciones = (nodo?.acciones && typeof nodo.acciones === 'object') ? nodo.acciones : {};
+      if (Object.prototype.hasOwnProperty.call(acciones, item.accion)) {
+        return Boolean(acciones[item.accion]);
+      }
+      if (Object.prototype.hasOwnProperty.call(acciones, 'ver')) {
+        return Boolean(acciones.ver);
+      }
+      return accesoGeneral;
+    });
+  }, [tokenInterno, esRolInternoTotal, permisosTrastiendaNodo]);
+
+  const puedeEditarTrastienda = useMemo(() => {
+    if (!tokenInterno) return false;
+    if (esRolInternoTotal) return true;
+    const nodo = permisosTrastiendaNodo;
+    if (!nodo || typeof nodo !== 'object') return false;
+    const acciones = (nodo?.acciones && typeof nodo.acciones === 'object') ? nodo.acciones : {};
+    if (Object.prototype.hasOwnProperty.call(acciones, 'editar')) {
+      return Boolean(acciones.editar);
+    }
+    return Boolean(nodo?.editar);
+  }, [tokenInterno, esRolInternoTotal, permisosTrastiendaNodo]);
+
+  const vistaTrastiendaFallback = useMemo(
+    () => (vistasTrastiendaDisponibles[0]?.id || '__sin_permisos__'),
+    [vistasTrastiendaDisponibles]
+  );
 
   useEffect(() => {
     carritoActualRef.current = carrito;
@@ -901,6 +1110,10 @@ export default function Tienda({
   useEffect(() => {
     clienteTokenActualRef.current = clienteToken;
   }, [clienteToken]);
+
+  useEffect(() => {
+    cuponesAplicadosRef.current = cuponesAplicados;
+  }, [cuponesAplicados]);
 
   const totalNoLeidasCliente = useMemo(() => (
     (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
@@ -1675,6 +1888,36 @@ export default function Tienda({
 
   useEffect(() => {
     if (esVistaTrastienda) return;
+    const slugDetalle = vistaActiva === 'detalle'
+      ? String(seleccionado?.slug || '').trim()
+      : '';
+    actualizarHashProductoDetalle(slugDetalle);
+  }, [esVistaTrastienda, vistaActiva, seleccionado]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return undefined;
+
+    const abrirDesdeHash = () => {
+      const slugObjetivo = leerSlugProductoDesdeHash();
+      if (!slugObjetivo) return;
+
+      const objetivo = (productos || []).find((item) => (
+        String(item?.slug || '').trim().toLowerCase() === slugObjetivo.toLowerCase()
+      ));
+      if (!objetivo) return;
+
+      const slugActual = String(seleccionado?.slug || '').trim().toLowerCase();
+      if (vistaActiva === 'detalle' && slugActual === slugObjetivo.toLowerCase()) return;
+      abrirDetalle(objetivo);
+    };
+
+    abrirDesdeHash();
+    window.addEventListener('hashchange', abrirDesdeHash);
+    return () => window.removeEventListener('hashchange', abrirDesdeHash);
+  }, [esVistaTrastienda, productos, vistaActiva, seleccionado]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
     guardarValorPersistido(CLAVE_TIENDA_SECCION_ACTIVA, seccionActiva);
   }, [esVistaTrastienda, seccionActiva]);
 
@@ -1687,6 +1930,23 @@ export default function Tienda({
     if (!esVistaTrastienda) return;
     guardarValorPersistido(CLAVE_TRASTIENDA_VISTA_ADMIN, adminVista);
   }, [esVistaTrastienda, adminVista]);
+
+  useEffect(() => {
+    if (!(esVistaTrastienda || vistaActiva === 'trastienda')) return;
+    if (!tokenInterno) return;
+
+    if (!vistasTrastiendaDisponibles.length) {
+      if (adminVista !== '__sin_permisos__') {
+        setAdminVista('__sin_permisos__');
+      }
+      return;
+    }
+
+    const existeActual = vistasTrastiendaDisponibles.some((item) => item.id === adminVista);
+    if (!existeActual) {
+      setAdminVista(vistaTrastiendaFallback);
+    }
+  }, [esVistaTrastienda, vistaActiva, tokenInterno, adminVista, vistasTrastiendaDisponibles, vistaTrastiendaFallback]);
 
   useEffect(() => {
     if (!esVistaTrastienda) return;
@@ -1886,10 +2146,16 @@ export default function Tienda({
   useEffect(() => {
     if (!esVistaTrastienda) return;
     const aplicarObjetivoPedido = ({ folio = '', idOrden = '' } = {}) => {
+      const tienePermisoPedidos = vistasTrastiendaDisponibles.some((item) => item.id === 'pedidos');
+      setAdminVista(tienePermisoPedidos ? 'pedidos' : vistaTrastiendaFallback);
+      if (!tienePermisoPedidos) {
+        setOrdenObjetivoAdmin({ id: '', folio: '' });
+        return;
+      }
+
       const folioLimpio = String(folio || '').trim();
       const idLimpio = String(idOrden || '').trim();
       const termino = folioLimpio || idLimpio;
-      setAdminVista('pedidos');
       setFiltroEstadoOrdenAdmin('todos');
       if (termino) {
         setBusquedaAdmin(termino);
@@ -1932,7 +2198,7 @@ export default function Tienda({
       window.removeEventListener('hashchange', aplicarFiltroPedidosDesdeHash);
       window.removeEventListener('chipactli:alerta-click', onAlertaClick);
     };
-  }, [esVistaTrastienda]);
+  }, [esVistaTrastienda, vistasTrastiendaDisponibles, vistaTrastiendaFallback]);
 
   useEffect(() => {
     if (!esVistaTrastienda) return;
@@ -2107,8 +2373,8 @@ export default function Tienda({
       setCarritoCreadoEn(Date.now());
       return;
     }
-    guardarCarritoGuardado(carrito, carritoCreadoEn);
-  }, [carrito, carritoCreadoEn, clienteToken]);
+    guardarCarritoGuardado(carrito, carritoCreadoEn, cuponesAplicados);
+  }, [carrito, carritoCreadoEn, clienteToken, cuponesAplicados]);
 
   useEffect(() => {
     ultimoCambioCarritoLocalMsRef.current = Date.now();
@@ -2215,9 +2481,39 @@ export default function Tienda({
     }
   }, [controlesSecciones, seccionActiva, esVistaTrastienda]);
 
-  const totalCarrito = useMemo(() => {
+  const subtotalCarrito = useMemo(() => {
     return carrito.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0);
   }, [carrito]);
+
+  const descuentoCuponCarrito = useMemo(() => {
+    const lista = Array.isArray(cuponesAplicados) ? cuponesAplicados : [];
+    if (!lista.length) return 0;
+
+    let restante = Math.max(0, Number(subtotalCarrito) || 0);
+    let descuento = 0;
+
+    for (const cupon of lista) {
+      if (restante <= 0) break;
+      const descuentoValidado = Math.max(0, Number(cupon?.monto_descuento) || 0);
+      let descuentoCupon = Math.max(0, Math.min(restante, Number(descuentoValidado.toFixed(2))));
+      if (descuentoCupon <= 0) {
+        const tipo = String(cupon?.tipo_descuento || 'porcentaje').trim().toLowerCase();
+        const valor = Math.max(0, Number(cupon?.valor_descuento) || 0);
+        const descuentoBase = tipo === 'monto_fijo'
+          ? valor
+          : (restante * (valor / 100));
+        descuentoCupon = Math.max(0, Math.min(restante, Number(descuentoBase.toFixed(2))));
+      }
+      descuento += descuentoCupon;
+      restante = Math.max(0, Number((restante - descuentoCupon).toFixed(2)));
+    }
+
+    return Math.max(0, Math.min(subtotalCarrito, Number(descuento.toFixed(2))));
+  }, [cuponesAplicados, subtotalCarrito]);
+
+  const totalCarrito = useMemo(() => (
+    Math.max(0, Number((subtotalCarrito - descuentoCuponCarrito).toFixed(2)))
+  ), [subtotalCarrito, descuentoCuponCarrito]);
 
   const linksInformacion = useMemo(() => {
     let linksLegacy = [];
@@ -2306,6 +2602,43 @@ export default function Tienda({
     setInfoSeleccionada(null);
     setSeleccionado(null);
     mostrarNotificacion('Vitrina restablecida', 'exito');
+  }
+
+  async function compartirProducto(producto) {
+    const nombre = String(producto?.nombre_receta || 'Producto CHIPACTLI').trim();
+    const link = construirLinkCompartirProducto(producto);
+    if (!link) {
+      mostrarNotificacion('No se pudo generar el enlace del producto', 'error');
+      return;
+    }
+
+    const payload = {
+      title: nombre,
+      text: `Mira este producto de CHIPACTLI: ${nombre}`,
+      url: link
+    };
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share(payload);
+        registrarEventoComportamiento('compartir_producto', nombre);
+        return;
+      } catch (error) {
+        if (String(error?.name || '') === 'AbortError') return;
+      }
+    }
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+        mostrarNotificacion('Enlace copiado al portapapeles', 'exito');
+      } else {
+        window.prompt('Copia este enlace del producto:', link);
+      }
+      registrarEventoComportamiento('compartir_producto', nombre);
+    } catch {
+      window.prompt('Copia este enlace del producto:', link);
+    }
   }
 
   function enviarMensajeWhatsDesdePagina() {
@@ -3029,6 +3362,8 @@ export default function Tienda({
     cargarAdminOrdenes();
     cargarConfigTiendaAdmin();
     cargarDescuentosAdmin();
+    cargarCuponesAdmin();
+    cargarHistorialCuponesAdmin();
   }, [
     tokenInterno,
     clienteToken,
@@ -3036,6 +3371,95 @@ export default function Tienda({
     permisoNotificacionesPedidos,
     sonidoNotificacionesPedidos
   ]);
+
+  useEffect(() => {
+    if (carrito.length) return;
+    if (!cuponesAplicados.length && !codigoCuponInput) return;
+    setCuponesAplicados([]);
+    setCodigoCuponInput('');
+    setEstadoInputCupon('neutral');
+  }, [carrito.length, cuponesAplicados, codigoCuponInput]);
+
+  async function revalidarCuponPersistidoEnCarrito(opciones = {}) {
+    const silencioso = opciones?.silencioso !== false;
+    const cuponesActuales = Array.isArray(cuponesAplicadosRef.current) ? cuponesAplicadosRef.current : [];
+    if (!cuponesActuales.length) return;
+    if (!Array.isArray(carrito) || !carrito.length) return;
+
+    try {
+      const ruta = clienteToken ? '/tienda/cupones/validar' : '/tienda/cupones/validar-publico';
+      const headers = { 'Content-Type': 'application/json' };
+      if (clienteToken) headers.Authorization = `Bearer ${clienteToken}`;
+
+      let subtotalTemporal = Math.max(0, Number(subtotalCarrito) || 0);
+      const cuponesValidados = [];
+      let removidos = 0;
+
+      for (const cuponActual of cuponesActuales) {
+        const codigoActual = String(cuponActual?.codigo || '').trim();
+        if (!codigoActual) continue;
+
+        try {
+          const data = await fetchJson(ruta, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              codigo_cupon: codigoActual,
+              subtotal: subtotalTemporal,
+              items: carrito.map((item) => ({
+                nombre_receta: String(item?.nombre_receta || '').trim(),
+                categoria_nombre: String(item?.categoria_nombre || '').trim(),
+                cantidad: Number(item?.cantidad) || 1,
+                precio_unitario: Number(item?.precio_unitario) || 0,
+                subtotal: Number(item?.subtotal) || 0
+              }))
+            })
+          });
+
+          if (!data?.ok || !data?.cupon) {
+            removidos += 1;
+            continue;
+          }
+
+          cuponesValidados.push(data.cupon);
+          subtotalTemporal = Math.max(0, Number(data?.total) || subtotalTemporal);
+        } catch {
+          removidos += 1;
+        }
+      }
+
+      const codigosEstadoActual = (Array.isArray(cuponesAplicadosRef.current) ? cuponesAplicadosRef.current : [])
+        .map((cup) => String(cup?.codigo || '').trim().toUpperCase())
+        .filter(Boolean)
+        .join('|');
+      const codigosIniciales = cuponesActuales
+        .map((cup) => String(cup?.codigo || '').trim().toUpperCase())
+        .filter(Boolean)
+        .join('|');
+      if (codigosEstadoActual !== codigosIniciales) return;
+
+      setCuponesAplicados(cuponesValidados);
+      if (removidos > 0) {
+        setEstadoInputCupon('invalido');
+        if (!silencioso) {
+          mostrarNotificacion('Uno o más cupones dejaron de ser válidos y se removieron del carrito', 'advertencia');
+        }
+      }
+    } catch {
+      if (!silencioso) {
+        mostrarNotificacion('No se pudo revalidar los cupones del carrito', 'advertencia');
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!cuponesAplicados.length || !carrito.length) return undefined;
+    revalidarCuponPersistidoEnCarrito({ silencioso: true });
+    const timer = window.setInterval(() => {
+      revalidarCuponPersistidoEnCarrito({ silencioso: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [clienteToken, carrito, cuponesAplicados]);
 
   useEffect(() => {
     const contenedor = contenedorScrollRef.current;
@@ -3162,6 +3586,10 @@ export default function Tienda({
       }
       if (tokenInterno && tipo === 'tienda_descuentos_actualizados') {
         cargarDescuentosAdmin();
+      }
+      if (tokenInterno && tipo === 'tienda_cupones_actualizados') {
+        cargarCuponesAdmin();
+        cargarHistorialCuponesAdmin();
       }
 
       if (tokenInterno && tipo === 'tienda_servicio_domicilio_habilitado') {
@@ -3493,7 +3921,318 @@ export default function Tienda({
     }
   }
 
+  async function aplicarCuponCarrito() {
+    const codigo = String(codigoCuponInput || '').trim().toUpperCase();
+    if (!codigo) {
+      setEstadoInputCupon('invalido');
+      mostrarNotificacion('Ingresa un codigo de cupon', 'error');
+      return;
+    }
+    if (!carrito.length) {
+      setEstadoInputCupon('invalido');
+      mostrarNotificacion('Agrega productos al carrito para aplicar cupon', 'error');
+      return;
+    }
+
+    setValidandoCupon(true);
+    try {
+      const ruta = clienteToken ? '/tienda/cupones/validar' : '/tienda/cupones/validar-publico';
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (clienteToken) {
+        headers.Authorization = `Bearer ${clienteToken}`;
+      }
+
+      const data = await fetchJson(ruta, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          codigo_cupon: codigo,
+          subtotal: Math.max(0, Number((subtotalCarrito - descuentoCuponCarrito).toFixed(2))),
+          items: carrito.map((item) => ({
+            nombre_receta: String(item?.nombre_receta || '').trim(),
+            categoria_nombre: String(item?.categoria_nombre || '').trim(),
+            cantidad: Number(item?.cantidad) || 1,
+            precio_unitario: Number(item?.precio_unitario) || 0,
+            subtotal: Number(item?.subtotal) || 0
+          }))
+        })
+      });
+
+      if (!data?.ok || !data?.cupon) {
+        throw new Error(data?.error || 'No se pudo aplicar el cupon');
+      }
+
+      const codigoNuevo = String(data?.cupon?.codigo || codigo).trim().toUpperCase();
+      const yaExiste = (Array.isArray(cuponesAplicadosRef.current) ? cuponesAplicadosRef.current : [])
+        .some((cup) => String(cup?.codigo || '').trim().toUpperCase() === codigoNuevo);
+      if (yaExiste) {
+        setEstadoInputCupon('invalido');
+        mostrarNotificacion('Ese cupón ya está aplicado', 'advertencia');
+        return;
+      }
+
+      setCuponesAplicados((prev) => ([...(Array.isArray(prev) ? prev : []), data.cupon]));
+      setCodigoCuponInput('');
+      setEstadoInputCupon('valido');
+      mostrarNotificacion(`Cupon ${String(data?.cupon?.codigo || codigo)} aplicado`, 'exito');
+    } catch (error) {
+      setEstadoInputCupon('invalido');
+      mostrarNotificacion('Cupón no válido', 'error');
+    } finally {
+      setValidandoCupon(false);
+    }
+  }
+
+  function quitarCuponCarrito(codigo = '') {
+    const codigoObjetivo = String(codigo || '').trim().toUpperCase();
+    if (!codigoObjetivo) {
+      setCuponesAplicados([]);
+    } else {
+      setCuponesAplicados((prev) => (Array.isArray(prev)
+        ? prev.filter((cup) => String(cup?.codigo || '').trim().toUpperCase() !== codigoObjetivo)
+        : []));
+    }
+    setEstadoInputCupon('neutral');
+    try {
+      const actuales = Array.isArray(cuponesAplicadosRef.current) ? cuponesAplicadosRef.current : [];
+      const restantes = !codigoObjetivo
+        ? []
+        : actuales.filter((cup) => String(cup?.codigo || '').trim().toUpperCase() !== codigoObjetivo);
+      if (restantes.length) {
+        localStorage.setItem(CLAVE_CUPONES_CARRITO_TIENDA, JSON.stringify(restantes));
+      } else {
+        localStorage.removeItem(CLAVE_CUPONES_CARRITO_TIENDA);
+      }
+    } catch {
+      // Ignorar errores de almacenamiento local.
+    }
+  }
+
+  async function cargarCuponesAdmin() {
+    if (!tokenInterno) return;
+    try {
+      const data = await fetchAdmin('/tienda/admin/cupones');
+      setCuponesAdmin(Array.isArray(data?.cupones) ? data.cupones : []);
+      setResumenCuponesAdmin({
+        cupones_totales: Number(data?.resumen_general?.cupones_totales) || 0,
+        cupones_activos: Number(data?.resumen_general?.cupones_activos) || 0,
+        usos_totales: Number(data?.resumen_general?.usos_totales) || 0,
+        ventas_totales: Number(data?.resumen_general?.ventas_totales) || 0,
+        descuentos_totales: Number(data?.resumen_general?.descuentos_totales) || 0,
+        productos_vendidos_totales: Number(data?.resumen_general?.productos_vendidos_totales) || 0
+      });
+    } catch {
+      setCuponesAdmin([]);
+      setResumenCuponesAdmin({
+        cupones_totales: 0,
+        cupones_activos: 0,
+        usos_totales: 0,
+        ventas_totales: 0,
+        descuentos_totales: 0,
+        productos_vendidos_totales: 0
+      });
+    }
+  }
+
+  async function cargarHistorialCuponesAdmin() {
+    if (!tokenInterno) return;
+    setCargandoHistorialCuponesAdmin(true);
+    try {
+      const data = await fetchAdmin('/tienda/admin/cupones/historial');
+      setHistorialCuponesAdmin({
+        historial: Array.isArray(data?.historial) ? data.historial : [],
+        influencers: Array.isArray(data?.influencers) ? data.influencers : []
+      });
+    } catch {
+      setHistorialCuponesAdmin({ historial: [], influencers: [] });
+    } finally {
+      setCargandoHistorialCuponesAdmin(false);
+    }
+  }
+
+  async function enviarCampanaCuponSuscriptores(cupon) {
+    const codigo = String(cupon?.codigo || '').trim().toUpperCase();
+    if (!codigo) return;
+
+    const tipoDescuento = String(cupon?.tipo_descuento || 'porcentaje').trim().toLowerCase();
+    const valorDescuento = Math.max(0, Number(cupon?.valor_descuento) || 0);
+    const descuentoTxt = tipoDescuento === 'porcentaje'
+      ? `${valorDescuento}% de descuento`
+      : `$${valorDescuento} MXN de descuento`;
+
+    const minimoTxt = Math.max(0, Number(cupon?.monto_minimo) || 0) > 0
+      ? `\n- Compra mínima: $${Math.max(0, Number(cupon?.monto_minimo) || 0)} MXN`
+      : '';
+    const topeTxt = Math.max(0, Number(cupon?.max_descuento) || 0) > 0
+      ? `\n- Tope de descuento: $${Math.max(0, Number(cupon?.max_descuento) || 0)} MXN`
+      : '';
+
+    const titulo = `Nuevo cupón disponible: ${codigo}`;
+    const contenido = [
+      `¡Tenemos un cupón nuevo para ti!`,
+      '',
+      `Código: ${codigo}`,
+      `Beneficio: ${descuentoTxt}`,
+      minimoTxt ? minimoTxt.replace(/^\n/, '') : '',
+      topeTxt ? topeTxt.replace(/^\n/, '') : '',
+      '',
+      `Úsalo en tu próxima compra antes de que termine su vigencia.`
+    ].filter(Boolean).join('\n');
+
+    return fetchAdmin('/tienda/admin/mail/masivo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        titulo,
+        contenido,
+        imagen_url: String(configTiendaAdmin?.correo_campana_imagen_url || '').trim(),
+        asunto: `Cupón activo en CHIPACTLI: ${codigo}`,
+        cuerpo: [
+          'Hola {{nombre_cliente}},',
+          '',
+          'Tenemos una promoción especial para ti.',
+          '',
+          `Código de cupón: ${codigo}`,
+          `Beneficio: ${descuentoTxt}`,
+          minimoTxt,
+          topeTxt,
+          '',
+          'Canjéalo desde la tienda en línea.',
+          'Visita nuestra tienda: {{url_tienda}}'
+        ].join('\n').replace(/\n{3,}/g, '\n\n'),
+        max_destinatarios: 1000
+      })
+    });
+  }
+
+  async function guardarCuponAdmin() {
+    if (!tokenInterno || guardandoCuponAdmin) return;
+    const esNuevoCupon = (Number(editandoCuponAdminId) || 0) <= 0;
+
+    const payload = {
+      ...cuponAdminDraft,
+      codigo: String(cuponAdminDraft?.codigo || '').trim().toUpperCase().replace(/\s+/g, ''),
+      nombre: String(cuponAdminDraft?.nombre || '').trim(),
+      alcance_tipo: String(cuponAdminDraft?.alcance_tipo || 'todos').trim().toLowerCase(),
+      alcance_clave: String(cuponAdminDraft?.alcance_clave || '').trim().toLowerCase(),
+      influencer_nombre: String(cuponAdminDraft?.influencer_nombre || '').trim(),
+      influencer_handle: String(cuponAdminDraft?.influencer_handle || '').trim(),
+      valor_descuento: Math.max(0, Number(cuponAdminDraft?.valor_descuento) || 0),
+      monto_minimo: Math.max(0, Number(cuponAdminDraft?.monto_minimo) || 0),
+      max_descuento: Math.max(0, Number(cuponAdminDraft?.max_descuento) || 0),
+      usos_maximos_total: Math.max(0, Number(cuponAdminDraft?.usos_maximos_total) || 0),
+      usos_maximos_por_cliente: Math.max(0, Number(cuponAdminDraft?.usos_maximos_por_cliente) || 0)
+    };
+
+    if (!payload.codigo) {
+      mostrarNotificacion('Codigo de cupon obligatorio', 'error');
+      return;
+    }
+    if (!payload.nombre) {
+      mostrarNotificacion('El nombre de la promocion es obligatorio', 'error');
+      return;
+    }
+    if ((payload.alcance_tipo === 'categoria' || payload.alcance_tipo === 'producto') && !payload.alcance_clave) {
+      mostrarNotificacion('Selecciona la categoría o producto para el alcance del cupón', 'error');
+      return;
+    }
+    if (payload.tipo === 'influencer' && !payload.influencer_nombre) {
+      mostrarNotificacion('El nombre del influencer es obligatorio', 'error');
+      return;
+    }
+    if (!payload.vigente_indefinido && (!payload.valido_desde || !payload.valido_hasta)) {
+      mostrarNotificacion('Define fecha de inicio y fin para la vigencia', 'error');
+      return;
+    }
+
+    setGuardandoCuponAdmin(true);
+    try {
+      await fetchAdmin('/tienda/admin/cupones/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (esNuevoCupon) {
+        const confirmarEnvio = await mostrarConfirmacion(
+          '¿Deseas enviar este cupón por correo a todos los suscriptores de la página?',
+          'Enviar cupón a suscriptores'
+        );
+        if (confirmarEnvio) {
+          try {
+            const dataEnvio = await enviarCampanaCuponSuscriptores(payload);
+            const enviados = Number(dataEnvio?.enviados || 0);
+            const fallidos = Number(dataEnvio?.fallidos || 0);
+            mostrarNotificacion(`Cupón enviado por correo. Éxito: ${enviados} · Fallidos: ${fallidos}`, fallidos > 0 ? 'advertencia' : 'exito');
+          } catch (errorMail) {
+            mostrarNotificacion(errorMail?.message || 'Cupón guardado, pero falló el envío a suscriptores', 'advertencia');
+          }
+        }
+      }
+
+      mostrarNotificacion('Cupon guardado', 'exito');
+      setCuponAdminDraft(CUPON_ADMIN_DEFAULT);
+      setMostrandoModalCuponAdmin(false);
+      setEditandoCuponAdminId(0);
+      await cargarCuponesAdmin();
+      await cargarHistorialCuponesAdmin();
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo guardar cupon', 'error');
+    } finally {
+      setGuardandoCuponAdmin(false);
+    }
+  }
+
+  async function cambiarActivoCuponAdmin(cupon, activo) {
+    const idCupon = Number(cupon?.id) || 0;
+    if (!idCupon || !tokenInterno) return;
+    setActualizandoActivoCuponId(idCupon);
+    try {
+      await fetchAdmin(`/tienda/admin/cupones/${idCupon}/activo`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activo: Boolean(activo) })
+      });
+      await cargarCuponesAdmin();
+      mostrarNotificacion('Estado del cupón actualizado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo cambiar el estado del cupón', 'error');
+    } finally {
+      setActualizandoActivoCuponId(0);
+    }
+  }
+
+  function abrirModalCuponAdmin(cupon = null) {
+    if (cupon) {
+      setEditandoCuponAdminId(Number(cupon?.id) || 0);
+      setCuponAdminDraft({
+        ...CUPON_ADMIN_DEFAULT,
+        ...cupon,
+        alcance_tipo: String(cupon?.alcance_tipo || 'todos').trim().toLowerCase() || 'todos',
+        alcance_clave: String(cupon?.alcance_clave || '').trim().toLowerCase(),
+        un_solo_uso_por_cliente: Number(cupon?.un_solo_uso_por_cliente) === 1,
+        vigente_indefinido: Number(cupon?.vigente_indefinido) === 1,
+        activo: Number(cupon?.activo) === 1,
+        valido_desde: String(cupon?.valido_desde || '').slice(0, 16),
+        valido_hasta: String(cupon?.valido_hasta || '').slice(0, 16)
+      });
+    } else {
+      setEditandoCuponAdminId(0);
+      setCuponAdminDraft(CUPON_ADMIN_DEFAULT);
+    }
+    setPasoModalCuponAdmin(1);
+    setMostrandoModalCuponAdmin(true);
+  }
+
   async function fetchAdmin(path, options = {}) {
+    const method = String(options?.method || 'GET').trim().toUpperCase() || 'GET';
+    const esLectura = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+    if (!esLectura && !puedeEditarTrastienda) {
+      mostrarNotificacion('No tienes permiso para editar en Trastienda.', 'error');
+      throw new Error('Permiso insuficiente para editar Trastienda');
+    }
     const headers = {
       ...(options.headers || {}),
       Authorization: `Bearer ${tokenInterno}`
@@ -4299,8 +5038,80 @@ export default function Tienda({
       setPasoRegistro(1);
       setMostrarModalAuthCliente(false);
       mostrarNotificacion(modoAuth === 'login' ? 'Sesión iniciada' : 'Cuenta creada', 'exito');
+
+      if (modoAuth === 'login' && Boolean(data?.debe_cambiar_password)) {
+        setModalCambioPasswordCliente({ visible: true, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
+        mostrarNotificacion('Por seguridad, cambia tu contraseña temporal para continuar.', 'advertencia');
+      }
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo autenticar', 'error');
+    }
+  }
+
+  async function enviarRecuperacionCliente() {
+    setRecuperacionClienteMensaje('');
+
+    try {
+      const email = String(recuperarClienteEmail || '').trim().toLowerCase();
+      if (!email) throw new Error('Escribe tu correo para recuperar tu contraseña');
+
+      setEnviandoRecuperacionCliente(true);
+      const data = await fetchJson('/tienda/auth/olvide-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+
+      setCredenciales((prev) => ({ ...prev, email, password: '' }));
+      setMostrarPanelRecuperarCliente(false);
+      setRecuperacionClienteMensaje('');
+      setRecuperarClienteEmail('');
+      mostrarNotificacion(data?.mensaje || 'Te enviamos una contraseña temporal a tu correo.', 'exito');
+    } catch (error) {
+      setRecuperacionClienteMensaje(error?.message || 'No se pudo enviar el correo de recuperación');
+    } finally {
+      setEnviandoRecuperacionCliente(false);
+    }
+  }
+
+  async function guardarNuevaPasswordCliente(event) {
+    event.preventDefault();
+
+    try {
+      const nueva = String(modalCambioPasswordCliente.nueva || '');
+      const confirmar = String(modalCambioPasswordCliente.confirmar || '');
+      if (!nueva || nueva.length < 8) throw new Error('Tu nueva contraseña debe tener al menos 8 caracteres');
+      if (nueva !== confirmar) throw new Error('Las contraseñas no coinciden');
+      if (!clienteToken) throw new Error('Tu sesión no es válida. Inicia sesión nuevamente');
+
+      setModalCambioPasswordCliente((prev) => ({ ...prev, guardando: true }));
+      const data = await fetchJson('/tienda/auth/cambiar-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${clienteToken}`
+        },
+        body: JSON.stringify({
+          password_nueva: nueva,
+          cerrar_sesiones: Boolean(modalCambioPasswordCliente.cerrarSesiones)
+        })
+      });
+
+      const cerrarSesiones = Boolean(modalCambioPasswordCliente.cerrarSesiones);
+      const tokenRefrescado = String(data?.token || '').trim();
+      if (tokenRefrescado) {
+        localStorage.setItem(CLAVE_TOKEN_CLIENTE, tokenRefrescado);
+        setClienteToken(tokenRefrescado);
+      }
+      setModalCambioPasswordCliente({ visible: false, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
+      if (cerrarSesiones) {
+        mostrarNotificacion('Contraseña actualizada. Se cerró sesión en tus otros dispositivos.', 'exito');
+      } else {
+        mostrarNotificacion('Contraseña actualizada correctamente', 'exito');
+      }
+    } catch (error) {
+      setModalCambioPasswordCliente((prev) => ({ ...prev, guardando: false }));
+      mostrarNotificacion(error?.message || 'No se pudo cambiar la contraseña', 'error');
     }
   }
 
@@ -4404,6 +5215,10 @@ export default function Tienda({
             origen_pedido: resolverOrigenPedidoCliente(),
             id_punto_entrega: Number(checkout.id_punto_entrega) || 0,
             notas: checkout.notas,
+            codigo_cupon: String((cuponesAplicados[0]?.codigo) || '').trim(),
+            codigos_cupones: (Array.isArray(cuponesAplicados) ? cuponesAplicados : [])
+              .map((cup) => String(cup?.codigo || '').trim())
+              .filter(Boolean),
             url_retorno_base: urlRetornoBase
           })
         });
@@ -4461,7 +5276,11 @@ export default function Tienda({
           origen_pedido: resolverOrigenPedidoCliente(),
           metodo_pago: checkout.metodo_pago,
           id_punto_entrega: Number(checkout.id_punto_entrega) || 0,
-          notas: checkout.notas
+          notas: checkout.notas,
+          codigo_cupon: String((cuponesAplicados[0]?.codigo) || '').trim(),
+          codigos_cupones: (Array.isArray(cuponesAplicados) ? cuponesAplicados : [])
+            .map((cup) => String(cup?.codigo || '').trim())
+            .filter(Boolean)
         })
       });
 
@@ -4471,6 +5290,8 @@ export default function Tienda({
       setCarrito([]);
       setCarritoCreadoEn(Date.now());
       setCheckout((prev) => ({ ...prev, notas: '' }));
+      setCuponesAplicados([]);
+      setCodigoCuponInput('');
       cerrarCarrito();
       await cargarMisOrdenes();
       await cargarProductos({ silencioso: true });
@@ -4684,34 +5505,58 @@ export default function Tienda({
                       <div className="tiendaImagenPlaceholder">Sin imagen</div>
                     )}
                   </div>
+                  <div className="tiendaShareIconRow">
+                    <button
+                      type="button"
+                      className="tiendaShareIconBtn"
+                      onClick={() => compartirProducto(producto)}
+                      aria-label={`Compartir ${producto.nombre_receta}`}
+                      title="Compartir"
+                    >
+                      <svg viewBox="0 0 24 24" role="presentation" focusable="false" aria-hidden="true">
+                        <path d="M18 16a3 3 0 0 0-2.29 1.06l-6.72-3.36a3.14 3.14 0 0 0 0-1.4l6.72-3.36A3 3 0 1 0 15 7a3.2 3.2 0 0 0 .03.41L8.3 10.77a3 3 0 1 0 0 2.46l6.73 3.36A3 3 0 1 0 18 16z" />
+                      </svg>
+                    </button>
+                  </div>
                   <div className="tiendaCategoriaBadge">{categoriaProducto}</div>
                   <h3>{producto.nombre_receta}</h3>
-                  <div className="tiendaCalificacionCard" title={totalResenas ? `${promedioResenas.toFixed(1)} de 5` : 'Sin calificaciones'}>
+                  <div className={totalResenas > 0 ? 'tiendaCalificacionCard' : 'tiendaCalificacionCard sinTexto'} title={totalResenas ? `${promedioResenas.toFixed(1)} de 5` : 'Sin calificaciones'}>
                     <div className="tiendaHojitasFila">
                       {hojitas.map((activa, idx) => (
                         <span key={`hojita-${producto.nombre_receta}-${idx}`} className={activa ? 'tiendaHojita activa' : 'tiendaHojita'}>🍃</span>
                       ))}
                     </div>
-                    <span className="tiendaCalificacionTxt">
-                      {totalResenas >= 5
-                        ? `${promedioResenas.toFixed(1)} / 5`
-                        : `${totalResenas} calificaciones`}
-                    </span>
+                    {totalResenas > 0 && (
+                      <span className="tiendaCalificacionTxt">
+                        {totalResenas >= 5
+                          ? `${promedioResenas.toFixed(1)} / 5`
+                          : `${totalResenas} calificaciones`}
+                      </span>
+                    )}
                   </div>
                   {!!variantes.length && (
                     <div className="tiendaVariantes tiendaVariantesCard">
-                      {variantes.map((v) => (
-                        <span key={`${producto.nombre_receta}-${v.nombre}`} className="tiendaChipVariante">{v.nombre}</span>
-                      ))}
+                      <div className="tiendaVariantesLista">
+                        {variantes.map((v) => (
+                          <span key={`${producto.nombre_receta}-${v.nombre}`} className="tiendaChipVariante">{v.nombre}</span>
+                        ))}
+                      </div>
+                      <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
+                        {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
+                      </span>
+                    </div>
+                  )}
+                  {!variantes.length && (
+                    <div className="tiendaMeta tiendaMetaFallback">
+                      <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
+                        {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
+                      </span>
                     </div>
                   )}
                   {String(producto.descripcion || '').trim() && (
                     <p className="tiendaDescripcion">{producto.descripcion}</p>
                   )}
                   <div className="tiendaCardFooter">
-                    <div className="tiendaMeta">
-                      <span className="tiendaMetaSolo">{tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}</span>
-                    </div>
                     <div className="tiendaAccionesCard">
                       <button className="boton" onClick={() => abrirDetalle(producto)}>Ver detalle</button>
                       <button
@@ -4795,7 +5640,56 @@ export default function Tienda({
             </div>
 
             <div className="tiendaCheckout tiendaCheckoutPie">
-              <div className="tiendaTotal">Total: {precio(totalCarrito)}</div>
+              <div className="tiendaCuponBox">
+                <input
+                  type="text"
+                  placeholder="Cupón"
+                  className={estadoInputCupon === 'valido' ? 'tiendaCuponInput valido' : (estadoInputCupon === 'invalido' ? 'tiendaCuponInput invalido' : 'tiendaCuponInput')}
+                  value={codigoCuponInput}
+                  onChange={(e) => {
+                    setCodigoCuponInput(String(e.target.value || '').toUpperCase().replace(/\s+/g, ''));
+                    if (estadoInputCupon !== 'neutral') setEstadoInputCupon('neutral');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      aplicarCuponCarrito();
+                    }
+                  }}
+                  disabled={validandoCupon}
+                />
+                <button type="button" className="botonPequeno" onClick={aplicarCuponCarrito} disabled={validandoCupon || !carrito.length}>
+                  {validandoCupon ? 'Validando...' : 'Aplicar'}
+                </button>
+              </div>
+              {cuponesAplicados.length > 0 && (
+                <div className="tiendaCuponAplicadoBar">
+                  <span>Cupones activos:</span>
+                  <div className="tiendaCuponAplicadoLista">
+                    {cuponesAplicados.map((cup) => {
+                      const codigo = String(cup?.codigo || '').trim().toUpperCase();
+                      return (
+                        <span key={codigo} className="tiendaCuponAplicadoChip">
+                          <strong>{codigo}</strong>
+                          <button type="button" className="botonPequeno botonDanger" onClick={() => quitarCuponCarrito(codigo)}>
+                            Quitar
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="tiendaCheckoutTotales">
+                <span>Subtotal: <strong>{precio(subtotalCarrito)}</strong></span>
+                {cuponesAplicados.length > 0 && (
+                  <span>
+                    Descuento ({cuponesAplicados.map((cup) => String(cup?.codigo || '').trim().toUpperCase()).join(' + ')}):
+                    <strong> -{precio(descuentoCuponCarrito)}</strong>
+                  </span>
+                )}
+                <span className="tiendaCheckoutTotalFinal">Total: <strong>{precio(totalCarrito)}</strong></span>
+              </div>
               <button type="button" className="boton botonExito" onClick={continuarPasoEntrega}>
                 Continuar con la entrega
               </button>
@@ -4850,8 +5744,20 @@ export default function Tienda({
             />
 
             <div className="tiendaCheckoutResumen">
-              <span>Total a pagar:</span>
-              <strong>{precio(totalCarrito)}</strong>
+              <div className="tiendaCheckoutResumenFilas">
+                <span>Subtotal:</span>
+                <strong>{precio(subtotalCarrito)}</strong>
+              </div>
+              {cuponesAplicados.length > 0 && (
+                <div className="tiendaCheckoutResumenFilas">
+                  <span>Descuento ({cuponesAplicados.map((cup) => String(cup?.codigo || '').trim().toUpperCase()).join(' + ')}):</span>
+                  <strong>-{precio(descuentoCuponCarrito)}</strong>
+                </div>
+              )}
+              <div className="tiendaCheckoutResumenFilas tiendaCheckoutResumenTotal">
+                <span>Total a pagar:</span>
+                <strong>{precio(totalCarrito)}</strong>
+              </div>
             </div>
 
             <div className="tiendaCheckoutAcciones">
@@ -4892,18 +5798,33 @@ export default function Tienda({
 
       {(esVistaTrastienda || vistaActiva === 'trastienda') && tokenInterno && (
         <section className="tarjeta tiendaCatalogo">
-          <div className="tiendaAdminPanel">
+          <div className={puedeEditarTrastienda ? 'tiendaAdminPanel' : 'tiendaAdminPanel soloLectura'}>
             <h3>Panel interno tienda</h3>
 
+            {!puedeEditarTrastienda && (
+              <div className="tiendaAdminSoloLecturaAviso">
+                Modo solo lectura activo. Puedes usar filtros y búsquedas, pero no guardar cambios.
+              </div>
+            )}
+
             <div className="tiendaAdminTabs">
-              <button type="button" className={adminVista === 'pedidos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('pedidos')}>Pedidos</button>
-              <button type="button" className={adminVista === 'clientes' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('clientes')}>Clientes</button>
-              <button type="button" className={adminVista === 'puntos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('puntos')}>Puntos de entrega</button>
-              <button type="button" className={adminVista === 'catalogo' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('catalogo')}>Catálogo</button>
-              <button type="button" className={adminVista === 'descuentos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('descuentos')}>Descuentos</button>
-              <button type="button" className={adminVista === 'metricas' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('metricas')}>Métricas</button>
-              <button type="button" className={adminVista === 'config' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setAdminVista('config')}>Configuración</button>
+              {vistasTrastiendaDisponibles.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={adminVista === item.id ? 'tiendaTab activa' : 'tiendaTab'}
+                  onClick={() => setAdminVista(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
+
+            {!vistasTrastiendaDisponibles.length && (
+              <div className="tiendaVacio" style={{ marginTop: 12 }}>
+                No tienes permisos para ver secciones de Trastienda.
+              </div>
+            )}
 
             {adminVista === 'metricas' && (
               <div className="tiendaAdminForm tiendaMetricasWrap">
@@ -6149,6 +7070,338 @@ export default function Tienda({
             </div>
             )}
 
+            {adminVista === 'cupones' && (
+            <div className="tiendaAdminForm tiendaCuponesAdminWrap">
+              <strong>Cupones de checkout</strong>
+              <div className="tiendaVacio" style={{ marginBottom: '8px' }}>
+                Crea cupones generales o de influencer con vigencia, límites de uso y seguimiento de ventas.
+              </div>
+
+              <div className="tiendaCuponesResumenGrid">
+                <article className="tiendaCuponResumenCard"><span>Cupones</span><strong>{resumenCuponesAdmin.cupones_totales}</strong></article>
+                <article className="tiendaCuponResumenCard"><span>Activos</span><strong>{resumenCuponesAdmin.cupones_activos}</strong></article>
+                <article className="tiendaCuponResumenCard"><span>Usos</span><strong>{resumenCuponesAdmin.usos_totales}</strong></article>
+                <article className="tiendaCuponResumenCard"><span>Productos vendidos</span><strong>{resumenCuponesAdmin.productos_vendidos_totales}</strong></article>
+                <article className="tiendaCuponResumenCard"><span>Ventas</span><strong>{precio(resumenCuponesAdmin.ventas_totales)}</strong></article>
+                <article className="tiendaCuponResumenCard"><span>Descuentos</span><strong>{precio(resumenCuponesAdmin.descuentos_totales)}</strong></article>
+              </div>
+
+              <div className="tiendaCuponesListaCard">
+                <div className="tiendaCuponesListaHead">
+                  <strong>Cupones registrados ({cuponesAdmin.length})</strong>
+                  <div className="tiendaCuponesListaAcciones">
+                    <button className="botonPequeno botonExito" type="button" onClick={() => abrirModalCuponAdmin(null)}>
+                      + Nuevo cupón
+                    </button>
+                    <button className="botonPequeno" type="button" onClick={() => { cargarCuponesAdmin(); cargarHistorialCuponesAdmin(); }}>
+                      Refrescar
+                    </button>
+                  </div>
+                </div>
+                <div className="tiendaCuponesListaTabla">
+                  {(cuponesAdmin || []).map((cupon) => (
+                    <article key={`admin-cupon-${cupon.id}-${cupon.codigo}`} className="tiendaCuponFila">
+                      <div>
+                        <strong>{cupon.codigo}</strong>
+                        <div className="tiendaAdminSubtexto">
+                          {cupon.nombre || 'Sin nombre'} · {cupon.tipo === 'influencer' ? 'Influencer' : 'General'} · {cupon.alcance_tipo || 'todos'}
+                        </div>
+                        {!!cupon.influencer_nombre && (
+                          <div className="tiendaAdminSubtexto">{cupon.influencer_nombre}{cupon.influencer_handle ? ` (${cupon.influencer_handle})` : ''}</div>
+                        )}
+                        {!!cupon.alcance_clave && <div className="tiendaAdminSubtexto">Alcance: {cupon.alcance_clave}</div>}
+                      </div>
+                      <div className="tiendaCuponFilaStats">
+                        <span>Usos: <strong>{Number(cupon?.estadistica?.usos) || 0}</strong></span>
+                        <span>Productos: <strong>{Number(cupon?.estadistica?.productos_vendidos) || 0}</strong></span>
+                        <span>Ventas: <strong>{precio(Number(cupon?.estadistica?.total_ventas) || 0)}</strong></span>
+                        <span>Descuento: <strong>{precio(Number(cupon?.estadistica?.descuento_total) || 0)}</strong></span>
+                      </div>
+                      <div className="tiendaCuponFilaAcciones">
+                        <SwitchConTexto
+                          checked={Number(cupon?.activo) === 1}
+                          label={Number(cupon?.activo) === 1 ? 'Activo' : 'Inactivo'}
+                          onChange={(e) => cambiarActivoCuponAdmin(cupon, e.target.checked)}
+                          ariaLabel={`Activar o desactivar cupón ${cupon.codigo}`}
+                        />
+                        <button
+                          type="button"
+                          className="botonPequeno"
+                          disabled={actualizandoActivoCuponId === Number(cupon?.id)}
+                          onClick={() => abrirModalCuponAdmin(cupon)}
+                        >
+                          Editar
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                  {!cuponesAdmin.length && <div className="tiendaVacio">Sin cupones registrados.</div>}
+                </div>
+              </div>
+
+              <div className="tiendaCuponesInfluencersCard">
+                <strong>Tracking de influencers</strong>
+                {cargandoHistorialCuponesAdmin ? (
+                  <div className="tiendaVacio">Cargando métricas...</div>
+                ) : (
+                  <div className="tiendaCuponesInfluencersGrid">
+                    {(historialCuponesAdmin.influencers || []).map((item) => (
+                      <article key={`influencer-cupon-${item.id}-${item.codigo}`} className="tiendaCuponInfluencerItem">
+                        <strong>{item.codigo}</strong>
+                        <span>{item.influencer_nombre || item.nombre || 'Influencer'}</span>
+                        <span>Órdenes: {Number(item.ordenes) || 0}</span>
+                        <span>Productos vendidos: {Number(item.productos_vendidos) || 0}</span>
+                        <span>Total vendido: {precio(Number(item.total_ventas) || 0)}</span>
+                        <span>Descuento otorgado: {precio(Number(item.descuento_otorgado) || 0)}</span>
+                      </article>
+                    ))}
+                    {!(historialCuponesAdmin.influencers || []).length && <div className="tiendaVacio">No hay datos de influencer aún.</div>}
+                  </div>
+                )}
+              </div>
+
+              {mostrandoModalCuponAdmin && typeof document !== 'undefined' && createPortal(
+                <div className="tiendaPerfilOverlay tiendaCuponOverlay" onClick={() => setMostrandoModalCuponAdmin(false)}>
+                  <div className="contenidoModal tiendaAuthModal tiendaCuponModal" onClick={(e) => e.stopPropagation()}>
+                    <div className="encabezadoModal tiendaPerfilHeaderPro">
+                      <h3>{editandoCuponAdminId > 0 ? 'Editar cupón' : 'Nuevo cupón'}</h3>
+                      <button className="cerrarModal" onClick={() => { setMostrandoModalCuponAdmin(false); setPasoModalCuponAdmin(1); }}>&times;</button>
+                    </div>
+
+                    <div className="tiendaCuponWizardPasos">
+                      {[1, 2, 3, 4].map((paso) => (
+                        <div key={`paso-cupon-${paso}`} className={pasoModalCuponAdmin === paso ? 'tiendaCuponWizardPaso activo' : 'tiendaCuponWizardPaso'}>
+                          Paso {paso}
+                        </div>
+                      ))}
+                    </div>
+
+                    {pasoModalCuponAdmin === 1 && (
+                      <div className="tiendaCuponWizardPanel">
+                        <h4>Datos básicos</h4>
+                        <div className="tiendaCuponesCampos2">
+                          <input
+                            placeholder="Código"
+                            value={cuponAdminDraft.codigo}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, codigo: String(e.target.value || '').toUpperCase().replace(/\s+/g, '') }))}
+                          />
+                          <input
+                            placeholder="Promoción (nombre)"
+                            value={cuponAdminDraft.nombre}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, nombre: e.target.value }))}
+                          />
+                        </div>
+                        <div className="tiendaCuponesCampos2">
+                          <select value={cuponAdminDraft.tipo} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, tipo: e.target.value }))}>
+                            <option value="general">General</option>
+                            <option value="influencer">Influencer</option>
+                          </select>
+                          <label className="tiendaSwitchCard tiendaSwitchToggle">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(cuponAdminDraft.activo)}
+                              onChange={(e) => setCuponAdminDraft((p) => ({ ...p, activo: e.target.checked }))}
+                            />
+                            <span className="tiendaSwitchSlider" />
+                            <span>Activo</span>
+                          </label>
+                        </div>
+                        {cuponAdminDraft.tipo === 'influencer' && (
+                          <div className="tiendaCuponesCampos2">
+                            <input placeholder="Nombre influencer" value={cuponAdminDraft.influencer_nombre} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, influencer_nombre: e.target.value }))} />
+                            <input placeholder="@handle (opcional)" value={cuponAdminDraft.influencer_handle} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, influencer_handle: e.target.value }))} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {pasoModalCuponAdmin === 2 && (
+                      <div className="tiendaCuponWizardPanel">
+                        <h4>Alcance del cupón</h4>
+                        <div className="tiendaCuponesCampos2">
+                          <select value={cuponAdminDraft.alcance_tipo} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, alcance_tipo: e.target.value, alcance_clave: '' }))}>
+                            <option value="todos">Menú general (todos)</option>
+                            <option value="categoria">Solo una categoría</option>
+                            <option value="producto">Solo un producto</option>
+                          </select>
+                          {cuponAdminDraft.alcance_tipo === 'categoria' ? (
+                            <select value={cuponAdminDraft.alcance_clave} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, alcance_clave: e.target.value }))}>
+                              <option value="">Selecciona categoría</option>
+                              {categoriasDisponibles.map((categoria) => (
+                                <option key={`cupon-cat-${categoria}`} value={String(categoria || '').toLowerCase()}>{categoria}</option>
+                              ))}
+                            </select>
+                          ) : cuponAdminDraft.alcance_tipo === 'producto' ? (
+                            <select value={cuponAdminDraft.alcance_clave} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, alcance_clave: e.target.value }))}>
+                              <option value="">Selecciona producto</option>
+                              {productos.map((producto) => (
+                                <option key={`cupon-prod-${producto?.slug || producto?.nombre_receta}`} value={String(producto?.nombre_receta || '').trim().toLowerCase()}>{producto?.nombre_receta}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input value="Aplica a todos" disabled />
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {pasoModalCuponAdmin === 3 && (
+                      <div className="tiendaCuponWizardPanel">
+                        <h4>Descuento y reglas de uso</h4>
+                        <div className="tiendaCuponSwitchTop">
+                          <label className="tiendaSwitchCard tiendaSwitchToggle">
+                            <input type="checkbox" checked={Boolean(cuponAdminDraft.un_solo_uso_por_cliente)} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, un_solo_uso_por_cliente: e.target.checked }))} />
+                            <span className="tiendaSwitchSlider" />
+                            <span>Un solo uso por cliente</span>
+                          </label>
+                        </div>
+
+                        <div className="tiendaCuponesCampos3">
+                          <select
+                            value={cuponAdminDraft.tipo_descuento}
+                            onChange={(e) => {
+                              const nuevoTipo = String(e.target.value || 'porcentaje').trim().toLowerCase();
+                              setCuponAdminDraft((p) => {
+                                let valor = Math.max(0, Number(p?.valor_descuento) || 0);
+                                if (nuevoTipo === 'porcentaje') {
+                                  valor = Math.min(100, Math.max(5, Math.round((valor || 5) / 5) * 5));
+                                }
+                                return { ...p, tipo_descuento: nuevoTipo, valor_descuento: valor };
+                              });
+                            }}
+                          >
+                            <option value="porcentaje">Descuento %</option>
+                            <option value="monto_fijo">Descuento fijo</option>
+                          </select>
+                          {cuponAdminDraft.tipo_descuento === 'porcentaje' ? (
+                            <select
+                              value={String(Math.min(100, Math.max(5, Math.round((Number(cuponAdminDraft.valor_descuento) || 5) / 5) * 5)))}
+                              onChange={(e) => setCuponAdminDraft((p) => ({ ...p, valor_descuento: Number(e.target.value) || 5 }))}
+                            >
+                              {Array.from({ length: 20 }, (_, i) => (i + 1) * 5).map((valor) => (
+                                <option key={`cupon-desc-${valor}`} value={valor}>{valor}% de descuento</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <select
+                              value={String(Math.max(0, Number(cuponAdminDraft.valor_descuento) || 0))}
+                              onChange={(e) => setCuponAdminDraft((p) => ({ ...p, valor_descuento: Number(e.target.value) || 0 }))}
+                            >
+                              {[50, 100, 150, 200, 250, 300, 400, 500, 750, 1000].map((valor) => (
+                                <option key={`cupon-monto-${valor}`} value={valor}>${valor} MXN descuento</option>
+                              ))}
+                            </select>
+                          )}
+                          <select
+                            value={String(Math.max(0, Number(cuponAdminDraft.monto_minimo) || 0))}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, monto_minimo: Number(e.target.value) || 0 }))}
+                          >
+                            {[0, 100, 200, 300, 500, 700, 1000, 1500, 2000].map((valor) => (
+                              <option key={`cupon-min-${valor}`} value={valor}>{valor === 0 ? 'Sin mínimo de compra' : `Compra mínima $${valor} MXN`}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={String(Math.max(0, Number(cuponAdminDraft.max_descuento) || 0))}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, max_descuento: Number(e.target.value) || 0 }))}
+                          >
+                            {[0, 50, 100, 150, 200, 300, 500, 700, 1000].map((valor) => (
+                              <option key={`cupon-tope-${valor}`} value={valor}>{valor === 0 ? 'Sin tope de descuento' : `Tope $${valor} MXN`}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={String(Math.max(0, Number(cuponAdminDraft.usos_maximos_total) || 0))}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, usos_maximos_total: Number(e.target.value) || 0 }))}
+                          >
+                            {[0, 10, 20, 30, 50, 100, 200, 500, 1000].map((valor) => (
+                              <option key={`cupon-usos-total-${valor}`} value={valor}>{valor === 0 ? 'Sin límite total' : `${valor} usos totales`}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={String(Math.max(0, Number(cuponAdminDraft.usos_maximos_por_cliente) || 0))}
+                            onChange={(e) => setCuponAdminDraft((p) => ({ ...p, usos_maximos_por_cliente: Number(e.target.value) || 0 }))}
+                          >
+                            {[0, 1, 2, 3, 5, 10].map((valor) => (
+                              <option key={`cupon-usos-cliente-${valor}`} value={valor}>{valor === 0 ? 'Sin límite por cliente' : `${valor} usos por cliente`}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {pasoModalCuponAdmin === 4 && (
+                      <div className="tiendaCuponWizardPanel">
+                        <h4>Vigencia</h4>
+                        <div className="tiendaCuponesCampos2">
+                          <label className="tiendaSwitchCard tiendaSwitchToggle">
+                            <input type="checkbox" checked={Boolean(cuponAdminDraft.vigente_indefinido)} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, vigente_indefinido: e.target.checked }))} />
+                            <span className="tiendaSwitchSlider" />
+                            <span>Vigencia indefinida</span>
+                          </label>
+                        </div>
+                        {!cuponAdminDraft.vigente_indefinido && (
+                          <div className="tiendaCuponesCampos2">
+                            <input type="datetime-local" value={cuponAdminDraft.valido_desde} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, valido_desde: e.target.value }))} />
+                            <input type="datetime-local" value={cuponAdminDraft.valido_hasta} onChange={(e) => setCuponAdminDraft((p) => ({ ...p, valido_hasta: e.target.value }))} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="tiendaCuponesEditorAcciones">
+                      <button
+                        className="boton"
+                        type="button"
+                        onClick={() => setPasoModalCuponAdmin((p) => Math.max(1, p - 1))}
+                        disabled={pasoModalCuponAdmin <= 1 || guardandoCuponAdmin}
+                      >
+                        Atrás
+                      </button>
+
+                      {pasoModalCuponAdmin < 4 ? (
+                        <button
+                          className="boton botonExito"
+                          type="button"
+                          onClick={() => {
+                            if (pasoModalCuponAdmin === 1) {
+                              if (!String(cuponAdminDraft.codigo || '').trim()) {
+                                mostrarNotificacion('Captura el código del cupón', 'error');
+                                return;
+                              }
+                              if (!String(cuponAdminDraft.nombre || '').trim()) {
+                                mostrarNotificacion('Captura el nombre de la promoción', 'error');
+                                return;
+                              }
+                              if (String(cuponAdminDraft.tipo || '') === 'influencer' && !String(cuponAdminDraft.influencer_nombre || '').trim()) {
+                                mostrarNotificacion('Captura el nombre del influencer', 'error');
+                                return;
+                              }
+                            }
+                            if (pasoModalCuponAdmin === 2 && (cuponAdminDraft.alcance_tipo === 'categoria' || cuponAdminDraft.alcance_tipo === 'producto') && !String(cuponAdminDraft.alcance_clave || '').trim()) {
+                              mostrarNotificacion('Selecciona el alcance específico del cupón', 'error');
+                              return;
+                            }
+                            setPasoModalCuponAdmin((p) => Math.min(4, p + 1));
+                          }}
+                        >
+                          Siguiente
+                        </button>
+                      ) : (
+                        <button className="boton botonExito" type="button" onClick={guardarCuponAdmin} disabled={guardandoCuponAdmin}>
+                          {guardandoCuponAdmin ? 'Guardando...' : 'Guardar cupón'}
+                        </button>
+                      )}
+
+                      <button className="boton" type="button" onClick={() => { setMostrandoModalCuponAdmin(false); setPasoModalCuponAdmin(1); }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
+            </div>
+            )}
+
             {adminVista === 'clientes' && (
               <div className="tiendaAdminForm">
                 <strong>Clientes registrados</strong>
@@ -6590,11 +7843,13 @@ export default function Tienda({
                     <div className="tiendaDetalleResenas">
                       <div className="tiendaDetalleResenasHead">
                         <strong>Calificación del producto</strong>
-                        <span>
-                          {(Number(seleccionado?.resenas_total) || 0) >= 5
-                            ? `Promedio ${(Number(seleccionado?.resenas_promedio) || 0).toFixed(1)} / 5`
-                            : `${Number(seleccionado?.resenas_total) || 0} calificaciones`}
-                        </span>
+                        {(Number(seleccionado?.resenas_total) || 0) > 0 && (
+                          <span>
+                            {(Number(seleccionado?.resenas_total) || 0) >= 5
+                              ? `Promedio ${(Number(seleccionado?.resenas_promedio) || 0).toFixed(1)} / 5`
+                              : `${Number(seleccionado?.resenas_total) || 0} calificaciones`}
+                          </span>
+                        )}
                       </div>
                       <div className="tiendaHojitasFila tiendaHojitasPromedio">
                         {pintarHojitas(Number(seleccionado?.resenas_promedio) || 0).map((activa, idx) => (
@@ -6852,6 +8107,9 @@ export default function Tienda({
                               <span>Origen: {etiquetaOrigenPedido(orden.origen_pedido)}</span>
                               <span>Pago: {orden.metodo_pago}</span>
                               <span>Estatus pago: {etiquetaEstadoPago(orden.estado_pago)}</span>
+                              <span>Subtotal: {precio(Number(orden?.subtotal) || Number(orden?.total) || 0)}</span>
+                              {Number(orden?.descuento_total) > 0 && <span>Descuento: -{precio(orden.descuento_total)}</span>}
+                              {String(orden?.codigo_cupon || '').trim() && <span>Cupón: {orden.codigo_cupon}</span>}
                               <span>Total: {precio(orden.total)}</span>
                               <span>Estado: {etiquetaEstadoPedido(orden.estado)}</span>
                               {String(orden?.paqueteria || '').trim() && <span>Paquetería: {etiquetaPaqueteria(orden.paqueteria)}</span>}
@@ -7206,7 +8464,6 @@ export default function Tienda({
               <button className="cerrarModal tiendaAuthCerrar" onClick={() => setMostrarModalAuthCliente(false)}>&times;</button>
               <img className="tiendaAuthLogo" src="/images/logo.png" alt="CHIPACTLI" />
               <h3 className="tiendaAuthTitulo">CHIPACTLI</h3>
-              <p className="tiendaAuthSubtitulo">{modoAuth === 'login' ? 'Iniciar sesión cliente' : 'Registro de cliente'}</p>
             </div>
             <form className="tiendaAuth" onSubmit={enviarAuth}>
               {modoAuth === 'login' ? (
@@ -7224,6 +8481,48 @@ export default function Tienda({
                     onChange={(e) => setCredenciales((p) => ({ ...p, password: e.target.value }))}
                     required
                   />
+                  <button
+                    type="button"
+                    className="tiendaAuthRecuperarBtn"
+                    onClick={() => {
+                      setMostrarPanelRecuperarCliente((prev) => !prev);
+                      setRecuperacionClienteMensaje('');
+                      if (!recuperarClienteEmail && credenciales.email) {
+                        setRecuperarClienteEmail(String(credenciales.email || ''));
+                      }
+                    }}
+                  >
+                    Se te olvidó tu contraseña?
+                  </button>
+
+                  {mostrarPanelRecuperarCliente && (
+                    <div className="tiendaAuthRecuperarPanel">
+                      <div className="tiendaAuthRecuperarForm">
+                        <input
+                          type="email"
+                          placeholder="Correo registrado"
+                          value={recuperarClienteEmail}
+                          onChange={(e) => setRecuperarClienteEmail(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              enviarRecuperacionCliente();
+                            }
+                          }}
+                          required
+                        />
+                        <button
+                          type="button"
+                          className="boton"
+                          disabled={enviandoRecuperacionCliente}
+                          onClick={() => enviarRecuperacionCliente()}
+                        >
+                          {enviandoRecuperacionCliente ? 'Enviando...' : 'Enviar temporal'}
+                        </button>
+                      </div>
+                      {!!recuperacionClienteMensaje && <div className="tiendaAuthRecuperarMsg">{recuperacionClienteMensaje}</div>}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -7320,6 +8619,59 @@ export default function Tienda({
         </div>
       )}
 
+      {modalCambioPasswordCliente.visible && (
+        <div className="modal" style={{ display: 'flex' }} onClick={(e) => e.stopPropagation()}>
+          <div className="contenidoModal tiendaAuthModal tiendaCambioPasswordModal" onClick={(e) => e.stopPropagation()}>
+            <div className="tiendaAuthHeader">
+              <h3 className="tiendaAuthTitulo">Actualiza tu contraseña</h3>
+              <p className="tiendaAuthSubtitulo">Iniciaste con una contraseña temporal. Crea una nueva para continuar.</p>
+            </div>
+            <form className="tiendaAuth" onSubmit={guardarNuevaPasswordCliente}>
+              <PasswordInput
+                placeholder="Nueva contraseña"
+                value={modalCambioPasswordCliente.nueva}
+                onChange={(e) => setModalCambioPasswordCliente((prev) => ({ ...prev, nueva: e.target.value }))}
+                required
+              />
+              <PasswordInput
+                placeholder="Confirmar nueva contraseña"
+                value={modalCambioPasswordCliente.confirmar}
+                onChange={(e) => setModalCambioPasswordCliente((prev) => ({ ...prev, confirmar: e.target.value }))}
+                required
+              />
+              <div className="tiendaCambioPasswordPregunta">
+                <div className="tiendaCambioPasswordPreguntaTitulo">¿Cerrar sesión en tus otros dispositivos?</div>
+                <div className="tiendaCambioPasswordOpciones">
+                  <label className="tiendaCambioPasswordOpcion">
+                    <input
+                      type="radio"
+                      name="cerrarSesionesPassword"
+                      checked={Boolean(modalCambioPasswordCliente.cerrarSesiones)}
+                      onChange={() => setModalCambioPasswordCliente((prev) => ({ ...prev, cerrarSesiones: true }))}
+                    />
+                    Sí, cerrar las demás sesiones
+                  </label>
+                  <label className="tiendaCambioPasswordOpcion">
+                    <input
+                      type="radio"
+                      name="cerrarSesionesPassword"
+                      checked={!Boolean(modalCambioPasswordCliente.cerrarSesiones)}
+                      onChange={() => setModalCambioPasswordCliente((prev) => ({ ...prev, cerrarSesiones: false }))}
+                    />
+                    No, mantener sesiones
+                  </label>
+                </div>
+              </div>
+              <div className="tiendaAuthAcciones tiendaAuthAccionesLogin">
+                <button className="boton botonExito" type="submit" disabled={modalCambioPasswordCliente.guardando}>
+                  {modalCambioPasswordCliente.guardando ? 'Guardando...' : 'Guardar contraseña'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {!esVistaTrastienda && <footer className="tiendaFooter">
         <div className="tiendaFooterCol">
           <h4>{configTienda.footer_marca_titulo}</h4>
@@ -7370,13 +8722,14 @@ export default function Tienda({
               <div className="tiendaFooterPagosLogosWrap">
                 {metodosPagoRenderFooter.map((metodo, idx) => (
                   String(metodo?.logo_render_url || '').trim() ? (
-                    <img
-                      key={`footer-logo-pago-${metodo.id}-${idx}`}
-                      src={String(metodo.logo_render_url).trim()}
-                      alt={metodo?.label || `Método de pago ${idx + 1}`}
-                      className="tiendaFooterPagosLogos"
-                      loading="lazy"
-                    />
+                    <span key={`footer-logo-pago-${metodo.id}-${idx}`} className="tiendaFooterPagoLogoItem">
+                      <img
+                        src={String(metodo.logo_render_url).trim()}
+                        alt={metodo?.label || `Método de pago ${idx + 1}`}
+                        className="tiendaFooterPagosLogos"
+                        loading="lazy"
+                      />
+                    </span>
                   ) : (
                     <span key={`footer-txt-pago-${metodo.id}-${idx}`} className="tiendaFooterPagoTextoItem">
                       {metodo?.label || `Método de pago ${idx + 1}`}

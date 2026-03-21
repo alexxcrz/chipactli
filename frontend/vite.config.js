@@ -33,7 +33,8 @@ export default defineConfig(({ command, mode }) => ({
       '^/cortesia': { target: BACKEND_TARGET, changeOrigin: true },
       '^/utensilios': { target: BACKEND_TARGET, changeOrigin: true },
       '^/backup': { target: BACKEND_TARGET, changeOrigin: true },
-      '^/tienda': { target: BACKEND_TARGET, changeOrigin: true }
+      '^/tienda': { target: BACKEND_TARGET, changeOrigin: true },
+      '^/visitas': { target: BACKEND_TARGET, changeOrigin: true }
     },
     // Allow Vite dev server to read files outside the react-app folder (parent `frontend`)
     fs: {

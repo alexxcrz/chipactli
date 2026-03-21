@@ -321,6 +321,7 @@ async function crearConexionAdminAuth() {
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         nombre TEXT,
+        correo TEXT,
         rol TEXT DEFAULT 'usuario',
         permisos TEXT,
         debe_cambiar_password INTEGER DEFAULT 1,
@@ -328,6 +329,7 @@ async function crearConexionAdminAuth() {
         actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    await clientePg.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS correo TEXT`);
     await clientePg.query(`
       CREATE TABLE IF NOT EXISTS auditoria_admin (
         id BIGSERIAL PRIMARY KEY,
@@ -1563,9 +1565,9 @@ const reglasPermisos = [
   { metodos: ['POST'], exacto: '/api/importar/cortesias', pestana: 'ventas', accion: 'importar' },
   { metodos: ['GET'], exacto: '/api/exportar/todo', pestana: 'admin_usuarios', accion: 'ver' },
   { metodos: ['POST'], exacto: '/api/importar/todo', pestana: 'admin_usuarios', accion: 'editar_usuario' },
-  { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', pestana: 'ventas', accion: 'editar' },
-  { metodos: ['GET'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'ver' },
-  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin', pestana: 'ventas', accion: 'editar' }
+  { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', pestana: 'trastienda', accion: 'editar' },
+  { metodos: ['GET'], prefijo: '/tienda/admin', pestana: 'trastienda', accion: 'ver' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin', pestana: 'trastienda', accion: 'editar' }
 ];
 
 function rutaCoincide(pathname, regla) {
@@ -2162,7 +2164,7 @@ const MAPA_DATABASES = {
 // Exportar respaldo completo de todas las tablas de todas las DBs.
 app.get('/api/exportar/todo', async (req, res) => {
   try {
-    const incluirUploads = String(req.query?.include_uploads || '0').trim() === '1';
+    const incluirUploads = true;
     const salida = {
       tipo: 'todo',
       version: 1,
@@ -2221,12 +2223,8 @@ app.post('/api/importar/todo', async (req, res) => {
   }
 
   const resultado = {};
-  const incluirUploads = (
-    String(req.query?.include_uploads || '').trim() === '1'
-    || payload?.incluye_uploads_tienda === true
-    || String(payload?.incluye_uploads_tienda || '').trim() === '1'
-  );
-  const archivosUploadsEntrada = incluirUploads ? toArrayMaybe(payload?.archivos_uploads_tienda) : [];
+  const incluirUploads = true;
+  const archivosUploadsEntrada = toArrayMaybe(payload?.archivos_uploads_tienda);
 
   try {
     for (const [nombreDb, db] of Object.entries(MAPA_DATABASES)) {
@@ -3197,10 +3195,31 @@ if (usarBuildReact && frontendPath) {
   // Esto permite trabajar en modo desarrollo sin generar la build.
   const VITE_HOST = process.env.VITE_DEV_HOST || 'localhost';
   const VITE_PORT = Number(process.env.VITE_DEV_PORT || 3000);
+  const prefijosBackend = [
+    '/api',
+    '/inventario',
+    '/recetas',
+    '/categorias',
+    '/produccion',
+    '/ventas',
+    '/cortesias',
+    '/cortesia',
+    '/utensilios',
+    '/backup',
+    '/tienda',
+    '/visitas',
+    '/uploads'
+  ];
+
+  function esRutaBackend(pathname = '') {
+    const ruta = String(pathname || '').toLowerCase();
+    return prefijosBackend.some((prefijo) => ruta.startsWith(prefijo));
+  }
 
   function proxyToVite(req, res) {
-    // No proxyar rutas de API
-    if (req.path && req.path.startsWith('/api')) {
+    // No proxyar endpoints de backend ni métodos distintos a GET/HEAD.
+    const metodo = String(req.method || 'GET').toUpperCase();
+    if (esRutaBackend(req.path) || (metodo !== 'GET' && metodo !== 'HEAD')) {
       res.status(404).send('Ruta API no encontrada');
       return;
     }
@@ -3233,7 +3252,7 @@ if (usarBuildReact && frontendPath) {
 
   // Proxy todas las demás rutas que no comiencen con /api
   app.use((req, res, next) => {
-    if (req.path && req.path.startsWith('/api')) return next();
+    if (esRutaBackend(req.path)) return next();
     proxyToVite(req, res);
   });
   }

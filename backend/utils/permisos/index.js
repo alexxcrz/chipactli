@@ -3,6 +3,8 @@ export const PERMISOS_DEFINICION = {
   recetas: ['ver', 'crear', 'editar', 'eliminar', 'calcular', 'categorias_ver', 'categorias_gestionar', 'exportar', 'importar'],
   produccion: ['ver', 'crear', 'eliminar', 'exportar', 'importar'],
   ventas: ['ver', 'crear', 'eliminar', 'ver_estadisticas', 'cortesia_ver', 'cortesia_crear', 'cortesia_eliminar', 'cortesia_limpiar', 'exportar', 'importar'],
+  tienda: ['ver'],
+  trastienda: ['ver', 'editar', 'pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'cupones', 'config', 'metricas'],
   utensilios: ['ver', 'crear', 'editar', 'eliminar', 'recuperar', 'ver_historial', 'ver_estadisticas', 'exportar', 'importar'],
   admin_usuarios: ['ver', 'crear', 'editar_usuario', 'editar_permisos', 'eliminar', 'reset_password']
 };

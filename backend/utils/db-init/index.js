@@ -462,6 +462,51 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       UNIQUE(scope, clave)
     )`);
 
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_cupones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      codigo TEXT UNIQUE,
+      nombre TEXT,
+      tipo TEXT DEFAULT 'general',
+      alcance_tipo TEXT DEFAULT 'todos',
+      alcance_clave TEXT,
+      influencer_nombre TEXT,
+      influencer_handle TEXT,
+      tipo_descuento TEXT DEFAULT 'porcentaje',
+      valor_descuento REAL DEFAULT 0,
+      monto_minimo REAL DEFAULT 0,
+      max_descuento REAL DEFAULT 0,
+      usos_maximos_total INTEGER DEFAULT 0,
+      usos_maximos_por_cliente INTEGER DEFAULT 0,
+      un_solo_uso_por_cliente INTEGER DEFAULT 0,
+      valido_desde TEXT,
+      valido_hasta TEXT,
+      vigente_indefinido INTEGER DEFAULT 1,
+      activo INTEGER DEFAULT 1,
+      metadata_json TEXT,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_cupones_codigo
+      ON tienda_cupones (codigo)`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_cupones_tipo_activo
+      ON tienda_cupones (tipo, activo)`);
+
+    bdVentas.all("PRAGMA table_info(tienda_cupones)", (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === "alcance_tipo")) {
+        bdVentas.run("ALTER TABLE tienda_cupones ADD COLUMN alcance_tipo TEXT DEFAULT 'todos'");
+      }
+      if (!columnas.some((col) => col.name === "alcance_clave")) {
+        bdVentas.run("ALTER TABLE tienda_cupones ADD COLUMN alcance_clave TEXT");
+      }
+      bdVentas.run(
+        `UPDATE tienda_cupones
+         SET alcance_tipo = COALESCE(NULLIF(TRIM(alcance_tipo), ''), 'todos')`
+      );
+    });
+
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_paquetes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT UNIQUE,
@@ -493,6 +538,8 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       direccion_default TEXT,
       forma_pago_preferida TEXT,
       recibe_promociones INTEGER DEFAULT 0,
+      debe_cambiar_password INTEGER DEFAULT 0,
+      token_version INTEGER DEFAULT 0,
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
     )`);
@@ -552,7 +599,14 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       metodo_pago TEXT,
       estado TEXT,
       estado_pago TEXT DEFAULT 'pendiente',
+      subtotal REAL DEFAULT 0,
+      descuento_total REAL DEFAULT 0,
+      total_sin_descuento REAL DEFAULT 0,
       total REAL,
+      codigo_cupon TEXT,
+      id_cupon INTEGER,
+      tipo_cupon TEXT,
+      influencer_nombre TEXT,
       moneda TEXT DEFAULT 'MXN',
       referencia_externa TEXT,
       detalle_pago TEXT,
@@ -612,7 +666,11 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       nombre_punto_entrega TEXT,
       direccion_entrega TEXT,
       notas TEXT,
+      subtotal REAL DEFAULT 0,
+      descuento_total REAL DEFAULT 0,
       total REAL,
+      codigo_cupon TEXT,
+      cupon_json TEXT,
       items_json TEXT,
       preference_id TEXT,
       payment_id TEXT,
@@ -625,6 +683,31 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id),
       FOREIGN KEY(id_orden_generada) REFERENCES tienda_ordenes(id)
     )`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_cupones_uso (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_cupon INTEGER,
+      codigo_cupon TEXT,
+      id_cliente INTEGER,
+      id_orden INTEGER,
+      folio TEXT,
+      monto_descuento REAL DEFAULT 0,
+      total_orden REAL DEFAULT 0,
+      items_cantidad_total INTEGER DEFAULT 0,
+      creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(id_cupon) REFERENCES tienda_cupones(id),
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id),
+      FOREIGN KEY(id_orden) REFERENCES tienda_ordenes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_cupones_uso_cupon
+      ON tienda_cupones_uso (id_cupon, creado_en DESC)`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_cupones_uso_cliente
+      ON tienda_cupones_uso (id_cliente, creado_en DESC)`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_cupones_uso_codigo
+      ON tienda_cupones_uso (codigo_cupon, creado_en DESC)`);
 
     bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_checkout_intentos_cliente
       ON tienda_checkout_intentos (id_cliente, id DESC)`);
@@ -656,6 +739,22 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
 
     bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_notificaciones_cliente
       ON tienda_notificaciones_cliente (id_cliente, leida, id DESC)`);
+
+    bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_recordatorios_resena (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_orden INTEGER,
+      id_cliente INTEGER,
+      receta_nombre TEXT,
+      slug_producto TEXT,
+      email_cliente TEXT,
+      enviado_en TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(id_orden, receta_nombre),
+      FOREIGN KEY(id_orden) REFERENCES tienda_ordenes(id),
+      FOREIGN KEY(id_cliente) REFERENCES tienda_clientes(id)
+    )`);
+
+    bdVentas.run(`CREATE INDEX IF NOT EXISTS idx_tienda_recordatorios_resena_enviado
+      ON tienda_recordatorios_resena (enviado_en DESC)`);
 
     bdVentas.run(`CREATE TABLE IF NOT EXISTS tienda_config (
       clave TEXT PRIMARY KEY,
@@ -761,6 +860,27 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!columnas.some(col => col.name === "numero_guia")) {
         bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN numero_guia TEXT");
       }
+      if (!columnas.some(col => col.name === "subtotal")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN subtotal REAL DEFAULT 0");
+      }
+      if (!columnas.some(col => col.name === "descuento_total")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN descuento_total REAL DEFAULT 0");
+      }
+      if (!columnas.some(col => col.name === "total_sin_descuento")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN total_sin_descuento REAL DEFAULT 0");
+      }
+      if (!columnas.some(col => col.name === "codigo_cupon")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN codigo_cupon TEXT");
+      }
+      if (!columnas.some(col => col.name === "id_cupon")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN id_cupon INTEGER");
+      }
+      if (!columnas.some(col => col.name === "tipo_cupon")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN tipo_cupon TEXT");
+      }
+      if (!columnas.some(col => col.name === "influencer_nombre")) {
+        bdVentas.run("ALTER TABLE tienda_ordenes ADD COLUMN influencer_nombre TEXT");
+      }
 
       const continuarNormalizacion = () => {
         if (tieneEstadoPago) {
@@ -844,6 +964,18 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!columnas.some((col) => col.name === "detalle_pago")) {
         bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN detalle_pago TEXT");
       }
+      if (!columnas.some((col) => col.name === "subtotal")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN subtotal REAL DEFAULT 0");
+      }
+      if (!columnas.some((col) => col.name === "descuento_total")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN descuento_total REAL DEFAULT 0");
+      }
+      if (!columnas.some((col) => col.name === "codigo_cupon")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN codigo_cupon TEXT");
+      }
+      if (!columnas.some((col) => col.name === "cupon_json")) {
+        bdVentas.run("ALTER TABLE tienda_checkout_intentos ADD COLUMN cupon_json TEXT");
+      }
       bdVentas.run(
         `UPDATE tienda_checkout_intentos
          SET origen_pedido = 'web'
@@ -865,6 +997,12 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
       if (!columnas.some((col) => col.name === "recibe_promociones")) {
         bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN recibe_promociones INTEGER DEFAULT 0");
       }
+      if (!columnas.some((col) => col.name === "debe_cambiar_password")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN debe_cambiar_password INTEGER DEFAULT 0");
+      }
+      if (!columnas.some((col) => col.name === "token_version")) {
+        bdVentas.run("ALTER TABLE tienda_clientes ADD COLUMN token_version INTEGER DEFAULT 0");
+      }
     });
   });
 }
@@ -876,6 +1014,7 @@ export function inicializarBdAdmin(bdAdmin, bdInventario) {
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       nombre TEXT,
+      correo TEXT,
       rol TEXT DEFAULT 'usuario',
       permisos TEXT,
       debe_cambiar_password INTEGER DEFAULT 1,
@@ -950,7 +1089,18 @@ export function inicializarBdAdmin(bdAdmin, bdInventario) {
       };
 
       if (!cols.some(col => col.name === "permisos")) {
-        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN permisos TEXT", [], () => continuar());
+        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN permisos TEXT", [], () => {
+          if (!cols.some(col => col.name === "correo")) {
+            bdAdmin.run("ALTER TABLE usuarios ADD COLUMN correo TEXT", [], () => continuar());
+            return;
+          }
+          continuar();
+        });
+        return;
+      }
+
+      if (!cols.some(col => col.name === "correo")) {
+        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN correo TEXT", [], () => continuar());
         return;
       }
 

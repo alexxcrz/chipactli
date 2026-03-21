@@ -1,7 +1,8 @@
 // modal-cambiar-password.js
 import { mostrarNotificacion } from '../utils/notificaciones.jsx';
 
-export function mostrarModalCambiarPassword(username) {
+export function mostrarModalCambiarPassword(username, opciones = {}) {
+  const obligatorio = Boolean(opciones?.obligatorio);
   if (document.getElementById('modalCambiarPassword')) return;
   const modal = document.createElement('div');
   modal.id = 'modalCambiarPassword';
@@ -9,9 +10,10 @@ export function mostrarModalCambiarPassword(username) {
   modal.innerHTML = `
     <div class="contenidoModal contenidoModalPassword chipactli-modal-top-content">
       <div class="encabezadoModal">
-        <h3>Cambia tu contraseña</h3>
-        <button type="button" class="cerrarModal" onclick="document.getElementById('modalCambiarPassword').remove()">&times;</button>
+        <h3>${obligatorio ? 'Actualiza tu contraseña' : 'Cambia tu contraseña'}</h3>
+        ${obligatorio ? '' : '<button type="button" class="cerrarModal" onclick="document.getElementById(\'modalCambiarPassword\').remove()">&times;</button>'}
       </div>
+      ${obligatorio ? '<p style="margin:0 0 10px;color:#4f5b4f;font-size:13px;">Por seguridad debes cambiar la contraseña temporal para continuar.</p>' : ''}
       <form id="formCambiarPassword" class="cajaFormulario">
         <div class="grupoFormulario">
           <label for="cambiarPasswordActual">Contraseña actual</label>
@@ -46,6 +48,17 @@ export function mostrarModalCambiarPassword(username) {
     </div>
   `;
   document.body.appendChild(modal);
+
+  if (obligatorio) {
+    modal.addEventListener('click', (event) => {
+      const contenido = modal.querySelector('.contenidoModalPassword');
+      if (!contenido) return;
+      if (!contenido.contains(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+  }
 
   Array.from(modal.querySelectorAll('[data-password-toggle]')).forEach((btn) => {
     btn.addEventListener('click', () => {

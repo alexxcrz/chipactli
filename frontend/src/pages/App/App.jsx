@@ -65,6 +65,8 @@ const PERMISOS_POR_DEFECTO = {
   recetas: { ver: false, acciones: { ver: false } },
   produccion: { ver: false, acciones: { ver: false } },
   ventas: { ver: false, acciones: { ver: false } },
+  tienda: { ver: false, acciones: { ver: false } },
+  trastienda: { ver: false, acciones: { ver: false } },
   utensilios: { ver: false, acciones: { ver: false } },
   admin_usuarios: { ver: false, acciones: { ver: false } }
 };
@@ -74,8 +76,8 @@ const MAPEO_PESTANA_PERMISO = {
   recetas: 'recetas',
   produccion: 'produccion',
   ventas: 'ventas',
-  tienda: 'ventas',
-  trastienda: 'ventas',
+  tienda: 'tienda',
+  trastienda: 'trastienda',
   utensilios: 'utensilios',
   'admin-usuarios': 'admin_usuarios'
 };
@@ -100,6 +102,8 @@ function normalizarPermisos(permisos, rol) {
       recetas: { ver: true, acciones: { ver: true } },
       produccion: { ver: true, acciones: { ver: true } },
       ventas: { ver: true, acciones: { ver: true } },
+      tienda: { ver: true, acciones: { ver: true } },
+      trastienda: { ver: true, acciones: { ver: true } },
       utensilios: { ver: true, acciones: { ver: true } },
       admin_usuarios: { ver: true, acciones: { ver: true } }
     };
@@ -171,6 +175,11 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotForm, setForgotForm] = useState({ email: '' });
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSuccess, setForgotSuccess] = useState('');
   const [eventoInstalacionPwa, setEventoInstalacionPwa] = useState(null);
   const [mostrarInstalarPwa, setMostrarInstalarPwa] = useState(false);
   const [configInicial, setConfigInicial] = useState({
@@ -290,46 +299,7 @@ export default function App() {
     document.title = TITULO_PESTANA;
   }, [page, isAuthenticated]);
 
-  React.useEffect(() => {
-    const bloquearContexto = (event) => {
-      event.preventDefault();
-    };
-
-    const bloquearAtajosCaptura = (event) => {
-      const key = String(event.key || '').toLowerCase();
-      const ctrlMeta = event.ctrlKey || event.metaKey;
-
-      const atajoDevTools = (ctrlMeta && event.shiftKey && ['i', 'j', 'c'].includes(key)) || key === 'f12';
-      const atajoCaptura = key === 'printscreen' || (ctrlMeta && event.shiftKey && ['s', '3', '4', '5'].includes(key));
-      const atajoImpresion = ctrlMeta && key === 'p';
-
-      if (atajoDevTools || atajoCaptura || atajoImpresion) {
-        event.preventDefault();
-        event.stopPropagation();
-        activarEscudoCaptura(1200);
-        if (key === 'printscreen' && navigator?.clipboard?.writeText) {
-          navigator.clipboard.writeText('').catch(() => {});
-        }
-      }
-    };
-
-    const reforzarTrasPrintScreen = (event) => {
-      const key = String(event?.key || '').toLowerCase();
-      if (key === 'printscreen') {
-        activarEscudoCaptura(1400);
-      }
-    };
-
-    document.addEventListener('contextmenu', bloquearContexto);
-    window.addEventListener('keydown', bloquearAtajosCaptura, true);
-    window.addEventListener('keyup', reforzarTrasPrintScreen, true);
-
-    return () => {
-      document.removeEventListener('contextmenu', bloquearContexto);
-      window.removeEventListener('keydown', bloquearAtajosCaptura, true);
-      window.removeEventListener('keyup', reforzarTrasPrintScreen, true);
-    };
-  }, [activarEscudoCaptura]);
+  React.useEffect(() => undefined, []);
 
   React.useEffect(() => () => {
     if (escudoCapturaTimeoutRef.current) {
@@ -685,12 +655,38 @@ export default function App() {
       }
 
       if (res.debe_cambiar_password) {
-        setTimeout(() => mostrarModalCambiarPassword(usuario.username), 150);
+        setTimeout(() => mostrarModalCambiarPassword(usuario.username, { obligatorio: true }), 150);
       }
     } catch (error) {
       setLoginError(error.message || 'Error al iniciar sesión');
     } finally {
       setLoginLoading(false);
+    }
+  };
+
+  const enviarRecuperacionPassword = async (event) => {
+    event.preventDefault();
+    setForgotError('');
+    setForgotSuccess('');
+    setForgotLoading(true);
+
+    try {
+      const correo = String(forgotForm.email || '').trim().toLowerCase();
+      if (!correo) {
+        throw new Error('Debes capturar tu correo');
+      }
+
+      const res = await fetchAPIJSON('/api/auth/olvide-password', {
+        method: 'POST',
+        body: { email: correo }
+      });
+
+      setForgotSuccess(res?.mensaje || 'Te enviamos una contraseña temporal a tu correo.');
+      setForgotForm({ email: '' });
+    } catch (error) {
+      setForgotError(error.message || 'No se pudo enviar el correo de recuperación');
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -1253,6 +1249,16 @@ export default function App() {
         {showAccesoSistema && (
           <div className="accesoSistemaOverlay" onClick={() => { if (!configInicial.visible) setShowAccesoSistema(false); }}>
             <div className="loginCard" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="loginCerrarX"
+                aria-label="Cerrar acceso"
+                title="Cerrar"
+                disabled={configInicial.visible}
+                onClick={() => setShowAccesoSistema(false)}
+              >
+                &times;
+              </button>
               <img className="loginLogo" src="/images/logo.png" alt="logo" />
               <h1 className="loginTitulo">CHIPACTLI</h1>
               <p className="loginSubtitulo">Inicia sesión para entrar al sistema</p>
@@ -1272,14 +1278,57 @@ export default function App() {
                   onChange={(e) => setLoginForm(prev => ({ ...prev, password: e.target.value }))}
                   required
                 />
+                <button
+                  type="button"
+                  className="linkRecuperarPassword"
+                  onClick={() => {
+                    setForgotError('');
+                    setForgotSuccess('');
+                    setForgotForm({ email: '' });
+                    setShowForgotPassword(true);
+                  }}
+                >
+                  Se te olvidó tu contraseña?
+                </button>
                 {loginError && <div className="loginError">{loginError}</div>}
                 <button className="loginBoton" type="submit" disabled={loginLoading}>
                   {loginLoading ? 'Ingresando...' : 'Entrar'}
                 </button>
-                <button type="button" className="boton" disabled={configInicial.visible} onClick={() => setShowAccesoSistema(false)}>
-                  Cerrar
-                </button>
               </form>
+
+              {showForgotPassword && (
+                <div className="miniModalRecuperarPassword" onClick={() => setShowForgotPassword(false)}>
+                  <div className="miniModalRecuperarPasswordCard" onClick={(e) => e.stopPropagation()}>
+                    <h3>Recuperar contraseña</h3>
+                    <p>Escribe tu correo registrado. Si existe en el sistema, te enviaremos una contraseña temporal.</p>
+                    <form onSubmit={enviarRecuperacionPassword} className="loginFormulario">
+                      <input
+                        type="email"
+                        className="loginInput"
+                        placeholder="correo@ejemplo.com"
+                        value={forgotForm.email}
+                        onChange={(e) => setForgotForm({ email: e.target.value })}
+                        required
+                      />
+                      {forgotError && <div className="loginError">{forgotError}</div>}
+                      {forgotSuccess && <div className="loginSuccess">{forgotSuccess}</div>}
+                      <div className="miniModalRecuperarPasswordAcciones">
+                        <button type="submit" className="loginBoton" disabled={forgotLoading}>
+                          {forgotLoading ? 'Enviando...' : 'Enviar correo'}
+                        </button>
+                        <button
+                          type="button"
+                          className="boton"
+                          onClick={() => setShowForgotPassword(false)}
+                          disabled={forgotLoading}
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
 
               {configInicial.visible && (
                 <div className="configInicialBloque">

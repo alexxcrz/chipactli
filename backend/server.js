@@ -567,7 +567,7 @@ const visitasDbReady = (async () => {
     await dbRunAsync(
       bdVentas,
       `CREATE TABLE IF NOT EXISTS tienda_visitas_eventos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         dia_clave TEXT,
         session_id TEXT,
         accion TEXT,
@@ -1487,7 +1487,33 @@ app.get(['/api/visitas/comportamiento', '/visitas/comportamiento'], async (req, 
         total: Number(item?.total) || 0
       }))
     });
-  } catch {
+  } catch (error) {
+    const msg = String(error?.message || '').toLowerCase();
+    const faltaTablaEventos =
+      msg.includes('tienda_visitas_eventos')
+      && (msg.includes('no such table') || msg.includes('does not exist') || msg.includes('relation'));
+
+    if (faltaTablaEventos) {
+      const fallbackVisitas = await dbGetAsync(
+        bdVentas,
+        `SELECT COALESCE(SUM(total_eventos), 0) AS total
+         FROM tienda_visitas_diarias
+         WHERE dia_clave >= ?`,
+        [desdeClave]
+      ).catch(() => ({ total: 0 }));
+
+      const totalFallback = Number(fallbackVisitas?.total) || 0;
+      return res.json({
+        ok: true,
+        rangoDias: dias,
+        desde: desdeClave,
+        hasta: hoyClave,
+        totalEventos: totalFallback,
+        topAcciones: totalFallback > 0 ? [{ accion: 'visita_pagina', total: totalFallback }] : [],
+        topProductos: []
+      });
+    }
+
     return res.status(500).json({ ok: false, error: 'No se pudo cargar comportamiento de visitas' });
   }
 });

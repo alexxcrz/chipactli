@@ -13,6 +13,30 @@ services:
         value: "1"
       - key: BACKUP_INITIAL_DELAY_SEC
         value: "30"
+      - key: MP_ACCESS_TOKEN
+        value: APP_USR-4031275071009320-030418-916ef4a12e424c2660a1980c4e2d36fc-1749985053
+      - key: MP_SUCCESS_URL
+        value: http://127.0.0.1:3000/
+      - key: MP_PENDING_URL
+        value: http://127.0.0.1:3000/
+      - key: MP_FAILURE_URL
+        value: http://127.0.0.1:3000/
+      - key: MAIL_ENABLED
+        value: "1"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "1"
+      - key: SMTP_USER
+        value: chipactli.ventas@gmail.com
+      - key: SMTP_PASS
+        value: hihyfhhyrmaggwuk
+      - key: SMTP_FROM
+        value: "CHIPACTLI Ventas <chipactli.ventas@gmail.com>"
+      - key: MAIL_LOGO_URL
+        value: http://localhost:3000/images/logo.png
     # Disco persistente para que las bases de datos no se borren
     disk:
       name: chipactli-data

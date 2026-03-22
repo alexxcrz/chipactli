@@ -941,6 +941,12 @@
   object-fit: cover;
 }
 
+.tiendaImagenWrap video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .tiendaImagenPlaceholder {
   color: #7a8680;
   font-size: 13px;
@@ -1942,6 +1948,10 @@
   object-fit: contain;
   border-radius: 8px;
 }
+
+.tiendaAdminImagenCampanaPreviewWrap video.tiendaAdminImagenCampanaPreview {
+  background: #f4f8f6;
+}
 @media (max-width: 760px) {
   .tiendaAdminImagenCampanaAcciones {
     grid-template-columns: 1fr;
@@ -2063,7 +2073,8 @@
   justify-content: center;
 }
 
-.tiendaCarritoThumb img {
+.tiendaCarritoThumb img,
+.tiendaCarritoThumb video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -2616,7 +2627,8 @@
   stroke-linejoin: round;
 }
 
-.tiendaDetalleColImagen img {
+.tiendaDetalleColImagen img,
+.tiendaDetalleColImagen video {
   width: calc(100% - 12px);
   height: calc(100% - 28px);
   max-width: 100%;
@@ -2674,7 +2686,8 @@
   box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.2);
 }
 
-.tiendaMiniImg img {
+.tiendaMiniImg img,
+.tiendaMiniImg video {
   width: 100%;
   height: 62px;
   object-fit: cover;
@@ -4102,8 +4115,8 @@
 }
 
 .tiendaPerfilModalPro {
-  width: min(1540px, calc(100vw - 8px)) !important;
-  max-width: min(1540px, calc(100vw - 8px)) !important;
+  width: min(1200px, calc(100vw - 36px)) !important;
+  max-width: min(1200px, calc(100vw - 36px)) !important;
   height: calc(100dvh - 8px) !important;
   max-height: calc(100dvh - 8px) !important;
   background: linear-gradient(180deg, #f7f1e8 0%, #efe5d6 100%);
@@ -4995,8 +5008,8 @@
   }
 
   .tiendaPerfilModalPro {
-    width: min(1040px, 98vw);
-    max-width: min(1040px, 98vw);
+    width: min(860px, 94vw);
+    max-width: min(860px, 94vw);
     height: calc(100dvh - 10px) !important;
     max-height: calc(100dvh - 10px) !important;
   }
@@ -5277,32 +5290,35 @@
   font-weight: 700;
 }
 
+.tiendaRegistroCamposGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .tiendaAuthAcciones {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 8px;
 }
 
 .tiendaAuthAccionesLogin {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 
 .tiendaAuthAccionesLogin .boton,
 .tiendaAuthAccionesRegistro .boton {
-  width: 100%;
+  width: min(170px, 100%);
 }
 
 .tiendaAuthAccionesRegistro {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
-}
-
-.tiendaAuthAccionesRegistro .boton:first-child:nth-last-child(2),
-.tiendaAuthAccionesRegistro .boton:first-child:nth-last-child(2) ~ .boton {
-  grid-column: span 1;
 }
 
 .tiendaAuthRecuperarBtn,
@@ -5465,6 +5481,15 @@
 
   .tiendaAuthAccionesLogin,
   .tiendaAuthAccionesRegistro {
+    justify-content: center;
+  }
+
+  .tiendaAuthAccionesLogin .boton,
+  .tiendaAuthAccionesRegistro .boton {
+    width: min(320px, 100%);
+  }
+
+  .tiendaRegistroCamposGrid {
     grid-template-columns: 1fr;
   }
 

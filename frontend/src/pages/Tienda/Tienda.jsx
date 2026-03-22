@@ -222,6 +222,15 @@ const PAQUETERIA_TRACKING_URLS = {
   ampm: 'https://ampm.com.mx/',
   correos_demexico: 'https://www.correosdemexico.gob.mx/SSLServicios/SeguimientoEnvio/Seguimiento.aspx'
 };
+const EXTENSIONES_VIDEO_TIENDA = /\.(mp4|webm|ogg|ogv|mov|m4v)(?:[?#].*)?$/i;
+
+function esUrlVideoTienda(url = '') {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+  const sinHash = raw.split('#')[0] || '';
+  const sinQuery = sinHash.split('?')[0] || '';
+  return EXTENSIONES_VIDEO_TIENDA.test(sinQuery) || raw.startsWith('data:video/');
+}
 
 function leerValorPersistido(clave, valorPorDefecto) {
   try {
@@ -877,7 +886,16 @@ export default function Tienda({
   const [modalCambioPasswordCliente, setModalCambioPasswordCliente] = useState({ visible: false, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
   const [mostrarModalPerfilCliente, setMostrarModalPerfilCliente] = useState(false);
   const [pasoRegistro, setPasoRegistro] = useState(1);
-  const [credenciales, setCredenciales] = useState({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
+  const [credenciales, setCredenciales] = useState({
+    nombre: '',
+    apellido_paterno: '',
+    apellido_materno: '',
+    email: '',
+    password: '',
+    confirmarPassword: '',
+    telefono: '',
+    recibe_promociones: false
+  });
   const [clienteToken, setClienteToken] = useState(() => localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '');
   const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
   const excluirMetricasVisitas = Boolean(tokenInterno) || esVistaTrastienda || vistaActiva === 'trastienda';
@@ -1646,6 +1664,16 @@ export default function Tienda({
     return 'Solo se permiten imágenes (PNG, JPG, WEBP, SVG, etc.).';
   }
 
+  function validarArchivoMediaCampana(archivo) {
+    if (!archivo) return 'No se encontró el archivo multimedia.';
+    const tipo = String(archivo?.type || '').toLowerCase();
+    if (tipo.startsWith('image/')) return '';
+    if (tipo.startsWith('video/')) return '';
+    const nombre = String(archivo?.name || '').toLowerCase();
+    if (/\.(mp4|webm|ogg|ogv|mov|m4v|gif|png|jpe?g|webp|svg)$/i.test(nombre)) return '';
+    return 'Solo se permiten imágenes, GIF y video (MP4/WEBM/OGG/MOV).';
+  }
+
   async function subirImagenTiendaArchivo(archivo) {
     const errorArchivo = validarArchivoImagen(archivo);
     if (errorArchivo) throw new Error(errorArchivo);
@@ -1659,6 +1687,27 @@ export default function Tienda({
     });
     const url = String(data?.url || '').trim();
     if (!url) throw new Error('No se recibió la URL de la imagen subida.');
+    return url;
+  }
+
+  async function subirMediaCampanaArchivo(archivo) {
+    const errorArchivo = validarArchivoMediaCampana(archivo);
+    if (errorArchivo) throw new Error(errorArchivo);
+
+    const tipo = String(archivo?.type || '').toLowerCase();
+    const esImagenNoGif = tipo.startsWith('image/') && !tipo.includes('gif');
+    const archivoProcesado = esImagenNoGif
+      ? await optimizarImagenArchivoCliente(archivo)
+      : archivo;
+
+    const formData = new FormData();
+    formData.append('imagen', archivoProcesado || archivo);
+    const data = await fetchAdmin('/api/uploads/tienda-imagen', {
+      method: 'POST',
+      body: formData
+    });
+    const url = String(data?.url || '').trim();
+    if (!url) throw new Error('No se recibió la URL del archivo multimedia subido.');
     return url;
   }
 
@@ -1713,7 +1762,7 @@ export default function Tienda({
   }
 
   async function subirImagenCampanaDesdeArchivo(archivo) {
-    const url = await subirImagenTiendaArchivo(archivo);
+    const url = await subirMediaCampanaArchivo(archivo);
     setConfigTiendaAdmin((prev) => ({ ...prev, correo_campana_imagen_url: url }));
   }
 
@@ -1724,9 +1773,9 @@ export default function Tienda({
     try {
       setSubiendoImagenCampana(true);
       await subirImagenCampanaDesdeArchivo(archivo);
-      mostrarNotificacion('Imagen de campaña cargada correctamente.', 'exito');
+      mostrarNotificacion('Multimedia de campaña cargada correctamente.', 'exito');
     } catch (error) {
-      mostrarNotificacion(error?.message || 'No se pudo subir la imagen de campaña.', 'error');
+      mostrarNotificacion(error?.message || 'No se pudo subir la multimedia de campaña.', 'error');
     } finally {
       setSubiendoImagenCampana(false);
       if (event?.target) event.target.value = '';
@@ -1744,9 +1793,9 @@ export default function Tienda({
     try {
       setSubiendoImagenCampana(true);
       await subirImagenCampanaDesdeArchivo(archivo);
-      mostrarNotificacion('Imagen de campaña cargada correctamente.', 'exito');
+      mostrarNotificacion('Multimedia de campaña cargada correctamente.', 'exito');
     } catch (error) {
-      mostrarNotificacion(error?.message || 'No se pudo subir la imagen de campaña.', 'error');
+      mostrarNotificacion(error?.message || 'No se pudo subir la multimedia de campaña.', 'error');
     } finally {
       setSubiendoImagenCampana(false);
     }
@@ -3120,6 +3169,9 @@ export default function Tienda({
     } catch {
       localStorage.removeItem(CLAVE_TOKEN_CLIENTE);
       setClienteToken('');
+      setMostrarModalPerfilCliente(false);
+      setPerfilModalTab('datos');
+      setVistaActiva('tienda');
     }
   }
 
@@ -5180,10 +5232,21 @@ export default function Tienda({
         throw new Error('La confirmación de contraseña no coincide');
       }
 
+      if (modoAuth === 'register') {
+        const nombre = String(credenciales.nombre || '').trim();
+        const apellidoPaterno = String(credenciales.apellido_paterno || '').trim();
+        const apellidoMaterno = String(credenciales.apellido_materno || '').trim();
+        if (!nombre || !apellidoPaterno || !apellidoMaterno) {
+          throw new Error('Nombre, apellido paterno y apellido materno son obligatorios');
+        }
+      }
+
       const body = modoAuth === 'login'
         ? { email: credenciales.email, password: credenciales.password }
         : {
             nombre: credenciales.nombre,
+            apellido_paterno: credenciales.apellido_paterno,
+            apellido_materno: credenciales.apellido_materno,
             email: credenciales.email,
             password: credenciales.password,
             telefono: credenciales.telefono,
@@ -5201,7 +5264,19 @@ export default function Tienda({
 
       localStorage.setItem(CLAVE_TOKEN_CLIENTE, token);
       setClienteToken(token);
-      setCredenciales({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
+      setMostrarModalPerfilCliente(false);
+      setPerfilModalTab('datos');
+      setVistaActiva('tienda');
+      setCredenciales({
+        nombre: '',
+        apellido_paterno: '',
+        apellido_materno: '',
+        email: '',
+        password: '',
+        confirmarPassword: '',
+        telefono: '',
+        recibe_promociones: false
+      });
       setPasoRegistro(1);
       setMostrarModalAuthCliente(false);
       mostrarNotificacion(modoAuth === 'login' ? 'Sesión iniciada' : 'Cuenta creada', 'exito');
@@ -5213,6 +5288,19 @@ export default function Tienda({
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo autenticar', 'error');
     }
+  }
+
+  function avanzarPasoRegistro() {
+    if (pasoRegistro === 1) {
+      const nombre = String(credenciales.nombre || '').trim();
+      const apellidoPaterno = String(credenciales.apellido_paterno || '').trim();
+      const apellidoMaterno = String(credenciales.apellido_materno || '').trim();
+      if (!nombre || !apellidoPaterno || !apellidoMaterno) {
+        mostrarNotificacion('Completa nombre, apellido paterno y apellido materno para continuar', 'error');
+        return;
+      }
+    }
+    setPasoRegistro((p) => Math.min(3, p + 1));
   }
 
   async function enviarRecuperacionCliente() {
@@ -5319,6 +5407,9 @@ export default function Tienda({
     localStorage.removeItem(CLAVE_TOKEN_CLIENTE);
     setClienteToken('');
     setCliente(null);
+    setMostrarModalPerfilCliente(false);
+    setPerfilModalTab('datos');
+    setVistaActiva('tienda');
   }
 
   async function crearOrden() {
@@ -5671,7 +5762,19 @@ export default function Tienda({
                 <article key={producto.slug || producto.nombre_receta} className="tiendaProductoCard">
                   <div className="tiendaImagenWrap">
                     {producto?.image_url ? (
-                      <img src={producto.image_url} alt={producto.nombre_receta} className="tiendaImagen" />
+                      esUrlVideoTienda(producto.image_url) ? (
+                        <video
+                          src={producto.image_url}
+                          className="tiendaImagen"
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                          preload="metadata"
+                        />
+                      ) : (
+                        <img src={producto.image_url} alt={producto.nombre_receta} className="tiendaImagen" />
+                      )
                     ) : (
                       <div className="tiendaImagenPlaceholder">Sin imagen</div>
                     )}
@@ -5782,7 +5885,18 @@ export default function Tienda({
                   <div className="tiendaCarritoInfo">
                     <div className="tiendaCarritoThumb">
                       {item.image_url ? (
-                        <img src={item.image_url} alt={item.nombre_base || item.nombre_receta} loading="lazy" />
+                        esUrlVideoTienda(item.image_url) ? (
+                          <video
+                            src={item.image_url}
+                            muted
+                            loop
+                            autoPlay
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img src={item.image_url} alt={item.nombre_base || item.nombre_receta} loading="lazy" />
+                        )
                       ) : (
                         <span className="tiendaCarritoThumbPlaceholder">Sin foto</span>
                       )}
@@ -6632,7 +6746,7 @@ export default function Tienda({
                     <input
                       ref={inputImagenCampanaArchivoRef}
                       type="file"
-                      accept="image/*,.svg"
+                      accept="image/*,video/mp4,video/webm,video/ogg,video/quicktime,.mov,.m4v"
                       className="tiendaInputOculto"
                       onChange={subirImagenCampanaDesdeComputadora}
                     />
@@ -6666,7 +6780,7 @@ export default function Tienda({
                           }}
                           onDrop={manejarDropImagenCampana}
                         >
-                          <div className="tiendaAdminSubtexto">Arrastra y suelta aquí tu imagen promocional o usa el botón.</div>
+                          <div className="tiendaAdminSubtexto">Arrastra y suelta aquí tu imagen, GIF o video promocional, o usa el botón.</div>
                         </div>
                         <div className="tiendaAdminImagenCampanaAcciones">
                           <button
@@ -6675,7 +6789,7 @@ export default function Tienda({
                             onClick={abrirSelectorImagenCampana}
                             disabled={subiendoImagenCampana}
                           >
-                            {subiendoImagenCampana ? 'Subiendo imagen...' : 'Subir imagen promocional'}
+                            {subiendoImagenCampana ? 'Subiendo multimedia...' : 'Subir multimedia promocional'}
                           </button>
                           {String(configTiendaAdmin?.correo_campana_imagen_url || '').trim() && (
                             <button
@@ -6689,14 +6803,26 @@ export default function Tienda({
                         </div>
                         {String(configTiendaAdmin?.correo_campana_imagen_url || '').trim() ? (
                           <div className="tiendaAdminImagenCampanaPreviewWrap">
-                            <img
-                              src={String(configTiendaAdmin.correo_campana_imagen_url || '').trim()}
-                              alt="Vista previa campaña"
-                              className="tiendaAdminImagenCampanaPreview"
-                            />
+                            {esUrlVideoTienda(String(configTiendaAdmin.correo_campana_imagen_url || '').trim()) ? (
+                              <video
+                                src={String(configTiendaAdmin.correo_campana_imagen_url || '').trim()}
+                                className="tiendaAdminImagenCampanaPreview"
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                              />
+                            ) : (
+                              <img
+                                src={String(configTiendaAdmin.correo_campana_imagen_url || '').trim()}
+                                alt="Vista previa campaña"
+                                className="tiendaAdminImagenCampanaPreview"
+                              />
+                            )}
                           </div>
                         ) : (
-                          <div className="tiendaAdminSubtexto">Sin imagen promocional cargada</div>
+                          <div className="tiendaAdminSubtexto">Sin multimedia promocional cargada</div>
                         )}
                       </div>
 
@@ -7984,7 +8110,18 @@ export default function Tienda({
                         </svg>
                       </span>
                       {String(seleccionado?.imagen_activa || '').trim() ? (
-                        <img src={seleccionado.imagen_activa} alt={seleccionado.nombre_receta} />
+                        esUrlVideoTienda(seleccionado.imagen_activa) ? (
+                          <video
+                            src={seleccionado.imagen_activa}
+                            autoPlay
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img src={seleccionado.imagen_activa} alt={seleccionado.nombre_receta} />
+                        )
                       ) : (
                         <div className="tiendaImagenPlaceholder">Sin imagen</div>
                       )}
@@ -8010,7 +8147,11 @@ export default function Tienda({
                             className={String(url) === String(seleccionado?.imagen_activa || '') ? 'tiendaMiniImg activa' : 'tiendaMiniImg'}
                             onClick={() => seleccionarImagenDetalle(url)}
                           >
-                            <img src={url} alt={`Vista ${idx + 1}`} />
+                            {esUrlVideoTienda(url) ? (
+                              <video src={url} muted loop autoPlay playsInline preload="metadata" />
+                            ) : (
+                              <img src={url} alt={`Vista ${idx + 1}`} />
+                            )}
                           </button>
                         ))}
                       </div>
@@ -8905,11 +9046,23 @@ export default function Tienda({
                 <>
                   <div className="tiendaRegistroPasos">Paso {pasoRegistro} de 3</div>
                   {pasoRegistro === 1 && (
-                    <>
+                    <div className="tiendaRegistroCamposGrid">
                       <input
-                        placeholder="Nombre completo"
+                        placeholder="Nombre(s)"
                         value={credenciales.nombre}
                         onChange={(e) => setCredenciales((p) => ({ ...p, nombre: e.target.value }))}
+                        required
+                      />
+                      <input
+                        placeholder="Apellido paterno"
+                        value={credenciales.apellido_paterno}
+                        onChange={(e) => setCredenciales((p) => ({ ...p, apellido_paterno: e.target.value }))}
+                        required
+                      />
+                      <input
+                        placeholder="Apellido materno"
+                        value={credenciales.apellido_materno}
+                        onChange={(e) => setCredenciales((p) => ({ ...p, apellido_materno: e.target.value }))}
                         required
                       />
                       <input
@@ -8917,7 +9070,7 @@ export default function Tienda({
                         value={credenciales.telefono}
                         onChange={(e) => setCredenciales((p) => ({ ...p, telefono: e.target.value }))}
                       />
-                    </>
+                    </div>
                   )}
                   {pasoRegistro === 2 && (
                     <>
@@ -8975,7 +9128,7 @@ export default function Tienda({
                     <button type="button" className="boton" onClick={() => setPasoRegistro((p) => Math.max(1, p - 1))}>Atrás</button>
                   )}
                   {pasoRegistro < 3 ? (
-                    <button type="button" className="boton botonExito" onClick={() => setPasoRegistro((p) => Math.min(3, p + 1))}>Siguiente</button>
+                    <button type="button" className="boton botonExito" onClick={avanzarPasoRegistro}>Siguiente</button>
                   ) : (
                     <button className="boton botonExito" type="submit">Completar registro</button>
                   )}

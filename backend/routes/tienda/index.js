@@ -3657,13 +3657,15 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   app.post("/tienda/auth/register", async (req, res) => {
     try {
       const nombre = String(req.body?.nombre || "").trim();
+      const apellidoPaterno = String(req.body?.apellido_paterno || "").trim();
+      const apellidoMaterno = String(req.body?.apellido_materno || "").trim();
       const email = String(req.body?.email || "").trim().toLowerCase();
       const password = String(req.body?.password || "");
       const telefono = String(req.body?.telefono || "").trim();
       const recibePromociones = boolToInt(req.body?.recibe_promociones);
 
-      if (!nombre || !email || !password) {
-        return res.status(400).json({ exito: false, mensaje: "Nombre, email y contraseña son obligatorios" });
+      if (!nombre || !apellidoPaterno || !apellidoMaterno || !email || !password) {
+        return res.status(400).json({ exito: false, mensaje: "Nombre, apellido paterno, apellido materno, email y contraseña son obligatorios" });
       }
 
       const existente = await dbGet(bdVentas, "SELECT id FROM tienda_clientes WHERE email = ?", [email]);
@@ -3675,8 +3677,8 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const creado = await dbRun(
         bdVentas,
         `INSERT INTO tienda_clientes (nombre, apellido_paterno, apellido_materno, email, password_hash, telefono, fecha_nacimiento, direccion_default, forma_pago_preferida, recibe_promociones, debe_cambiar_password, creado_en, actualizado_en)
-         VALUES (?, '', '', ?, ?, ?, '', '', '', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [nombre, email, hash, telefono, recibePromociones]
+         VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [nombre, apellidoPaterno, apellidoMaterno, email, hash, telefono, recibePromociones]
       );
 
       try {
@@ -3702,7 +3704,15 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
       const cliente = { id: creado.lastID, nombre, email, recibe_promociones: recibePromociones, token_version: 0 };
       const token = crearTokenCliente(cliente);
-      return res.json({ exito: true, token, cliente });
+      return res.json({
+        exito: true,
+        token,
+        cliente: {
+          ...cliente,
+          apellido_paterno: apellidoPaterno,
+          apellido_materno: apellidoMaterno
+        }
+      });
     } catch (error) {
       return res.status(500).json({ exito: false, mensaje: "No se pudo registrar el cliente" });
     }

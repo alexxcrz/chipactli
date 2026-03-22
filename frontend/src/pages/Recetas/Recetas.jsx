@@ -349,17 +349,17 @@ export default function Recetas() {
               <label htmlFor="fichaTiendaPrecioPublico">Precio público (opcional)</label>
               <input id="fichaTiendaPrecioPublico" type="number" min="0" step="0.01" placeholder="Ej. 120" />
             </div>
-            <label className="fichaSpan2" htmlFor="fichaTiendaImagenes">Imágenes del producto (la primera será la principal)</label>
+            <label className="fichaSpan2" htmlFor="fichaTiendaImagenes">Multimedia del producto (imagen, GIF o video; la primera será la principal)</label>
             <input
               id="fichaTiendaImagenes"
               className="fichaSpan2"
               type="file"
-              accept="image/*"
+              accept="image/*,video/mp4,video/webm,video/ogg,video/quicktime,.mov,.m4v"
               multiple
               onChange={() => agregarImagenesFichaTiendaDesdeInput()}
             />
             <button className="boton fichaSpan2" type="button" onClick={() => abrirSelectorImagenFichaTienda()}>
-              + Agregar otra imagen
+              + Agregar multimedia
             </button>
             <div id="fichaTiendaGaleria" className="fichaTiendaGaleria fichaSpan2"></div>
             <textarea id="fichaTiendaDescripcion" className="fichaSpan2" rows="2" placeholder="Descripción (se comparte entre variantes)"></textarea>
@@ -588,11 +588,38 @@ let filtroCategoriaPaqueteActual = '';
 let busquedaRecetaPaqueteActual = '';
 let paqueteProduccionActual = null;
 const REDONDEO_PRECIO_FIJO = 5;
+const EXTENSIONES_VIDEO_TIENDA = /\.(mp4|webm|ogg|ogv|mov|m4v)(?:[?#].*)?$/i;
 let ajustesProduccionActual = {
   factor_costo_produccion: 1.15,
   factor_precio_venta: 2.5,
   redondeo_precio: REDONDEO_PRECIO_FIJO
 };
+
+function escaparHtmlAtributo(valor = '') {
+  return String(valor || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function esUrlVideoTienda(url = '') {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+  const sinHash = raw.split('#')[0] || '';
+  const sinQuery = sinHash.split('?')[0] || '';
+  return EXTENSIONES_VIDEO_TIENDA.test(sinQuery) || raw.startsWith('data:video/');
+}
+
+function renderMediaHtmlFicha(url = '', alt = '', estilo = 'width:100%;height:74px;object-fit:cover;border-radius:6px;display:block;') {
+  const src = escaparHtmlAtributo(url);
+  const altSeguro = escaparHtmlAtributo(alt);
+  const style = escaparHtmlAtributo(estilo);
+  if (esUrlVideoTienda(url)) {
+    return `<video src="${src}" aria-label="${altSeguro}" style="${style}" autoplay muted loop playsinline preload="metadata"></video>`;
+  }
+  return `<img src="${src}" alt="${altSeguro}" style="${style}" />`;
+}
 
 function claveNombreReceta(valor) {
   return String(valor || '')
@@ -1882,7 +1909,7 @@ function renderDetallePaqueteContenido(paquete, indexActivo = 0) {
   const ingredientes = Array.isArray(actual?.ingredientes) ? actual.ingredientes.map((x) => String(x || '').trim()).filter(Boolean) : [];
   cont.innerHTML = `
     <div style="display:grid;grid-template-columns:120px 1fr;gap:12px;align-items:start;">
-      <div>${actual?.image_url ? `<img src="${actual.image_url}" alt="${String(actual?.receta_nombre || '')}" style="width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid #ddd;" />` : '<div style="width:120px;height:120px;border-radius:12px;background:#f1f1f1;display:flex;align-items:center;justify-content:center;color:#777;">Sin imagen</div>'}</div>
+      <div>${actual?.image_url ? renderMediaHtmlFicha(actual.image_url, String(actual?.receta_nombre || ''), 'width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid #ddd;display:block;') : '<div style="width:120px;height:120px;border-radius:12px;background:#f1f1f1;display:flex;align-items:center;justify-content:center;color:#777;">Sin imagen</div>'}</div>
       <div>
         <h4 style="margin:0 0 6px 0;">${String(actual?.receta_nombre || '')}</h4>
         <div style="font-size:12px;color:#555;margin-bottom:6px;">Piezas en paquete: ${Number(actual?.cantidad) || 1}</div>
@@ -2821,10 +2848,10 @@ async function agregarImagenesFichaTiendaDesdeInput() {
     fichaTiendaGaleriaActual = Array.from(new Set(fichaTiendaGaleriaActual));
     renderFichaTiendaPreviews();
     await persistirFichaTiendaImagenesActual();
-    mostrarNotificacion('Imagen agregada y guardada automáticamente', 'exito');
+    mostrarNotificacion('Multimedia agregada y guardada automáticamente', 'exito');
   } catch (error) {
     console.error('Error subiendo imagen de ficha:', error);
-    mostrarNotificacion(error?.message || 'No se pudo subir la imagen', 'error');
+    mostrarNotificacion(error?.message || 'No se pudo subir el archivo multimedia', 'error');
   } finally {
     if (inputImagenes) inputImagenes.value = '';
   }
@@ -2876,12 +2903,12 @@ function renderFichaTiendaPreviews() {
   const contGaleria = document.getElementById('fichaTiendaGaleria');
   if (contGaleria) {
     if (!fichaTiendaGaleriaActual.length) {
-      contGaleria.innerHTML = '<span style="color:#777;font-size:12px">Sin imágenes todavía</span>';
+      contGaleria.innerHTML = '<span style="color:#777;font-size:12px">Sin multimedia todavía</span>';
       return;
     }
     contGaleria.innerHTML = fichaTiendaGaleriaActual.map((url, idx) => `
       <div class="fichaTiendaGaleriaItem" draggable="true" ondragstart="window.recetas.iniciarArrastreImagenGaleria(${idx})" ondragover="window.recetas.permitirDropImagenGaleria(event)" ondrop="window.recetas.soltarImagenGaleria(${idx})">
-        <img src="${url}" alt="Galería ${idx + 1}" />
+        ${renderMediaHtmlFicha(url, `Galería ${idx + 1}`)}
         ${idx === 0 ? '<div class="fichaTiendaBadgePrincipal">Principal</div>' : ''}
         <div class="fichaTiendaGaleriaAcciones">
           <button type="button" class="botonPequeno" onclick="window.recetas.moverImagenGaleriaTienda(${idx}, 'izq')" title="Mover a la izquierda">←</button>
@@ -2935,7 +2962,7 @@ async function subirImagenTienda(archivo) {
 
   const data = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
-    throw new Error(data?.mensaje || data?.error || 'No se pudo subir la imagen');
+    throw new Error(data?.mensaje || data?.error || 'No se pudo subir el archivo multimedia');
   }
   return String(data?.url || '').trim();
 }

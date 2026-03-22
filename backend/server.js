@@ -1754,16 +1754,26 @@ app.use((req, res, next) => {
 app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar una imagen' });
+      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar un archivo multimedia' });
     }
 
     const mime = String(req.file.mimetype || '').toLowerCase();
-    if (!mime.startsWith('image/')) {
-      return res.status(400).json({ exito: false, mensaje: 'El archivo debe ser una imagen' });
+    const esImagen = mime.startsWith('image/');
+    const esVideo = mime.startsWith('video/');
+    if (!esImagen && !esVideo) {
+      return res.status(400).json({ exito: false, mensaje: 'El archivo debe ser imagen o video' });
     }
 
     const extOriginal = path.extname(String(req.file.originalname || '')).toLowerCase();
-    const ext = extOriginal || (mime.includes('png') ? '.png' : mime.includes('webp') ? '.webp' : '.jpg');
+    const ext = extOriginal
+      || (mime.includes('png') ? '.png'
+        : mime.includes('webp') ? '.webp'
+          : mime.includes('gif') ? '.gif'
+            : mime.includes('mp4') ? '.mp4'
+              : mime.includes('webm') ? '.webm'
+                : mime.includes('ogg') ? '.ogv'
+                  : mime.includes('quicktime') ? '.mov'
+                    : '.jpg');
     const nombre = `tienda-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
     const destino = path.join(uploadsDir, 'tienda', nombre);
 
@@ -1771,7 +1781,7 @@ app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res)
 
     return res.json({ ok: true, url: `/uploads/tienda/${nombre}` });
   } catch {
-    return res.status(500).json({ exito: false, mensaje: 'No se pudo subir la imagen' });
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo subir el archivo multimedia' });
   }
 });
 

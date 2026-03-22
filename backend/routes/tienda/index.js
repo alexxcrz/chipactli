@@ -2192,6 +2192,24 @@ async function crearOrdenTiendaDesdeItems({
 }
 
 export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdInventario, bdAdmin = null) {
+  async function asegurarColumnaAccionesAppClientes() {
+    try {
+      await dbRun(
+        bdVentas,
+        'ALTER TABLE tienda_clientes ADD COLUMN acciones_app_activas INTEGER DEFAULT 1'
+      );
+    } catch (error) {
+      const msg = String(error?.message || '').toLowerCase();
+      const columnaExiste = msg.includes('duplicate column') || msg.includes('already exists') || msg.includes('duplicada');
+      if (!columnaExiste) throw error;
+    }
+
+    await dbRun(
+      bdVentas,
+      'UPDATE tienda_clientes SET acciones_app_activas = 1 WHERE acciones_app_activas IS NULL'
+    ).catch(() => {});
+  }
+
   async function asegurarTablaRecordatoriosResena() {
     await dbRun(
       bdVentas,
@@ -2323,6 +2341,10 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
   iniciarSchedulerRecordatoriosResena().catch((error) => {
     console.error('[tienda] No se pudo iniciar scheduler de recordatorio reseña:', error?.message || error);
+  });
+
+  asegurarColumnaAccionesAppClientes().catch((error) => {
+    console.error('[tienda] No se pudo asegurar columna acciones_app_activas en clientes:', error?.message || error);
   });
 
   async function authClienteConVersion(req, res, next) {
@@ -2614,11 +2636,41 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     try {
       const clientes = await dbAll(
         bdVentas,
-        "SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida, recibe_promociones, creado_en, actualizado_en FROM tienda_clientes ORDER BY id DESC"
+        `SELECT id, nombre, email, telefono, direccion_default, forma_pago_preferida,
+                recibe_promociones, COALESCE(acciones_app_activas, 1) AS acciones_app_activas,
+                creado_en, actualizado_en
+         FROM tienda_clientes
+         ORDER BY id DESC`
       );
       res.json(clientes || []);
     } catch {
       res.status(500).json({ error: "No se pudieron cargar clientes" });
+    }
+  });
+
+  app.patch('/tienda/admin/clientes/:id/acciones-app', authInterno, async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Cliente inválido' });
+
+      const existe = await dbGet(bdVentas, 'SELECT id FROM tienda_clientes WHERE id = ? LIMIT 1', [id]);
+      if (!existe) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+      const accionesActivas = boolToInt(
+        req.body?.acciones_app_activas
+        ?? req.body?.accionesActivas
+        ?? req.body?.activo
+      );
+
+      await dbRun(
+        bdVentas,
+        'UPDATE tienda_clientes SET acciones_app_activas = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?',
+        [accionesActivas, id]
+      );
+
+      res.json({ ok: true, id, acciones_app_activas: accionesActivas });
+    } catch {
+      res.status(500).json({ error: 'No se pudo actualizar el estado de acciones del cliente' });
     }
   });
 
@@ -2772,6 +2824,46 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       }
     } catch {
       res.status(500).json({ error: 'No se pudieron reiniciar los contadores de pedidos' });
+    }
+  });
+
+  app.post('/tienda/admin/metricas/reset', authInterno, async (_req, res) => {
+    try {
+      await dbRun(bdVentas, 'BEGIN');
+      try {
+        const tablas = [
+          'tienda_visitas_eventos',
+          'tienda_visitas_sesiones_diarias',
+          'tienda_visitas_diarias_horas',
+          'tienda_visitas_diarias_paises',
+          'tienda_visitas_diarias'
+        ];
+
+        for (const tabla of tablas) {
+          await dbRun(bdVentas, `DELETE FROM ${tabla}`);
+        }
+
+        try {
+          await dbRun(
+            bdVentas,
+            "DELETE FROM sqlite_sequence WHERE name IN ('tienda_visitas_eventos')"
+          );
+        } catch {
+          // En Postgres no existe sqlite_sequence.
+        }
+
+        await dbRun(bdVentas, 'COMMIT');
+        return res.json({ ok: true });
+      } catch (errorInterno) {
+        try {
+          await dbRun(bdVentas, 'ROLLBACK');
+        } catch {
+          // Ignorado.
+        }
+        throw errorInterno;
+      }
+    } catch {
+      res.status(500).json({ error: 'No se pudieron reiniciar las métricas' });
     }
   });
 
@@ -4239,9 +4331,23 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
         return res.status(400).json({ error: 'receta_nombre es obligatorio' });
       }
 
+      let idClienteSolicitante = 0;
+      const auth = String(req.get('Authorization') || '').trim();
+      if (auth.startsWith('Bearer ')) {
+        try {
+          const token = auth.replace('Bearer ', '').trim();
+          const decoded = jwt.verify(token, TIENDA_JWT_SECRET);
+          if (decoded?.tipo === 'tienda_cliente' && Number(decoded?.id) > 0) {
+            idClienteSolicitante = Number(decoded.id) || 0;
+          }
+        } catch {
+          // Token opcional en esta ruta; si falla, la petición sigue como pública.
+        }
+      }
+
       const resenas = await dbAll(
         bdVentas,
-        `SELECT id, receta_nombre, nombre_cliente, calificacion, comentario, creado_en
+        `SELECT id, receta_nombre, id_cliente, nombre_cliente, calificacion, comentario, creado_en
          FROM tienda_resenas
          WHERE receta_nombre = ?
          ORDER BY id DESC
@@ -4263,7 +4369,15 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
           total: Number(resumen?.total) || 0,
           promedio: Number(resumen?.promedio) || 0
         },
-        resenas: resenas || []
+        resenas: (resenas || []).map((item) => ({
+          id: Number(item?.id) || 0,
+          receta_nombre: String(item?.receta_nombre || ''),
+          nombre_cliente: String(item?.nombre_cliente || '').trim() || 'Cliente',
+          calificacion: Number(item?.calificacion) || 0,
+          comentario: String(item?.comentario || ''),
+          creado_en: item?.creado_en || null,
+          puede_editar: idClienteSolicitante > 0 && Number(item?.id_cliente || 0) === idClienteSolicitante
+        }))
       });
     } catch {
       return res.status(500).json({ error: 'No se pudieron cargar las reseñas' });
@@ -4312,6 +4426,68 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       });
     } catch {
       return res.status(500).json({ error: 'No se pudo guardar la reseña' });
+    }
+  });
+
+  app.patch('/tienda/resenas/:id', authClienteConVersion, async (req, res) => {
+    try {
+      const idResena = Number(req.params?.id || 0);
+      const comentario = String(req.body?.comentario || '').trim();
+      const calificacion = Math.round(Number(req.body?.calificacion) || 0);
+
+      if (!Number.isFinite(idResena) || idResena <= 0) {
+        return res.status(400).json({ error: 'Reseña inválida' });
+      }
+      if (calificacion < 1 || calificacion > 5) {
+        return res.status(400).json({ error: 'La calificación debe ser entre 1 y 5' });
+      }
+      if (comentario.length < 3) {
+        return res.status(400).json({ error: 'Comentario demasiado corto' });
+      }
+
+      const resena = await dbGet(
+        bdVentas,
+        `SELECT id, receta_nombre, id_cliente
+         FROM tienda_resenas
+         WHERE id = ?
+         LIMIT 1`,
+        [idResena]
+      );
+      if (!resena) {
+        return res.status(404).json({ error: 'Reseña no encontrada' });
+      }
+      if (Number(resena?.id_cliente || 0) !== Number(req.cliente?.id || 0)) {
+        return res.status(403).json({ error: 'Solo puedes editar tus propios comentarios' });
+      }
+
+      await dbRun(
+        bdVentas,
+        `UPDATE tienda_resenas
+         SET calificacion = ?, comentario = ?
+         WHERE id = ?`,
+        [calificacion, comentario, idResena]
+      );
+
+      const recetaNombre = String(resena?.receta_nombre || '').trim();
+      const resumen = await dbGet(
+        bdVentas,
+        `SELECT COUNT(*) AS total, ROUND(AVG(COALESCE(calificacion, 0)), 2) AS promedio
+         FROM tienda_resenas
+         WHERE receta_nombre = ?`,
+        [recetaNombre]
+      );
+
+      return res.json({
+        ok: true,
+        id: idResena,
+        receta_nombre: recetaNombre,
+        resumen: {
+          total: Number(resumen?.total) || 0,
+          promedio: Number(resumen?.promedio) || 0
+        }
+      });
+    } catch {
+      return res.status(500).json({ error: 'No se pudo actualizar la reseña' });
     }
   });
 

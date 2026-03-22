@@ -57,16 +57,16 @@ export default function Recetas() {
       guardarReceta,
       agregarReceta,
       editarReceta,
+      cambiarVistaEditarReceta,
       guardarEditarReceta,
       eliminarReceta,
       filtrarRecetas,
       buscarInsumoParaReceta,
       agregarIngrediente,
       eliminarIngrediente,
+      establecerCantidadIngredienteTemporal,
+      guardarCantidadIngredienteConEnter,
       actualizarTablaIngredientes,
-      mostrarIngredientes,
-      guardarCantidadIngrediente,
-      eliminarIngredienteDeReceta,
       abrirProduccionRapida,
       actualizarCostoProduccion,
       producirDesdeReceta,
@@ -289,49 +289,54 @@ export default function Recetas() {
           <div className="encabezadoModal"><h3>Editar Receta</h3><button className="cerrarModal" onClick={() => cerrarModal('modalEditarReceta')}>&times;</button></div>
           <form onSubmit={guardarEditarReceta} className="cajaFormulario">
             <input id="idEditReceta" type="hidden" />
-            <div className="recetaFilaDatosPrincipales">
-              <input id="editNombreReceta" type="text" required onKeyDown={(e) => manejarEnterModalReceta(e, 'nombre', true)} />
-              <select id="editCategoriaReceta" required onKeyDown={(e) => manejarEnterModalReceta(e, 'categoria', true)}></select>
-              <input id="editGramajeReceta" type="number" step="0.01" min="0" onKeyDown={(e) => manejarEnterModalReceta(e, 'gramaje', true)} />
+            <div className="tabsEditarReceta" role="tablist" aria-label="Vista de edicion de receta">
+              <button type="button" id="tabEditarRecetaNormal" className="boton activo" onClick={() => cambiarVistaEditarReceta('normal')}>Vista normal</button>
+              <button type="button" id="tabEditarRecetaIngredientes" className="boton" onClick={() => cambiarVistaEditarReceta('ingredientes')}>Solo ingredientes</button>
             </div>
-            <div className="recetaFilaInsumo">
-              <div className="recetaBusquedaInsumoWrap">
-                <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} onKeyDown={(e) => manejarEnterModalReceta(e, 'busqueda', true)} autoComplete="off" />
-                <input id="editIdInsumoSeleccionado" type="hidden" />
-                <div id="editListaBusquedaInsumos"></div>
+
+            <div id="panelEditarRecetaNormal">
+              <div className="recetaFilaDatosPrincipales">
+                <input id="editNombreReceta" type="text" required onKeyDown={(e) => manejarEnterModalReceta(e, 'nombre', true)} />
+                <select id="editCategoriaReceta" required onKeyDown={(e) => manejarEnterModalReceta(e, 'categoria', true)}></select>
+                <input id="editGramajeReceta" type="number" step="0.01" min="0" onKeyDown={(e) => manejarEnterModalReceta(e, 'gramaje', true)} />
               </div>
-              <div className="recetaFilaInsumoControles">
-                <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', true)} />
-                <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', true)} />
-                <select id="editUnidadIngrediente" disabled>
-                  <option value="">Seleccionar</option>
-                  <option value="cda">Cucharadas (cda)</option>
-                  <option value="cdta">Cucharaditas (cdta)</option>
-                  <option value="gotas">Gotas (go)</option>
-                  <option value="g">Gramos (g)</option>
-                  <option value="kg">Kilogramos (kg)</option>
-                  <option value="l">Litros (l)</option>
-                  <option value="ml">Mililitros (ml)</option>
-                  <option value="oz">Onzas (oz)</option>
-                  <option value="pz">Piezas (pz)</option>
-                  <option value="taza">Tazas</option>
-                </select>
-                <button type="button" className="boton" onClick={() => agregarIngrediente(true)}>+ Ing.</button>
+              <div className="recetaFilaInsumo">
+                <div className="recetaBusquedaInsumoWrap">
+                  <input id="editInsumoSeleccionado" type="text" placeholder="Buscar insumo..." onChange={e => buscarInsumoParaReceta(e.target.value)} onKeyDown={(e) => manejarEnterModalReceta(e, 'busqueda', true)} autoComplete="off" />
+                  <input id="editIdInsumoSeleccionado" type="hidden" />
+                  <div id="editListaBusquedaInsumos"></div>
+                </div>
+                <div className="recetaFilaInsumoControles">
+                  <input id="editProveedorIngrediente" type="text" placeholder="Proveedor (opcional)" onKeyDown={(e) => manejarEnterModalReceta(e, 'proveedor', true)} />
+                  <input id="editCantidadIngrediente" type="number" step="0.01" placeholder="Cantidad" onKeyDown={(e) => manejarEnterModalReceta(e, 'cantidad', true)} />
+                  <select id="editUnidadIngrediente" disabled>
+                    <option value="">Seleccionar</option>
+                    <option value="cda">Cucharadas (cda)</option>
+                    <option value="cdta">Cucharaditas (cdta)</option>
+                    <option value="gotas">Gotas (go)</option>
+                    <option value="g">Gramos (g)</option>
+                    <option value="kg">Kilogramos (kg)</option>
+                    <option value="l">Litros (l)</option>
+                    <option value="ml">Mililitros (ml)</option>
+                    <option value="oz">Onzas (oz)</option>
+                    <option value="pz">Piezas (pz)</option>
+                    <option value="taza">Tazas</option>
+                  </select>
+                  <button type="button" className="boton" onClick={() => agregarIngrediente(true)}>+ Ing.</button>
+                </div>
               </div>
+              <table>
+                <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad / costo uso</th><th></th></tr></thead>
+                <tbody id="editTablaIngredientesTemporales"></tbody>
+              </table>
             </div>
-            <table>
-              <thead><tr><th>Ingrediente</th><th>Proveedor</th><th>Cantidad / costo uso</th><th></th></tr></thead>
-              <tbody id="editTablaIngredientesTemporales"></tbody>
-            </table>
+
+            <div id="panelEditarRecetaIngredientes" className="panelEditarRecetaIngredientes" style={{ display: 'none' }}>
+              <div id="resumenGramajeEditarReceta" className="resumenGramajeEditarReceta"></div>
+              <div id="listaSoloIngredientesEditar" className="listaSoloIngredientesEditar"></div>
+            </div>
             <button className="boton botonExito" type="submit">Guardar cambios</button>
           </form>
-        </div>
-      </div>
-
-      <div id="modalIngredientes" className="modal" onClick={() => cerrarModal('modalIngredientes')}>
-        <div className="contenidoModal" onClick={e => e.stopPropagation()}>
-          <div className="encabezadoModal"><h3>Ingredientes de receta</h3><button className="cerrarModal" onClick={() => cerrarModal('modalIngredientes')}>&times;</button></div>
-          <div id="detallesIngredientes"></div>
         </div>
       </div>
 
@@ -557,6 +562,7 @@ export default function Recetas() {
 let categoriaRecetaActual = null;
 let ingredientesTemporales = [];
 let mapaInsumosReceta = new Map();
+let vistaEditarRecetaActiva = 'normal';
 let ultimoEnterNuevaRecetaMs = 0;
 let ultimoEnterEditarRecetaMs = 0;
 let cargandoRecetas = false;
@@ -1510,7 +1516,6 @@ async function cargarListadoRecetas(opciones = {}) {
             <button onclick="window.recetas.abrirFichaTiendaReceta(${receta.id})" class="botonPequeno" style="background:#4a7c59" title="Editar ficha de tienda">🛍️</button>
             <button onclick="window.recetas.abrirEscalarReceta(${receta.id}, '${nombreRecetaSeguro}', ${receta.gramaje || 0})" class="botonPequeno" style="background:#3498db" title="Copiar con escalado">📋</button>
             <button onclick="window.recetas.archivarReceta(${receta.id}, '${nombreRecetaSeguro}')" class="botonPequeno" style="background:#607d8b" title="Archivar receta">🗂️</button>
-            <button onclick="window.recetas.mostrarIngredientes(${receta.id})" class="botonPequeno" title="Ver ingredientes">👁️</button>
           </div>
         </div>
       `;
@@ -2123,6 +2128,7 @@ async function editarReceta(id) {
       costo_por_unidad: Number(ing.costo_por_unidad || 0),
       pendiente: ing.pendiente === true || ing.pendiente === 1
     }));
+    cambiarVistaEditarReceta('normal');
     actualizarTablaIngredientes();
 
     const listaBusquedaEdit = document.getElementById('editListaBusquedaInsumos');
@@ -2140,6 +2146,49 @@ async function editarReceta(id) {
   } catch (error) {
     console.error(error);
   }
+}
+
+function cambiarVistaEditarReceta(vista = 'normal') {
+  vistaEditarRecetaActiva = vista === 'ingredientes' ? 'ingredientes' : 'normal';
+
+  const tabNormal = document.getElementById('tabEditarRecetaNormal');
+  const tabIngredientes = document.getElementById('tabEditarRecetaIngredientes');
+  const panelNormal = document.getElementById('panelEditarRecetaNormal');
+  const panelIngredientes = document.getElementById('panelEditarRecetaIngredientes');
+
+  if (tabNormal) tabNormal.classList.toggle('activo', vistaEditarRecetaActiva === 'normal');
+  if (tabIngredientes) tabIngredientes.classList.toggle('activo', vistaEditarRecetaActiva === 'ingredientes');
+  if (panelNormal) panelNormal.style.display = vistaEditarRecetaActiva === 'normal' ? '' : 'none';
+  if (panelIngredientes) panelIngredientes.style.display = vistaEditarRecetaActiva === 'ingredientes' ? '' : 'none';
+
+  if (vistaEditarRecetaActiva === 'ingredientes') {
+    renderVistaSoloIngredientesEditar();
+  }
+}
+
+function renderVistaSoloIngredientesEditar() {
+  const lista = document.getElementById('listaSoloIngredientesEditar');
+  const resumen = document.getElementById('resumenGramajeEditarReceta');
+  const gramaje = parseFloat(document.getElementById('editGramajeReceta')?.value || '0');
+
+  if (resumen) {
+    resumen.textContent = Number.isFinite(gramaje) && gramaje > 0
+      ? `Gramaje total de la receta: ${gramaje.toFixed(2)} g`
+      : 'Gramaje total de la receta: sin definir';
+  }
+
+  if (!lista) return;
+  if (!ingredientesTemporales.length) {
+    lista.innerHTML = '<div class="itemSoloIngredienteVacio">No hay ingredientes agregados.</div>';
+    return;
+  }
+
+  lista.innerHTML = ingredientesTemporales.map((ing) => `
+    <div class="itemSoloIngrediente">
+      <div class="itemSoloIngredienteNombre">${ing.nombre}</div>
+      <div class="itemSoloIngredienteMeta">${parseFloat(ing.cantidad || 0).toFixed(2)} ${getAbrev(ing.unidad)}</div>
+    </div>
+  `).join('');
 }
 
 function intentarGuardarConDobleEnter(esEdicion = false) {
@@ -2225,7 +2274,7 @@ function manejarEnterModalReceta(event, campo, esEdicion = false) {
   }
 }
 
-async function guardarEditarReceta(event) {
+async function guardarEditarReceta(event, mantenerModalAbierto = false) {
   if (event) event.preventDefault();
   const id = document.getElementById('idEditReceta')?.value;
   const nombre = document.getElementById('editNombreReceta')?.value;
@@ -2253,9 +2302,11 @@ async function guardarEditarReceta(event) {
     });
 
     if (respuesta.ok) {
-      cerrarModal('modalEditarReceta');
-      ingredientesTemporales = [];
-      actualizarTablaIngredientes();
+      if (!mantenerModalAbierto) {
+        cerrarModal('modalEditarReceta');
+        ingredientesTemporales = [];
+        actualizarTablaIngredientes();
+      }
       mostrarNotificacion('Receta actualizada', 'exito');
       await cargarListadoRecetas();
       await cargarPestanasCategorias();
@@ -2435,12 +2486,32 @@ function eliminarIngrediente(indice) {
   actualizarTablaIngredientes();
 }
 
+function establecerCantidadIngredienteTemporal(indice, valor) {
+  const ingrediente = ingredientesTemporales[indice];
+  if (!ingrediente) return;
+
+  const numero = Number.parseFloat(String(valor ?? '').replace(',', '.'));
+  if (!Number.isFinite(numero)) return;
+
+  const siguiente = Math.max(0.01, Number(numero.toFixed(2)));
+  ingrediente.cantidad = siguiente;
+  actualizarTablaIngredientes();
+}
+
+function guardarCantidadIngredienteConEnter(event, indice, valor) {
+  if (!event || event.key !== 'Enter') return;
+  event.preventDefault();
+  establecerCantidadIngredienteTemporal(indice, valor);
+  guardarEditarReceta(null, true);
+}
+
 function actualizarTablaIngredientes() {
   const tabla = document.getElementById('tablaIngredientesTemporales');
   const editTabla = document.getElementById('editTablaIngredientesTemporales');
 
   const render = (target) => {
     if (!target) return;
+    const esTablaEdicion = target.id === 'editTablaIngredientesTemporales';
     target.innerHTML = '';
     ingredientesTemporales.forEach((ing, idx) => {
       const fila = document.createElement('tr');
@@ -2449,10 +2520,25 @@ function actualizarTablaIngredientes() {
       const costoUsoHtml = Number.isFinite(costoUso)
         ? `<div style="font-size:12px;color:#4a7c59;font-weight:700">Costo uso: $${Number(costoUso || 0).toFixed(2)}</div>`
         : '<div style="font-size:12px;color:#999">Costo uso: N/D</div>';
+      const celdaCantidad = esTablaEdicion
+        ? `<div class="editorCantidadReceta">
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              class="inputCantidadIngredienteEditar"
+              value="${Number(ing.cantidad || 0).toFixed(2)}"
+              onchange="window.recetas.establecerCantidadIngredienteTemporal(${idx}, this.value)"
+              onkeydown="window.recetas.guardarCantidadIngredienteConEnter(event, ${idx}, this.value)"
+            />
+            <span class="cantidadIngredienteUnidad">${getAbrev(ing.unidad)}</span>
+          </div>${costoUsoHtml}`
+        : `${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${costoUsoHtml}`;
+
       fila.innerHTML = `
         <td>${ing.nombre}</td>
         <td>${ing.proveedor || '<span style="color:#999">Sin proveedor</span>'}</td>
-        <td>${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${costoUsoHtml}</td>
+        <td>${celdaCantidad}</td>
         <td><button onclick="window.recetas.eliminarIngrediente(${idx})" class="botonPequeno botonDanger">×</button></td>
       `;
       target.appendChild(fila);
@@ -2461,59 +2547,21 @@ function actualizarTablaIngredientes() {
 
   render(tabla);
   render(editTabla);
-}
-
-async function mostrarIngredientes(idReceta) {
-  try {
-    const respuesta = await fetch(`${API}/recetas/${idReceta}`);
-    if (!respuesta.ok) {
-      mostrarNotificacion('Error al cargar la receta', 'error');
-      return;
-    }
-    const receta = await respuesta.json();
-
-    let html = `<h3 class="tituloIngredientesRecetaModal">${receta.nombre}</h3><ul id="listaIngredientesModal" class="listaIngredientesRecetaModal">`;
-    if (!receta.ingredientes || receta.ingredientes.length === 0) {
-      html += '<li class="itemIngredienteRecetaVacio">Sin ingredientes agregados</li>';
-    } else {
-      receta.ingredientes.forEach(ing => {
-        const pendiente = ing.pendiente === true || ing.pendiente === 1;
-        const costoUso = calcularCostoUsoIngrediente(ing);
-        const costoUsoTexto = Number.isFinite(costoUso)
-          ? `$${Number(costoUso || 0).toFixed(2)}`
-          : 'N/D';
-        const nombreIngredienteSeguro = escaparParaInlineJs(ing?.nombre);
-        html += `<li class="itemIngredienteRecetaModal ${pendiente ? 'itemIngredienteRecetaPendiente' : ''}">
-          <div class="itemIngredienteRecetaInfo itemIngredienteRecetaLineaPrincipal">
-            <span class="itemIngredienteRecetaNombre"><strong>${ing.nombre}</strong>: ${parseFloat(ing.cantidad).toFixed(2)} ${getAbrev(ing.unidad)}${ing.proveedor ? ` (${ing.proveedor})` : ''} • Costo uso: ${costoUsoTexto}</span>
-          </div>
-          <div class="itemIngredienteRecetaFilaEdicion">
-            <div class="itemIngredienteRecetaControles">
-              <span class="itemIngredienteRecetaEditarTexto">Editar:</span>
-              <input type="number" id="cantidad_${ing.id}" value="${parseFloat(ing.cantidad).toFixed(2)}" step="0.01" class="inputCantidadIngredienteRecetaModal">
-              <span class="unidadIngredienteRecetaModal">${getAbrev(ing.unidad)}</span>
-            </div>
-            <div class="itemIngredienteRecetaAcciones">
-              <button onclick="window.recetas.guardarCantidadIngrediente(${idReceta}, ${ing.id})" class="botonPequeno botonGuardarIngredienteReceta" title="Guardar cantidad">💾</button>
-              <button onclick="window.recetas.eliminarIngredienteDeReceta(${idReceta}, ${ing.id}, '${nombreIngredienteSeguro}')" class="botonPequeno botonDanger" title="Eliminar ingrediente">×</button>
-            </div>
-          </div>
-        </li>`;
-      });
-    }
-    html += '</ul>';
-    const detalles = document.getElementById('detallesIngredientes');
-    if (!detalles) return;
-    detalles.innerHTML = html;
-    abrirModal('modalIngredientes');
-  } catch (error) {
-    console.error('Error cargando ingredientes:', error);
-    mostrarNotificacion('Error al cargar los ingredientes', 'error');
+  if (vistaEditarRecetaActiva === 'ingredientes') {
+    renderVistaSoloIngredientesEditar();
   }
 }
 
 async function abrirFichaTiendaReceta(idReceta) {
   try {
+    const formularioFicha = document.querySelector('#modalFichaTiendaReceta .fichaTiendaFormularioCompacta');
+    if (formularioFicha) {
+      // Limpieza defensiva: evita que quede HTML residual de vistas anteriores.
+      formularioFicha
+        .querySelectorAll('.tituloIngredientesRecetaModal, .listaIngredientesRecetaModal, .itemIngredienteRecetaModal')
+        .forEach((nodo) => nodo.remove());
+    }
+
     const respuesta = await fetch(`${API}/recetas/${idReceta}`);
     if (!respuesta.ok) {
       mostrarNotificacion('No se pudo cargar la receta', 'error');
@@ -2890,74 +2938,6 @@ async function subirImagenTienda(archivo) {
     throw new Error(data?.mensaje || data?.error || 'No se pudo subir la imagen');
   }
   return String(data?.url || '').trim();
-}
-
-async function guardarCantidadIngrediente(idReceta, idIngrediente) {
-  const nuevaCantidad = parseFloat(document.getElementById(`cantidad_${idIngrediente}`)?.value);
-  if (isNaN(nuevaCantidad) || nuevaCantidad <= 0) {
-    mostrarNotificacion('Por favor ingresa una cantidad válida', 'error');
-    return;
-  }
-
-  try {
-    const respuesta = await fetch(`${API}/recetas/${idReceta}`);
-    const receta = await respuesta.json();
-    const ingredientesActualizados = (receta.ingredientes || []).map(ing => {
-      if (ing.id === idIngrediente) return { id_insumo: ing.id_insumo, nombre: ing.nombre, proveedor: ing.proveedor || '', cantidad: nuevaCantidad, unidad: ing.unidad };
-      return { id_insumo: ing.id_insumo, nombre: ing.nombre, proveedor: ing.proveedor || '', cantidad: ing.cantidad, unidad: ing.unidad };
-    });
-
-    const respuestaActualizar = await fetch(`${API}/recetas/${idReceta}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nombre: receta.nombre,
-        id_categoria: receta.id_categoria,
-        gramaje: receta.gramaje,
-        ingredientes: ingredientesActualizados
-      })
-    });
-
-    if (respuestaActualizar.ok) {
-      mostrarNotificacion('Cantidad actualizada correctamente', 'exito');
-      mostrarIngredientes(idReceta);
-      cargarListadoRecetas();
-    }
-  } catch (error) {
-    console.error('Error actualizando cantidad:', error);
-    mostrarNotificacion('Error al actualizar la cantidad', 'error');
-  }
-}
-
-async function eliminarIngredienteDeReceta(idReceta, idIngrediente, nombreIngrediente) {
-  const ok = await mostrarConfirmacion(`¿Eliminar "${nombreIngrediente}" de esta receta?`, 'Eliminar ingrediente');
-  if (!ok) return;
-
-  try {
-    const respuesta = await fetch(`${API}/recetas/${idReceta}`);
-    const receta = await respuesta.json();
-    const ingredientesFiltrados = (receta.ingredientes || []).filter(ing => ing.id !== idIngrediente);
-
-    const respuestaActualizar = await fetch(`${API}/recetas/${idReceta}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nombre: receta.nombre,
-        id_categoria: receta.id_categoria,
-        gramaje: receta.gramaje,
-        ingredientes: ingredientesFiltrados.map(ing => ({ id_insumo: ing.id_insumo, nombre: ing.nombre, proveedor: ing.proveedor || '', cantidad: ing.cantidad, unidad: ing.unidad }))
-      })
-    });
-
-    if (respuestaActualizar.ok) {
-      mostrarIngredientes(idReceta);
-      cargarListadoRecetas();
-      mostrarNotificacion('Ingrediente eliminado correctamente', 'exito');
-    }
-  } catch (error) {
-    console.error('Error eliminando ingrediente:', error);
-    mostrarNotificacion('Error al eliminar el ingrediente', 'error');
-  }
 }
 
 async function abrirProduccionRapida(idReceta, nombreReceta, costoPorPieza = 0) {

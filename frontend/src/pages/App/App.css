@@ -79,19 +79,26 @@ body,
 }
 
 .botonSalir{
-  border:2px solid #2a2a2a;
+  border:2px solid #9e3a35;
   border-radius:999px;
-  background:rgba(199,85,80,.2);
-  color:#7a2a27;
+  background:#c75550;
+  color:#fff;
   font-size:12px;
   padding:8px 12px;
   cursor:pointer;
+  font-weight:700;
+  box-shadow:0 2px 8px rgba(120,35,31,0.28);
 }
 
 .botonSalir:hover{
-  background:var(--danger);
+  background:#a83f3a;
   color:#fff;
-  border-color:var(--danger);
+  border-color:#8e3430;
+}
+
+.botonSalir:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(199,85,80,0.35), 0 2px 8px rgba(120,35,31,0.28);
 }
 
 .botonSalirMenu{

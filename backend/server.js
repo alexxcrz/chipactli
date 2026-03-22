@@ -1220,6 +1220,25 @@ function esClaveFechaValida(clave) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(clave || '').trim());
 }
 
+async function clienteAccionesAppActivas(idCliente) {
+  const id = Number(idCliente || 0);
+  if (!Number.isFinite(id) || id <= 0) return true;
+
+  try {
+    const row = await dbGetAsync(
+      bdVentas,
+      `SELECT COALESCE(acciones_app_activas, 1) AS acciones_app_activas
+       FROM tienda_clientes
+       WHERE id = ?
+       LIMIT 1`,
+      [id]
+    );
+    return Number(row?.acciones_app_activas ?? 1) === 1;
+  } catch {
+    return true;
+  }
+}
+
 app.post(['/api/visitas/ping', '/visitas/ping'], async (req, res) => {
   const ahora = Date.now();
   const ahoraDate = new Date(ahora);
@@ -1228,6 +1247,29 @@ app.post(['/api/visitas/ping', '/visitas/ping'], async (req, res) => {
   const diaClave = tiempoLocalVisita.diaClave;
   const horaClave = tiempoLocalVisita.horaClave;
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
+  const idCliente = Number(body.idCliente || body.id_cliente || 0);
+
+  if (idCliente > 0) {
+    const accionesActivas = await clienteAccionesAppActivas(idCliente);
+    if (!accionesActivas) {
+      if (sessionId) visitantesActivos.delete(sessionId);
+      limpiarVisitantesInactivos(ahora);
+      limpiarEstadisticasAntiguas(ahoraDate);
+      const statsDiaBase = obtenerStatsDia(diaClave);
+      return res.json({
+        ok: true,
+        ignorado: true,
+        totalActivos: contarActivosReales(),
+        visitasDia: statsDiaBase.sesionesUnicas.size,
+        eventosDia: statsDiaBase.totalEventos,
+        horaPico: obtenerHoraPico(statsDiaBase),
+        ubicaciones: resumenUbicacionesActivas(),
+        actualizadoEn: new Date(ahora).toISOString(),
+        timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+      });
+    }
+  }
+
   let origen = obtenerOrigenAproximado(req, body);
   try {
     origen = await enriquecerOrigenPorIp(req, origen);
@@ -1289,6 +1331,7 @@ app.post(['/api/visitas/evento', '/visitas/evento'], async (req, res) => {
   const tiempoLocalEvento = obtenerDiaHoraPorZona(ahoraDate, body?.zonaHoraria || '');
   const diaClave = tiempoLocalEvento.diaClave;
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
+  const idCliente = Number(body.idCliente || body.id_cliente || 0);
   const accion = limpiarTextoCorto(body.accion || '', 64);
   const producto = limpiarTextoCorto(body.producto || '', 140);
   const seccion = limpiarTextoCorto(body.seccion || '', 64);
@@ -1296,6 +1339,13 @@ app.post(['/api/visitas/evento', '/visitas/evento'], async (req, res) => {
 
   if (!accion || esUserAgentBot(req)) {
     return res.json({ ok: true, ignorado: true });
+  }
+
+  if (idCliente > 0) {
+    const accionesActivas = await clienteAccionesAppActivas(idCliente);
+    if (!accionesActivas) {
+      return res.json({ ok: true, ignorado: true });
+    }
   }
 
   try {

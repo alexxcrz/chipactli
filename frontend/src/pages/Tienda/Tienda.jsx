@@ -909,6 +909,7 @@ export default function Tienda({
   const [adminOrdenes, setAdminOrdenes] = useState([]);
   const [seguimientoDraftPorOrden, setSeguimientoDraftPorOrden] = useState({});
   const [procesandoPedidosAdmin, setProcesandoPedidosAdmin] = useState(false);
+  const [actualizandoClienteAccionesId, setActualizandoClienteAccionesId] = useState(0);
   const [modalResetContadoresAdmin, setModalResetContadoresAdmin] = useState({ visible: false, password: '' });
   const [adminVista, setAdminVista] = useState(() => leerValorPersistidoPermitido(CLAVE_TRASTIENDA_VISTA_ADMIN, ['pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'cupones', 'config', 'metricas'], 'pedidos'));
   const [filtroEstadoOrdenAdmin, setFiltroEstadoOrdenAdmin] = useState('todos');
@@ -966,6 +967,9 @@ export default function Tienda({
   const [cargandoResenas, setCargandoResenas] = useState(false);
   const [enviandoResena, setEnviandoResena] = useState(false);
   const [resenaNueva, setResenaNueva] = useState({ calificacion: 5, comentario: '' });
+  const [mostrarModalResena, setMostrarModalResena] = useState(false);
+  const [resenaEditandoId, setResenaEditandoId] = useState(0);
+  const [resenaDetalleModal, setResenaDetalleModal] = useState(null);
   const [mostrarWhatsForm, setMostrarWhatsForm] = useState(false);
   const [whatsForm, setWhatsForm] = useState({ nombre: '', mensaje: '' });
   const [permisoNotificacionesPedidos, setPermisoNotificacionesPedidos] = useState(() => obtenerPermisoNotificacionesNativas());
@@ -1019,6 +1023,7 @@ export default function Tienda({
     topAcciones: [],
     topProductos: []
   });
+  const [reiniciandoMetricasAdmin, setReiniciandoMetricasAdmin] = useState(false);
   const bloqueoAperturaCarritoRef = useRef(0);
   const ubicacionVisitanteRef = useRef(null);
   const cargandoUbicacionVisitanteRef = useRef(false);
@@ -1370,6 +1375,7 @@ export default function Tienda({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId,
+            idCliente: Number(cliente?.id || 0) > 0 ? Number(cliente?.id || 0) : undefined,
             ruta,
             zonaHoraria,
             idioma,
@@ -1409,7 +1415,7 @@ export default function Tienda({
       window.clearInterval(intervalo);
       document.removeEventListener('visibilitychange', alVolverVisible);
     };
-  }, [esVistaTrastienda]);
+  }, [esVistaTrastienda, cliente?.id]);
 
   useEffect(() => {
     if (!esVistaTrastienda || !tokenInterno || adminVista !== 'metricas') return undefined;
@@ -3025,6 +3031,23 @@ export default function Tienda({
       .filter(Boolean);
   }
 
+  function parseTextoFichaEnItems(texto = '') {
+    const base = String(texto || '').trim();
+    if (!base) return [];
+
+    const normalizado = base
+      .replace(/\r\n?/g, '\n')
+      .replace(/\s*[•●▪◦·]\s*/g, '\n• ')
+      .replace(/\s+(?=\d+[\.)]\s+)/g, '\n');
+
+    return normalizado
+      .split('\n')
+      .map((linea) => String(linea || '').trim())
+      .filter(Boolean)
+      .map((linea) => String(linea).replace(/^[•●▪◦·]\s*/, '').trim())
+      .filter(Boolean);
+  }
+
   function parseVariantesTexto(texto = '') {
     return parseLineas(texto).map((linea) => {
       const [nombreRaw, extraRaw] = String(linea).split('|');
@@ -4308,13 +4331,39 @@ export default function Tienda({
     }
   }
 
+  async function reiniciarMetricasAdmin() {
+    if (!tokenInterno || reiniciandoMetricasAdmin) return;
+    const confirmar = await mostrarConfirmacion(
+      '¿Reiniciar métricas de visitas y comportamiento? Esta acción no se puede deshacer.',
+      'Reiniciar métricas'
+    );
+    if (!confirmar) return;
+
+    setReiniciandoMetricasAdmin(true);
+    try {
+      await fetchAdmin('/tienda/admin/metricas/reset', { method: 'POST' });
+      await Promise.all([
+        cargarResumenVisitasAdmin(fechaVisitaSeleccionada),
+        cargarHistorialVisitasAdmin(historialVisitasAdmin.rangoDias),
+        cargarComportamientoVisitasAdmin(historialVisitasAdmin.rangoDias)
+      ]);
+      mostrarNotificacion('Métricas reiniciadas', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudieron reiniciar las métricas', 'error');
+    } finally {
+      setReiniciandoMetricasAdmin(false);
+    }
+  }
+
   function registrarEventoComportamiento(accion, producto = '') {
     const sessionId = obtenerSesionVisitaId();
     if (!sessionId) return;
 
+    const idCliente = Number(cliente?.id || 0);
     const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
     const payload = {
       sessionId,
+      idCliente: idCliente > 0 ? idCliente : undefined,
       accion: String(accion || '').trim().slice(0, 64),
       producto: String(producto || '').trim().slice(0, 140),
       seccion: String(seccionActiva || '').trim().slice(0, 64),
@@ -4371,6 +4420,33 @@ export default function Tienda({
       setAdminClientes(Array.isArray(data) ? data : []);
     } catch {
       setAdminClientes([]);
+    }
+  }
+
+  async function cambiarAccionesClienteAdmin(idCliente, accionesActivas) {
+    const id = Number(idCliente || 0);
+    if (!Number.isFinite(id) || id <= 0) return;
+
+    setActualizandoClienteAccionesId(id);
+    try {
+      await fetchAdmin(`/tienda/admin/clientes/${id}/acciones-app`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acciones_app_activas: Boolean(accionesActivas) })
+      });
+
+      setAdminClientes((prev) => (Array.isArray(prev)
+        ? prev.map((item) => (
+          Number(item?.id || 0) === id
+            ? { ...item, acciones_app_activas: accionesActivas ? 1 : 0 }
+            : item
+        ))
+        : []));
+      mostrarNotificacion('Estado de acciones del cliente actualizado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo actualizar el estado del cliente', 'error');
+    } finally {
+      setActualizandoClienteAccionesId(0);
     }
   }
 
@@ -4764,14 +4840,18 @@ export default function Tienda({
     const receta = String(recetaNombre || '').trim();
     if (!receta) {
       setResenasDetalle([]);
+      setResenaDetalleModal(null);
       return;
     }
 
     setCargandoResenas(true);
     try {
-      const data = await fetchJson(`/tienda/resenas?receta_nombre=${encodeURIComponent(receta)}`);
+      const headers = {};
+      if (clienteToken) headers.Authorization = `Bearer ${clienteToken}`;
+      const data = await fetchJson(`/tienda/resenas?receta_nombre=${encodeURIComponent(receta)}`, { headers });
       const resumen = data?.resumen || {};
       setResenasDetalle(Array.isArray(data?.resenas) ? data.resenas : []);
+      setResenaDetalleModal(null);
       setSeleccionado((prev) => {
         if (!prev || String(prev?.nombre_receta || '').trim() !== receta) return prev;
         return {
@@ -4782,6 +4862,7 @@ export default function Tienda({
       });
     } catch {
       setResenasDetalle([]);
+      setResenaDetalleModal(null);
     } finally {
       setCargandoResenas(false);
     }
@@ -4814,6 +4895,7 @@ export default function Tienda({
       });
 
       setResenaNueva({ calificacion: 5, comentario: '' });
+      setMostrarModalResena(false);
       await cargarResenasProducto(receta);
       await cargarProductos({ silencioso: true });
 
@@ -4832,6 +4914,71 @@ export default function Tienda({
     } finally {
       setEnviandoResena(false);
     }
+  }
+
+  async function actualizarResenaProducto() {
+    const idResena = Number(resenaEditandoId || 0);
+    const receta = String(seleccionado?.nombre_receta || '').trim();
+    const comentario = String(resenaNueva?.comentario || '').trim();
+    const calificacion = Math.max(1, Math.min(5, Number(resenaNueva?.calificacion) || 0));
+
+    if (!clienteToken) {
+      mostrarNotificacion('Inicia sesión para editar tu comentario', 'error');
+      return;
+    }
+    if (!idResena) return;
+    if (!receta) return;
+    if (comentario.length < 3) {
+      mostrarNotificacion('Escribe un comentario más completo', 'error');
+      return;
+    }
+
+    setEnviandoResena(true);
+    try {
+      const data = await fetchJson(`/tienda/resenas/${idResena}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${clienteToken}`
+        },
+        body: JSON.stringify({ calificacion, comentario })
+      });
+
+      setResenaNueva({ calificacion: 5, comentario: '' });
+      setResenaEditandoId(0);
+      setMostrarModalResena(false);
+      await cargarResenasProducto(receta);
+      await cargarProductos({ silencioso: true });
+
+      const resumen = data?.resumen || {};
+      setSeleccionado((prev) => {
+        if (!prev || String(prev?.nombre_receta || '').trim() !== receta) return prev;
+        return {
+          ...prev,
+          resenas_total: Number(resumen?.total) || prev?.resenas_total || 0,
+          resenas_promedio: Number(resumen?.promedio) || prev?.resenas_promedio || 0
+        };
+      });
+      mostrarNotificacion('Comentario actualizado', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo actualizar tu comentario', 'error');
+    } finally {
+      setEnviandoResena(false);
+    }
+  }
+
+  function resolverClaveResena(resena = {}, idx = 0) {
+    const id = Number(resena?.id) || 0;
+    if (id > 0) return `resena-${id}`;
+    const nombre = String(resena?.nombre_cliente || 'cliente').trim().toLowerCase();
+    return `resena-${nombre || 'anon'}-${idx}`;
+  }
+
+  function obtenerVistaPreviaComentario(comentario = '', limite = 180) {
+    const texto = String(comentario || '').trim().replace(/\s+/g, ' ');
+    if (!texto) return '';
+    if (texto.length <= limite) return texto;
+    return `${texto.slice(0, limite).trimEnd()}...`;
   }
 
   function abrirDetalle(producto) {
@@ -4856,6 +5003,9 @@ export default function Tienda({
       imagen_activa: imagenActiva
     });
     setResenaNueva({ calificacion: 5, comentario: '' });
+    setResenaEditandoId(0);
+    setMostrarModalResena(false);
+    setResenaDetalleModal(null);
     cargarResenasProducto(producto?.nombre_receta);
     setVistaActiva('detalle');
     registrarEventoComportamiento('ver_detalle_producto', producto?.nombre_receta || 'producto');
@@ -5310,7 +5460,11 @@ export default function Tienda({
   const whatsMensajeInvalido = whatsMensajeTrimLen < 6 || whatsMensajeTrimLen > 420;
 
   return (
-    <div ref={contenedorScrollRef} className="tiendaRootScroll" tabIndex={0}>
+    <div
+      ref={contenedorScrollRef}
+      className={`tiendaRootScroll ${(esVistaTrastienda || vistaActiva === 'trastienda') ? 'tiendaRootScrollAdminMovil' : ''}`.trim()}
+      tabIndex={0}
+    >
       {!esVistaTrastienda && (
       <div className="tiendaPromoBar">
         {configTienda.promo_texto}
@@ -5864,6 +6018,14 @@ export default function Tienda({
                       disabled={resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando || comportamientoVisitasAdmin.cargando}
                     >
                       {(resumenVisitasAdmin.cargando || historialVisitasAdmin.cargando || comportamientoVisitasAdmin.cargando) ? 'Actualizando...' : 'Actualizar'}
+                    </button>
+                    <button
+                      type="button"
+                      className="boton botonEliminar"
+                      onClick={reiniciarMetricasAdmin}
+                      disabled={reiniciandoMetricasAdmin}
+                    >
+                      {reiniciandoMetricasAdmin ? 'Reiniciando...' : 'Reiniciar métricas'}
                     </button>
                   </div>
                 </div>
@@ -7409,18 +7571,33 @@ export default function Tienda({
                   <div className="clientesGrid">
                     {clientesAdminFiltrados.map((c) => (
                       <div key={c.id} className="tiendaAdminFila tiendaAdminClienteCard">
-                        <div>
+                        <div className="tiendaAdminClienteHeader">
                           <strong>{c.nombre || 'Sin nombre'}</strong>
                           <div className="tiendaAdminSubtexto">{c.email || 'Sin correo'}</div>
                         </div>
-                        <div className="tiendaAdminClienteMeta">
-                          <span>Tel: {c.telefono || '-'}</span>
-                          <span>Promociones: {Number(c.recibe_promociones) === 1 ? 'Suscrito' : 'No suscrito'}</span>
-                          <span>Pago preferido: {c.forma_pago_preferida || '-'}</span>
-                          <span>Dirección: {c.direccion_default || '-'}</span>
-                          <span>Alta: {String(c.creado_en || '').replace('T', ' ').slice(0, 16) || '-'}</span>
+
+                        <div className="tiendaAdminClienteCuerpo">
+                          <div className="tiendaAdminClienteDatosGrid">
+                            <div className="tiendaAdminClienteDato"><span>Teléfono</span><strong>{c.telefono || '-'}</strong></div>
+                            <div className="tiendaAdminClienteDato"><span>Promociones</span><strong>{Number(c.recibe_promociones) === 1 ? 'Suscrito' : 'No suscrito'}</strong></div>
+                            <div className="tiendaAdminClienteDato"><span>Acciones app</span><strong>{Number(c.acciones_app_activas ?? 1) === 1 ? 'Activas' : 'Pausadas'}</strong></div>
+                            <div className="tiendaAdminClienteDato"><span>Pago preferido</span><strong>{c.forma_pago_preferida || '-'}</strong></div>
+                            <div className="tiendaAdminClienteDato tiendaAdminClienteDatoAncho"><span>Dirección</span><strong>{c.direccion_default || '-'}</strong></div>
+                            <div className="tiendaAdminClienteDato"><span>Alta</span><strong>{String(c.creado_en || '').replace('T', ' ').slice(0, 16) || '-'}</strong></div>
+                            <div className="tiendaAdminClienteDato tiendaAdminClienteAccionCelda">
+                              <SwitchConTexto
+                                checked={Number(c.acciones_app_activas ?? 1) === 1}
+                                label={Number(c.acciones_app_activas ?? 1) === 1 ? 'Tomar en cuenta acciones' : 'Ignorar acciones'}
+                                onChange={(e) => cambiarAccionesClienteAdmin(c.id, e.target.checked)}
+                                ariaLabel={`Activar o desactivar acciones en app para ${c.nombre || c.email || 'cliente'}`}
+                              />
+                              <button className="boton botonEliminar" onClick={() => eliminarClienteAdmin(c.id)}>Eliminar</button>
+                            </div>
+                          </div>
                         </div>
-                        <button className="boton botonEliminar" style={{ marginTop: '8px' }} onClick={() => eliminarClienteAdmin(c.id)}>Eliminar</button>
+                        {actualizandoClienteAccionesId === Number(c.id || 0) && (
+                          <div className="tiendaAdminSubtexto tiendaAdminClienteActualizando">Actualizando estado...</div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -7724,6 +7901,10 @@ export default function Tienda({
                 ? detalleActivo.ingredientes
                 : ingredientesActivos)
               : ingredientesActivos;
+            const modoUsoItems = parseTextoFichaEnItems(modoUsoFinal);
+            const cuidadosItems = parseTextoFichaEnItems(cuidadosFinal);
+            const modoUsoNumerado = modoUsoItems.length > 1 && modoUsoItems.every((linea) => /^\d+[\.)]\s+/.test(linea));
+            const cuidadosNumerado = cuidadosItems.length > 1 && cuidadosItems.every((linea) => /^\d+[\.)]\s+/.test(linea));
             const variantesDisponibles = variantes;
             const precioFichaDetalle = Number(seleccionado?.tienda_precio_publico) || 0;
             const tienePrecioDetalle = precioFichaDetalle > 0;
@@ -7734,7 +7915,7 @@ export default function Tienda({
               <>
                 <div className="encabezadoModal tiendaDetalleHeaderFijo">
                   <div>
-                    <h3>{seleccionado.nombre_receta}</h3>
+                    <h3>Detalle del producto</h3>
                     <div className="tiendaDetallePresentacionActiva">{seleccionado.nombre_receta}</div>
                   </div>
                   <button
@@ -7772,11 +7953,37 @@ export default function Tienda({
                       onTouchStart={iniciarSwipeDetalle}
                       onTouchEnd={finalizarSwipeDetalle}
                     >
+                      <span className="tiendaDetalleMarcoEnredadera tiendaDetalleMarcoEnredaderaTop" aria-hidden="true">
+                        <svg viewBox="0 0 140 18" role="presentation" focusable="false" preserveAspectRatio="none">
+                          <path d="M1 9 C20 2, 40 16, 60 9 C80 2, 100 16, 120 9 C128 6, 134 8, 139 9" />
+                          <ellipse cx="14" cy="5" rx="4" ry="2.2" transform="rotate(-25 14 5)" />
+                          <ellipse cx="29" cy="13" rx="4.3" ry="2.4" transform="rotate(22 29 13)" />
+                          <ellipse cx="45" cy="5" rx="4" ry="2.2" transform="rotate(-20 45 5)" />
+                          <ellipse cx="61" cy="13" rx="4.3" ry="2.4" transform="rotate(22 61 13)" />
+                          <ellipse cx="77" cy="5" rx="4" ry="2.2" transform="rotate(-24 77 5)" />
+                          <ellipse cx="93" cy="13" rx="4.3" ry="2.4" transform="rotate(22 93 13)" />
+                          <ellipse cx="109" cy="5" rx="4" ry="2.2" transform="rotate(-20 109 5)" />
+                          <ellipse cx="126" cy="12" rx="4" ry="2.2" transform="rotate(20 126 12)" />
+                        </svg>
+                      </span>
                       {String(seleccionado?.imagen_activa || '').trim() ? (
                         <img src={seleccionado.imagen_activa} alt={seleccionado.nombre_receta} />
                       ) : (
                         <div className="tiendaImagenPlaceholder">Sin imagen</div>
                       )}
+                      <span className="tiendaDetalleMarcoEnredadera tiendaDetalleMarcoEnredaderaBottom" aria-hidden="true">
+                        <svg viewBox="0 0 140 18" role="presentation" focusable="false" preserveAspectRatio="none">
+                          <path d="M1 9 C20 2, 40 16, 60 9 C80 2, 100 16, 120 9 C128 6, 134 8, 139 9" />
+                          <ellipse cx="14" cy="5" rx="4" ry="2.2" transform="rotate(-25 14 5)" />
+                          <ellipse cx="29" cy="13" rx="4.3" ry="2.4" transform="rotate(22 29 13)" />
+                          <ellipse cx="45" cy="5" rx="4" ry="2.2" transform="rotate(-20 45 5)" />
+                          <ellipse cx="61" cy="13" rx="4.3" ry="2.4" transform="rotate(22 61 13)" />
+                          <ellipse cx="77" cy="5" rx="4" ry="2.2" transform="rotate(-24 77 5)" />
+                          <ellipse cx="93" cy="13" rx="4.3" ry="2.4" transform="rotate(22 93 13)" />
+                          <ellipse cx="109" cy="5" rx="4" ry="2.2" transform="rotate(-20 109 5)" />
+                          <ellipse cx="126" cy="12" rx="4" ry="2.2" transform="rotate(20 126 12)" />
+                        </svg>
+                      </span>
                     </div>
                     {!!(Array.isArray(seleccionado?.galeria) && seleccionado.galeria.length) && (
                       <div className="tiendaDetalleGaleriaMini">
@@ -7791,12 +7998,6 @@ export default function Tienda({
                         ))}
                       </div>
                     )}
-                    <div className="tiendaDetalleDescripcionDebajo">
-                      <strong>Descripción</strong>
-                      <p>{descripcionFinal || 'Sin descripción todavía.'}</p>
-                    </div>
-                  </div>
-                  <div className="tiendaDetalleColInfo">
                     {!!variantesDisponibles.length && (
                       <div className="tiendaDetallePresentaciones">
                         <div className="tiendaDetallePresentacionesTitulo">Presentación</div>
@@ -7821,14 +8022,52 @@ export default function Tienda({
                       <p><strong>{tienePrecioDetalle ? precio(precioFichaDetalle) : 'Próximamente'}</strong></p>
                       {tokenInterno && <p><strong>Stock:</strong> {stockActivo}</p>}
                     </div>
+                    <div className="tiendaDetalleDescripcionDebajo">
+                      <strong>Descripción</strong>
+                      <p>{descripcionFinal || 'Sin descripción todavía.'}</p>
+                    </div>
+                  </div>
+                  <div className="tiendaDetalleColInfo">
                     <div className="tiendaDetalleTabs">
                       <div className="tiendaDetalleTabItem">
                         <strong>Modo de uso</strong>
-                        <p>{modoUsoFinal || 'Sin modo de uso todavía.'}</p>
+                        {!modoUsoItems.length ? (
+                          <p>Sin modo de uso todavía.</p>
+                        ) : modoUsoItems.length === 1 ? (
+                          <p>{modoUsoItems[0]}</p>
+                        ) : modoUsoNumerado ? (
+                          <ol className="tiendaDetalleListaTexto">
+                            {modoUsoItems.map((paso, idx) => (
+                              <li key={`modo-uso-item-${idx}`}>{String(paso).replace(/^\d+[\.)]\s+/, '')}</li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <ul className="tiendaDetalleListaTexto">
+                            {modoUsoItems.map((paso, idx) => (
+                              <li key={`modo-uso-item-${idx}`}>{paso}</li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                       <div className="tiendaDetalleTabItem">
                         <strong>Cuidados</strong>
-                        <p>{cuidadosFinal || 'Sin cuidados registrados.'}</p>
+                        {!cuidadosItems.length ? (
+                          <p>Sin cuidados registrados.</p>
+                        ) : cuidadosItems.length === 1 ? (
+                          <p>{cuidadosItems[0]}</p>
+                        ) : cuidadosNumerado ? (
+                          <ol className="tiendaDetalleListaTexto">
+                            {cuidadosItems.map((paso, idx) => (
+                              <li key={`cuidados-item-${idx}`}>{String(paso).replace(/^\d+[\.)]\s+/, '')}</li>
+                            ))}
+                          </ol>
+                        ) : (
+                          <ul className="tiendaDetalleListaTexto">
+                            {cuidadosItems.map((paso, idx) => (
+                              <li key={`cuidados-item-${idx}`}>{paso}</li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                       <div className="tiendaDetalleTabItem">
                         <strong>Ingredientes</strong>
@@ -7858,37 +8097,17 @@ export default function Tienda({
                       </div>
 
                       {clienteToken ? (
-                        <div className="tiendaResenaForm">
-                          <div className="tiendaResenaSelector">
-                            {Array.from({ length: 5 }).map((_, idx) => {
-                              const valor = idx + 1;
-                              const activa = valor <= Number(resenaNueva.calificacion || 0);
-                              return (
-                                <button
-                                  key={`set-hoja-${valor}`}
-                                  type="button"
-                                  className={activa ? 'tiendaBotonHojita activa' : 'tiendaBotonHojita'}
-                                  onClick={() => setResenaNueva((prev) => ({ ...prev, calificacion: valor }))}
-                                  aria-label={`Calificar con ${valor} de 5`}
-                                >
-                                  🍃
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <textarea
-                            rows={3}
-                            placeholder="Cuéntanos cómo te pareció este producto"
-                            value={resenaNueva.comentario}
-                            onChange={(e) => setResenaNueva((prev) => ({ ...prev, comentario: e.target.value }))}
-                          />
+                        <div className="tiendaResenaAcciones">
                           <button
                             type="button"
                             className="boton botonExito"
-                            onClick={enviarResenaProducto}
-                            disabled={enviandoResena}
+                            onClick={() => {
+                              setResenaEditandoId(0);
+                              setResenaNueva({ calificacion: 5, comentario: '' });
+                              setMostrarModalResena(true);
+                            }}
                           >
-                            {enviandoResena ? 'Enviando...' : 'Enviar comentario'}
+                            Agregar comentario
                           </button>
                         </div>
                       ) : (
@@ -7898,19 +8117,55 @@ export default function Tienda({
                       <div className="tiendaListaResenas">
                         {cargandoResenas && <div className="tiendaVacio">Cargando comentarios...</div>}
                         {!cargandoResenas && !resenasDetalle.length && <div className="tiendaVacio">Aún no hay comentarios.</div>}
-                        {resenasDetalle.map((resena) => (
-                          <article key={`resena-${resena.id}`} className="tiendaResenaCard">
+                        {resenasDetalle.map((resena, idx) => {
+                          const claveResena = resolverClaveResena(resena, idx);
+                          const comentarioOriginal = String(resena?.comentario || '').trim();
+                          const comentarioPreview = obtenerVistaPreviaComentario(comentarioOriginal);
+                          const requiereToggle = comentarioPreview !== comentarioOriginal;
+
+                          return (
+                          <article key={claveResena} className="tiendaResenaCard">
                             <div className="tiendaResenaHead">
                               <strong>{resena.nombre_cliente || 'Cliente'}</strong>
-                              <div className="tiendaHojitasFila">
+                              <div className="tiendaHojitasFila tiendaResenaHojitas">
                                 {pintarHojitas(Number(resena.calificacion) || 0).map((activa, idx) => (
                                   <span key={`resena-hoja-${resena.id}-${idx}`} className={activa ? 'tiendaHojita activa' : 'tiendaHojita'}>🍃</span>
                                 ))}
                               </div>
                             </div>
-                            <p>{resena.comentario}</p>
+                            <p>{comentarioPreview || 'Sin comentario.'}</p>
+                            {requiereToggle && (
+                              <button
+                                type="button"
+                                className="tiendaResenaToggleTexto"
+                                onClick={() => setResenaDetalleModal({
+                                  nombre: String(resena?.nombre_cliente || 'Cliente'),
+                                  calificacion: Number(resena?.calificacion) || 0,
+                                  comentario: comentarioOriginal || 'Sin comentario.'
+                                })}
+                              >
+                                Ver más
+                              </button>
+                            )}
+                            {Boolean(resena?.puede_editar) && (
+                              <button
+                                type="button"
+                                className="tiendaResenaToggleTexto"
+                                onClick={() => {
+                                  setResenaEditandoId(Number(resena?.id) || 0);
+                                  setResenaNueva({
+                                    calificacion: Math.max(1, Math.min(5, Number(resena?.calificacion) || 5)),
+                                    comentario: String(resena?.comentario || '')
+                                  });
+                                  setMostrarModalResena(true);
+                                }}
+                              >
+                                Editar
+                              </button>
+                            )}
                           </article>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                     <div>
@@ -7930,6 +8185,111 @@ export default function Tienda({
             );
           })()}
         </section>
+      )}
+
+      {mostrarModalResena && !esVistaTrastienda && vistaActiva === 'detalle' && (
+        <div className="tiendaPerfilOverlay tiendaResenaOverlay" onClick={() => {
+          setMostrarModalResena(false);
+          setResenaEditandoId(0);
+        }}>
+          <div className="contenidoModal tiendaAuthModal tiendaResenaModal" onClick={(e) => e.stopPropagation()}>
+            <div className="encabezadoModal">
+              <h3>{resenaEditandoId > 0 ? 'Editar comentario' : 'Agregar calificación'}</h3>
+              <button
+                type="button"
+                className="cerrarModal"
+                aria-label="Cerrar modal de comentario"
+                onClick={() => {
+                  setMostrarModalResena(false);
+                  setResenaEditandoId(0);
+                }}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="tiendaResenaForm">
+              <div className="tiendaResenaSelector">
+                {Array.from({ length: 5 }).map((_, idx) => {
+                  const valor = idx + 1;
+                  const activa = valor <= Number(resenaNueva.calificacion || 0);
+                  return (
+                    <button
+                      key={`set-hoja-modal-${valor}`}
+                      type="button"
+                      className={activa ? 'tiendaBotonHojita activa' : 'tiendaBotonHojita'}
+                      onClick={() => setResenaNueva((prev) => ({ ...prev, calificacion: valor }))}
+                      aria-label={`Calificar con ${valor} de 5`}
+                    >
+                      🍃
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea
+                rows={5}
+                placeholder="Cuéntanos cómo te pareció este producto"
+                value={resenaNueva.comentario}
+                onChange={(e) => setResenaNueva((prev) => ({ ...prev, comentario: e.target.value }))}
+              />
+              <div className="tiendaResenaModalAcciones">
+                <button
+                  type="button"
+                  className="boton"
+                  onClick={() => {
+                    setMostrarModalResena(false);
+                    setResenaEditandoId(0);
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="boton botonExito"
+                  onClick={resenaEditandoId > 0 ? actualizarResenaProducto : enviarResenaProducto}
+                  disabled={enviandoResena}
+                >
+                  {enviandoResena ? 'Enviando...' : (resenaEditandoId > 0 ? 'Guardar cambios' : 'Guardar comentario')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resenaDetalleModal && !esVistaTrastienda && vistaActiva === 'detalle' && (
+        <div className="tiendaPerfilOverlay tiendaResenaOverlay" onClick={() => setResenaDetalleModal(null)}>
+          <div className="contenidoModal tiendaAuthModal tiendaResenaModal tiendaResenaDetalleModal" onClick={(e) => e.stopPropagation()}>
+            <div className="encabezadoModal">
+              <h3>Comentario completo</h3>
+              <button
+                type="button"
+                className="cerrarModal"
+                aria-label="Cerrar comentario"
+                onClick={() => setResenaDetalleModal(null)}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="tiendaResenaDetalleBody">
+              <strong>{resenaDetalleModal?.nombre || 'Cliente'}</strong>
+              <div className="tiendaHojitasFila tiendaResenaHojitas">
+                {pintarHojitas(Number(resenaDetalleModal?.calificacion) || 0).map((activa, idx) => (
+                  <span key={`resena-modal-hoja-${idx}`} className={activa ? 'tiendaHojita activa' : 'tiendaHojita'}>🍃</span>
+                ))}
+              </div>
+              <p>{String(resenaDetalleModal?.comentario || 'Sin comentario.')}</p>
+              <div className="tiendaResenaModalAcciones">
+                <button
+                  type="button"
+                  className="boton"
+                  onClick={() => setResenaDetalleModal(null)}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       </div>

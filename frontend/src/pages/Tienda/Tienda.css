@@ -842,6 +842,7 @@
   gap: 7px;
   background: #fff;
   height: 100%;
+  min-width: 0;
 }
 
 .tiendaProductoCard h3 {
@@ -854,6 +855,7 @@
   margin-top: 2px;
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .tiendaCalificacionCard {
@@ -1057,16 +1059,23 @@
 }
 
 .tiendaAccionesCard {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  justify-content: center;
-  align-items: center;
+  justify-content: stretch;
+  align-items: stretch;
   margin-top: 0;
+  min-width: 0;
 }
 
 .tiendaAccionesCard .boton {
   margin-right: 0;
-  min-width: 102px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tiendaShareIconRow {
@@ -2441,6 +2450,12 @@
   }
 }
 
+@media (min-width: 769px) and (max-width: 1080px) {
+  .tiendaProductos {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .tiendaPerfilAcciones {
   display: flex;
   gap: 8px;
@@ -2478,6 +2493,15 @@
 .tiendaDetalleModalGrande .encabezadoModal h3 {
   margin: 0;
   font-size: clamp(22px, 2.3vw, 34px);
+}
+
+.tiendaDetalleHeaderFijo h3 {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5d7468;
 }
 
 .tiendaDetalleModalGrande .cerrarModal {
@@ -2541,32 +2565,71 @@
 
 .tiendaDetalleLayout {
   display: grid;
-  grid-template-columns: minmax(220px, 30%) 1fr;
+  grid-template-columns: minmax(180px, 24%) 1fr;
   gap: 12px;
   overflow: visible;
 }
 
 .tiendaDetalleColImagen {
-  border: 1px solid #dde6e0;
-  border-radius: 14px;
+  border: 1px solid #b7cbbb;
+  border-radius: 10px;
   overflow: hidden;
-  min-height: 170px;
-  max-height: 230px;
-  background: #fff;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  max-height: none;
+  background: linear-gradient(180deg, #fcfffd 0%, #f2f9f4 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  padding: 10px;
+  width: min(100%, 260px);
+  margin-inline: auto;
+}
+
+.tiendaDetalleMarcoEnredadera {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  height: 14px;
+  display: block;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.tiendaDetalleMarcoEnredaderaTop {
+  top: 8px;
+}
+
+.tiendaDetalleMarcoEnredaderaBottom {
+  bottom: 8px;
+  transform: rotate(180deg);
+}
+
+.tiendaDetalleMarcoEnredadera svg {
+  width: 100%;
+  height: 100%;
+  fill: rgba(116, 161, 121, 0.35);
+  stroke: #6a9a6f;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .tiendaDetalleColImagen img {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - 12px);
+  height: calc(100% - 28px);
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
+  object-position: center;
+  position: relative;
+  z-index: 1;
 }
 
 .tiendaDetalleDescripcionDebajo {
   border: 1px solid #dbe5df;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
   padding: 8px 10px;
 }
@@ -2622,7 +2685,7 @@
   color: #4a7c59;
   font-weight: 800;
   margin-top: 2px;
-  font-size: clamp(26px, 3vw, 40px);
+  font-size: clamp(22px, 2.4vw, 32px);
   line-height: 1.08;
 }
 
@@ -2647,11 +2710,14 @@
   font-weight: 800;
   color: #2f2f2f;
   margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.3;
 }
 
 .tiendaDetallePresentacionesGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(66px, 82px));
+  justify-content: flex-start;
   gap: 5px;
 }
 
@@ -2659,14 +2725,15 @@
   border: 1px solid #d6dfda;
   border-radius: 8px;
   background: #fafcfb;
-  padding: 5px;
+  padding: 2px 4px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 0;
   cursor: pointer;
   text-align: left;
   width: 100%;
+  min-height: 30px;
 }
 
 .tiendaPresentacionCard.activa {
@@ -2678,7 +2745,8 @@
 .tiendaPresentacionNombre {
   font-weight: 800;
   color: #3f5f4b;
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.2;
 }
 
 .tiendaPresentacionPrecio {
@@ -2698,7 +2766,8 @@
 .tiendaPresentacionEstado {
   color: #d48d34;
   font-weight: 700;
-  font-size: 10px;
+  font-size: 14px;
+  line-height: 1.2;
 }
 
 .tiendaPresentacionEstado.agotado {
@@ -2717,6 +2786,16 @@
   background: #fff;
 }
 
+.tiendaDetalleResumen p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.tiendaDetalleResumen p + p {
+  margin-top: 6px;
+}
+
 .tiendaVariantesDetalle {
   gap: 10px;
 }
@@ -2732,21 +2811,41 @@
   border-radius: 12px;
   background: #fbfdfc;
   padding: 8px;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .tiendaDetalleTabItem strong {
   display: block;
   margin-bottom: 6px;
+  font-size: 14px;
+  line-height: 1.3;
 }
 
 .tiendaDetalleTabItem p {
   margin: 0;
   color: #425049;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .tiendaDetalleTabItem ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.tiendaDetalleListaTexto {
+  margin: 0;
+  padding-left: 18px;
+  color: #425049;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.tiendaDetalleListaTexto li {
+  line-height: 1.45;
 }
 
 .tiendaDetalleResenas {
@@ -2778,6 +2877,11 @@
   gap: 8px;
 }
 
+.tiendaResenaAcciones {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .tiendaResenaSelector {
   display: flex;
   gap: 6px;
@@ -2803,6 +2907,7 @@
 
 .tiendaListaResenas {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2811,18 +2916,131 @@
   border-radius: 10px;
   background: #fff;
   padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 132px;
 }
 
 .tiendaResenaHead {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
   gap: 8px;
 }
 
+.tiendaResenaHead strong {
+  width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.22;
+}
+
+.tiendaResenaHojitas {
+  display: inline-flex;
+  gap: 4px;
+}
+
 .tiendaResenaCard p {
-  margin: 6px 0 0;
+  margin: 0;
   color: #394740;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+}
+
+.tiendaResenaToggleTexto {
+  border: none;
+  background: transparent;
+  color: #356748;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(53, 103, 72, 0.55);
+  text-underline-offset: 2px;
+  align-self: flex-start;
+}
+
+.tiendaResenaToggleTexto:hover {
+  color: #234a33;
+  text-decoration-color: rgba(35, 74, 51, 0.8);
+}
+
+.tiendaPerfilOverlay.tiendaResenaOverlay {
+  align-items: center;
+  justify-content: center;
+  padding-top: max(12px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+}
+
+.tiendaResenaModal {
+  width: min(560px, 94vw);
+  max-width: min(560px, 94vw);
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100dvh - 24px) !important;
+  align-self: center;
+  background: #4a7c59;
+  border: 1px solid #d6c6ad;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.tiendaResenaModal .encabezadoModal {
+  background: linear-gradient(180deg, #5d8f64 0%, #4a7c59 100%);
+  border-bottom: 1px solid #d8eadf;
+  border-radius: 16px 16px 0 0;
+  margin: 0;
+}
+
+.tiendaResenaModal .encabezadoModal h3 {
+  color: #f6fff8;
+  margin: 0;
+  font-size: 20px;
+}
+
+.tiendaResenaModal .tiendaResenaForm {
+  padding: 12px;
+  background: linear-gradient(180deg, #f7f1e8 0%, #efe5d6 100%);
+}
+
+.tiendaResenaModal textarea {
+  min-height: 120px;
+  resize: vertical;
+  border-radius: 14px;
+}
+
+.tiendaResenaModalAcciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tiendaResenaDetalleModal {
+  width: min(620px, 94vw);
+  max-width: min(620px, 94vw);
+}
+
+.tiendaResenaDetalleBody {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(180deg, #f7f1e8 0%, #efe5d6 100%);
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tiendaResenaDetalleBody p {
+  margin: 0;
+  line-height: 1.45;
+  color: #2f3f37;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tiendaEditorFicha {
@@ -3057,18 +3275,33 @@
   }
 
   .tiendaAccionesCard {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
-    justify-content: center;
+    justify-content: stretch;
+    align-items: stretch;
   }
 
   .tiendaAccionesCard .boton {
     margin-right: 0;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 6px 6px;
     font-size: 10px;
     border-radius: 9px;
     min-height: 30px;
   }
 
+
+@media (max-width: 420px) {
+  .tiendaAccionesCard {
+    grid-template-columns: 1fr;
+  }
+}
   .tiendaDetalleHeaderFijo {
     flex-direction: column;
     align-items: stretch;
@@ -3078,7 +3311,7 @@
 
   .tiendaDetalleHeaderFijo h3 {
     margin: 0;
-    font-size: 18px;
+    font-size: 12px;
     line-height: 1.2;
   }
 
@@ -3098,10 +3331,13 @@
   }
 
   .tiendaDetalleColImagen {
-    min-height: 145px;
-    max-height: 190px;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    max-height: none;
     border-radius: 10px;
     touch-action: pan-y;
+    padding: 9px;
+    width: min(100%, 230px);
   }
 
   .tiendaDetalleDescripcionDebajo {
@@ -3117,11 +3353,18 @@
   }
 
   .tiendaDetallePresentacionesGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(62px, 78px));
   }
 
-  .tiendaPresentacionPrecio {
-    font-size: 14px;
+  .tiendaPresentacionNombre,
+  .tiendaPresentacionEstado,
+  .tiendaDetallePresentacionesTitulo,
+  .tiendaDetalleResumen p,
+  .tiendaDetalleTabItem,
+  .tiendaDetalleTabItem strong,
+  .tiendaDetalleTabItem p,
+  .tiendaDetalleListaTexto {
+    font-size: 13px;
   }
 
   .tiendaDetalleTabItem {
@@ -3132,6 +3375,25 @@
   .tiendaDetalleResenas {
     padding: 8px;
     border-radius: 10px;
+  }
+
+  .tiendaResenaModal {
+    max-height: calc(100dvh - 12px) !important;
+  }
+
+  .tiendaResenaDetalleBody {
+    max-height: calc(100dvh - 128px);
+    overflow-y: auto;
+  }
+
+  .tiendaListaResenas {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .tiendaListaResenas {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3432,15 +3694,149 @@
   gap: 10px;
 }
 
+.tiendaAdminFila.tiendaAdminClienteCard {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto;
+  align-items: start;
+  justify-items: stretch;
+  border: 1px solid #d6e1db;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.tiendaAdminClienteHeader {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tiendaAdminClienteHeader strong {
+  font-size: 16px;
+  line-height: 1.1;
+  color: #1f352b;
+}
+
+.tiendaAdminClienteHeader .tiendaAdminSubtexto {
+  font-size: 11px;
+  color: #506a5d;
+}
+
+.tiendaAdminClienteHeader .tiendaAdminSubtexto {
+  overflow-wrap: anywhere;
+}
+
+.tiendaAdminClienteCuerpo {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 6px;
+}
+
+.tiendaAdminClienteDatosGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tiendaAdminClienteDato {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #e8efeb;
+  border-radius: 7px;
+  background: #fafdfb;
+  padding: 5px 6px;
+  min-width: 0;
+}
+
+.tiendaAdminClienteDato span {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6a8074;
+}
+
+.tiendaAdminClienteDato strong {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #2e4338;
+  overflow-wrap: anywhere;
+}
+
+.tiendaAdminClienteDatoAncho {
+  grid-column: 1 / -1;
+}
+
+.tiendaAdminClienteAccionCelda {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 100%;
+}
+
+.tiendaAdminClienteAccionCelda .tiendaSwitchCard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.tiendaAdminClienteAccionCelda .tiendaSwitchSlider {
+  width: 30px;
+  height: 16px;
+}
+
+.tiendaAdminClienteAccionCelda .tiendaSwitchSlider::after {
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+}
+
+.tiendaAdminClienteAccionCelda .tiendaSwitchToggle input[type='checkbox']:checked + .tiendaSwitchSlider::after {
+  transform: translateX(14px);
+}
+
+.tiendaAdminClienteAccionCelda .boton {
+  font-size: 11px;
+  padding: 4px 10px;
+  min-height: 28px;
+  margin-top: auto;
+}
+
+.tiendaAdminClienteActualizando {
+  margin-top: -2px;
+}
+
 .clientesGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 @media (max-width: 1100px) {
   .clientesGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminClienteHeader strong {
+    font-size: 14px;
+  }
+
+  .tiendaAdminClienteCuerpo {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAdminClienteDatosGrid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -5050,8 +5446,9 @@
   }
 
   .tiendaDetalleColImagen {
-    min-height: 180px;
-    max-height: 220px;
+    aspect-ratio: 1 / 1;
+    min-height: 0;
+    max-height: none;
   }
 
   .tiendaDetalleModalGrande {
@@ -5093,6 +5490,24 @@
     overflow-y: visible;
     overscroll-behavior-y: auto;
     padding-bottom: 78px;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil {
+    min-height: calc(100dvh - 96px);
+    max-height: calc(100dvh - 96px);
+    height: calc(100dvh - 96px) !important;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCatalogo,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminPanel,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminForm {
+    touch-action: pan-y;
+    overscroll-behavior-y: auto;
   }
 
   .tiendaGridAdminFull .tiendaCatalogo {

@@ -2321,7 +2321,12 @@ const MAPA_DATABASES = {
 // Exportar respaldo completo de todas las tablas de todas las DBs.
 app.get('/api/exportar/todo', async (req, res) => {
   try {
-    const incluirUploads = true;
+    const incluirUploadsRaw = String(
+      req.query?.include_uploads
+      ?? req.query?.incluir_uploads
+      ?? ''
+    ).trim().toLowerCase();
+    const incluirUploads = incluirUploadsRaw === '1' || incluirUploadsRaw === 'true' || incluirUploadsRaw === 'si';
     const salida = {
       tipo: 'todo',
       version: 1,
@@ -2380,7 +2385,7 @@ app.post('/api/importar/todo', async (req, res) => {
   }
 
   const resultado = {};
-  const incluirUploads = true;
+  const incluirUploads = Boolean(payload?.incluye_uploads_tienda) || toArrayMaybe(payload?.archivos_uploads_tienda).length > 0;
   const archivosUploadsEntrada = toArrayMaybe(payload?.archivos_uploads_tienda);
 
   try {

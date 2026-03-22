@@ -880,6 +880,7 @@ export default function Tienda({
   const [credenciales, setCredenciales] = useState({ nombre: '', email: '', password: '', confirmarPassword: '', telefono: '', recibe_promociones: false });
   const [clienteToken, setClienteToken] = useState(() => localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '');
   const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
+  const excluirMetricasVisitas = Boolean(tokenInterno) || esVistaTrastienda || vistaActiva === 'trastienda';
   const [cliente, setCliente] = useState(null);
   const [perfil, setPerfil] = useState({
     nombre: '',
@@ -1366,6 +1367,18 @@ export default function Tienda({
 
     const enviarHeartbeatVisita = async () => {
       try {
+        if (excluirMetricasVisitas) {
+          const estado = await fetchJson('/visitas/estado');
+          if (!cancelado) {
+            setVisitasActivas({
+              totalActivos: Number(estado?.totalActivos) || 0,
+              ubicaciones: Array.isArray(estado?.ubicaciones) ? estado.ubicaciones : [],
+              listo: true
+            });
+          }
+          return;
+        }
+
         const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
         const idioma = String(window?.navigator?.language || '').trim();
         const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/tienda')).trim();
@@ -1382,7 +1395,8 @@ export default function Tienda({
             pais: String(geo?.pais || '').trim(),
             region: String(geo?.region || '').trim(),
             ciudad: String(geo?.ciudad || '').trim(),
-            visible: document.visibilityState === 'visible'
+            visible: document.visibilityState === 'visible',
+            esTrastienda: excluirMetricasVisitas
           })
         });
 
@@ -1415,7 +1429,7 @@ export default function Tienda({
       window.clearInterval(intervalo);
       document.removeEventListener('visibilitychange', alVolverVisible);
     };
-  }, [esVistaTrastienda, cliente?.id]);
+  }, [esVistaTrastienda, cliente?.id, excluirMetricasVisitas]);
 
   useEffect(() => {
     if (!esVistaTrastienda || !tokenInterno || adminVista !== 'metricas') return undefined;
@@ -1449,6 +1463,7 @@ export default function Tienda({
   }, [esVistaTrastienda, vistaActiva, seccionActiva]);
 
   useEffect(() => {
+    if (excluirMetricasVisitas) return undefined;
     const contenedor = contenedorScrollRef.current;
     if (!contenedor) return undefined;
 
@@ -1478,7 +1493,7 @@ export default function Tienda({
 
     contenedor.addEventListener('click', onClickCaptura, true);
     return () => contenedor.removeEventListener('click', onClickCaptura, true);
-  }, [vistaActiva, adminVista, seccionActiva]);
+  }, [vistaActiva, adminVista, seccionActiva, excluirMetricasVisitas]);
 
   function sincronizarTabsNavegacionAdminDesdeConfig(config = configTiendaAdmin) {
     const lista = obtenerTabsNavegacionConfig(config?.menu_tabs_personalizadas);
@@ -4356,6 +4371,7 @@ export default function Tienda({
   }
 
   function registrarEventoComportamiento(accion, producto = '') {
+    if (excluirMetricasVisitas) return;
     const sessionId = obtenerSesionVisitaId();
     if (!sessionId) return;
 
@@ -4368,7 +4384,8 @@ export default function Tienda({
       producto: String(producto || '').trim().slice(0, 140),
       seccion: String(seccionActiva || '').trim().slice(0, 64),
       ruta: String(window?.location?.hash || '#/tienda').trim().slice(0, 120),
-      zonaHoraria: String(zonaHoraria || '').trim().slice(0, 64)
+      zonaHoraria: String(zonaHoraria || '').trim().slice(0, 64),
+      esTrastienda: excluirMetricasVisitas
     };
     if (!payload.accion) return;
 

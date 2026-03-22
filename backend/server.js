@@ -949,6 +949,21 @@ function esUserAgentBot(req) {
   return /(bot|spider|crawler|lighthouse|headless|preview|facebookexternalhit|whatsapp|telegrambot|slackbot|discordbot)/i.test(ua);
 }
 
+function leerBanderaBooleana(valor) {
+  if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor === 1;
+  const texto = String(valor || '').trim().toLowerCase();
+  return texto === '1' || texto === 'true' || texto === 'si' || texto === 'yes';
+}
+
+function esActividadTrastienda(body = {}) {
+  if (leerBanderaBooleana(body?.esTrastienda) || leerBanderaBooleana(body?.es_trastienda)) {
+    return true;
+  }
+  const ruta = String(body?.ruta || '').trim().toLowerCase();
+  return ruta.includes('trastienda');
+}
+
 function claveDiaLocal(fecha = new Date()) {
   const yyyy = fecha.getFullYear();
   const mm = String(fecha.getMonth() + 1).padStart(2, '0');
@@ -1249,6 +1264,24 @@ app.post(['/api/visitas/ping', '/visitas/ping'], async (req, res) => {
   const sessionId = limpiarTextoCorto(body.sessionId || '', 80);
   const idCliente = Number(body.idCliente || body.id_cliente || 0);
 
+  if (esActividadTrastienda(body)) {
+    if (sessionId) visitantesActivos.delete(sessionId);
+    limpiarVisitantesInactivos(ahora);
+    limpiarEstadisticasAntiguas(ahoraDate);
+    const statsDiaBase = obtenerStatsDia(diaClave);
+    return res.json({
+      ok: true,
+      ignorado: true,
+      totalActivos: contarActivosReales(),
+      visitasDia: statsDiaBase.sesionesUnicas.size,
+      eventosDia: statsDiaBase.totalEventos,
+      horaPico: obtenerHoraPico(statsDiaBase),
+      ubicaciones: resumenUbicacionesActivas(),
+      actualizadoEn: new Date(ahora).toISOString(),
+      timeoutSegundos: Math.round(VISITAS_TIMEOUT_MS / 1000)
+    });
+  }
+
   if (idCliente > 0) {
     const accionesActivas = await clienteAccionesAppActivas(idCliente);
     if (!accionesActivas) {
@@ -1336,6 +1369,10 @@ app.post(['/api/visitas/evento', '/visitas/evento'], async (req, res) => {
   const producto = limpiarTextoCorto(body.producto || '', 140);
   const seccion = limpiarTextoCorto(body.seccion || '', 64);
   const ruta = limpiarTextoCorto(body.ruta || '', 120);
+
+  if (esActividadTrastienda(body)) {
+    return res.json({ ok: true, ignorado: true });
+  }
 
   if (!accion || esUserAgentBot(req)) {
     return res.json({ ok: true, ignorado: true });

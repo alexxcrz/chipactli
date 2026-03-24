@@ -261,8 +261,16 @@ export function inicializarBds(bdInventario, bdRecetas, bdProduccion, bdVentas) 
   bdRecetas.serialize(() => {
     bdRecetas.run(`CREATE TABLE IF NOT EXISTS categorias (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT UNIQUE
+      nombre TEXT UNIQUE,
+      image_url TEXT
     )`);
+
+    bdRecetas.all('PRAGMA table_info(categorias)', (err, columnas) => {
+      if (err || !Array.isArray(columnas)) return;
+      if (!columnas.some((col) => col.name === 'image_url')) {
+        bdRecetas.run('ALTER TABLE categorias ADD COLUMN image_url TEXT');
+      }
+    });
 
     bdRecetas.run(`CREATE TABLE IF NOT EXISTS recetas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

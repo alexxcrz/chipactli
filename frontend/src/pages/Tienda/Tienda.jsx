@@ -27,6 +27,7 @@ const CLAVE_NOTIF_PEDIDOS_ULTIMO_PROMPT = 'tienda_notif_pedidos_ultimo_prompt';
 const CLAVE_TIENDA_VISTA_ACTIVA = 'chipactli:tienda:vistaActiva';
 const CLAVE_TIENDA_SECCION_ACTIVA = 'chipactli:tienda:seccionActiva';
 const CLAVE_TIENDA_CATEGORIA_ACTIVA = 'chipactli:tienda:categoriaActiva';
+const CLAVE_TIENDA_FAVORITOS_PREFIJO = 'chipactli:vitrina:favoritos';
 const CLAVE_TRASTIENDA_VISTA_ADMIN = 'chipactli:trastienda:adminVista';
 const CLAVE_TRASTIENDA_CONFIG_TAB = 'chipactli:trastienda:configAdminTab';
 const CLAVE_TRASTIENDA_DESCUENTOS_TAB = 'chipactli:trastienda:descuentoTabInterna';
@@ -67,14 +68,14 @@ const METODOS_PAGO_BASE = [
 ];
 const METODOS_PAGO_BASE_SERIALIZADO = JSON.stringify(METODOS_PAGO_BASE);
 const CONFIG_DEFAULT = {
-  promo_texto: '💖 ¡Últimas horas! Llévate productos favoritos con promoción especial.',
+  promo_texto: '',
   footer_marca_titulo: 'CHIPACTLI',
   footer_marca_texto: 'Formulamos productos artesanales para el cuidado personal de forma segura y consciente.',
-  atencion_horario_lunes_viernes: '09:00 a.m. - 06:00 p.m.',
-  atencion_horario_sabado: '09:00 a.m. - 02:00 p.m.',
-  atencion_horario_lunes_sabado: '09:00 a.m. - 09:00 p.m.',
-  atencion_horario_domingo: '08:00 a.m. - 12:00 p.m.',
-  atencion_correo: 'atc@chipactli.mx',
+  atencion_horario_lunes_viernes: '',
+  atencion_horario_sabado: '',
+  atencion_horario_lunes_sabado: '',
+  atencion_horario_domingo: '',
+  atencion_correo: '',
   transferencia_clabe: '',
   whatsapp_numero: '',
   social_facebook_url: '',
@@ -123,7 +124,7 @@ const CONFIG_DEFAULT = {
   info_link_5_texto: 'Conoce cómo recopilamos, usamos y protegemos tus datos personales en CHIPACTLI.',
   info_link_5_activo: '1',
   correo_bienvenida_asunto: 'Bienvenido a CHIPACTLI, {{nombre_cliente}}',
-  correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra tienda.\n\nIr a la tienda: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
+  correo_bienvenida_cuerpo: 'Hola {{nombre_cliente}},\n\nTu cuenta fue creada con éxito.\nYa puedes iniciar sesión y comprar en nuestra vitrina.\n\nIr a la vitrina: {{url_tienda}}\n\nGracias por unirte a CHIPACTLI.',
   correo_confirmacion_asunto: 'Confirmacion de pedido {{folio}}',
   correo_confirmacion_cuerpo: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}} correctamente.\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\n{{clabe_transferencia_linea}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nImportante:\nRealiza tu transferencia usando la CLABE indicada y guarda tu comprobante.\nEn cuanto se confirme el pago, te notificaremos el siguiente avance de tu pedido.\n\nGracias por tu compra en CHIPACTLI.',
   correo_confirmacion_cuerpo_contraentrega: 'Hola {{nombre_cliente}},\n\nRecibimos tu pedido {{folio}}.\n{{estado_preparacion_linea}}\n\nResumen:\nTotal: {{total}}\nMetodo de pago: {{metodo_pago}}\nPunto de entrega: {{punto_entrega}}\n{{direccion_entrega}}\n\nDetalle del pedido:\n{{detalle_items}}\n\nGracias por tu compra en CHIPACTLI.',
@@ -132,7 +133,7 @@ const CONFIG_DEFAULT = {
   correo_diagnostico_asunto: 'Diagnostico correo CHIPACTLI{{etiqueta_sufijo}}',
   correo_diagnostico_cuerpo: 'Hola {{nombre_admin}},\n\nEste es un correo de diagnostico del modulo de pedidos de CHIPACTLI.\nFecha: {{fecha}}\nSMTP host: {{smtp_host}}\nUsuario SMTP: {{smtp_user}}\n\nSi recibiste este correo, el envio SMTP esta funcionando.',
   correo_campana_asunto: 'Novedades CHIPACTLI: {{titulo_campana}}',
-  correo_campana_cuerpo: 'Hola {{nombre_cliente}},\n\n{{contenido_campana}}\n\nVisita nuestra tienda: {{url_tienda}}\n\nGracias por seguir a CHIPACTLI.',
+  correo_campana_cuerpo: 'Hola {{nombre_cliente}},\n\n{{contenido_campana}}\n\nVisita nuestra vitrina: {{url_tienda}}\n\nGracias por seguir a CHIPACTLI.',
   correo_campana_titulo: 'Novedades CHIPACTLI',
   correo_campana_contenido: '',
   correo_campana_imagen_url: '',
@@ -253,35 +254,64 @@ function guardarValorPersistido(clave, valor) {
   }
 }
 
-function leerSlugProductoDesdeHash() {
-  if (typeof window === 'undefined') return '';
+function leerRutaPublicaTiendaDesdeUrl() {
+  if (typeof window === 'undefined') return null;
+  const pathname = String(window.location.pathname || '/').trim().toLowerCase();
+
+  if (pathname === '/vitrina' || pathname.startsWith('/vitrina/') || pathname === '/tienda' || pathname.startsWith('/tienda/')) {
+    const params = new URLSearchParams(String(window.location.search || ''));
+    return {
+      categoria: String(params.get('categoria') || 'todas').trim().toLowerCase() || 'todas',
+      producto: String(params.get('producto') || '').trim(),
+      info: String(params.get('info') || '').trim().toLowerCase()
+    };
+  }
+
   const hashRaw = String(window.location.hash || '').trim();
-  if (!hashRaw.startsWith('#/tienda')) return '';
+  if (hashRaw.startsWith('#/vitrina')) {
+    const idxQuery = hashRaw.indexOf('?');
+    const params = new URLSearchParams(idxQuery >= 0 ? hashRaw.slice(idxQuery + 1) : '');
+    return {
+      categoria: String(params.get('categoria') || 'todas').trim().toLowerCase() || 'todas',
+      producto: String(params.get('producto') || '').trim(),
+      info: String(params.get('info') || '').trim().toLowerCase()
+    };
+  }
+  if (!hashRaw.startsWith('#/tienda')) return null;
   const idxQuery = hashRaw.indexOf('?');
-  if (idxQuery < 0) return '';
-  const params = new URLSearchParams(hashRaw.slice(idxQuery + 1));
-  return String(params.get('producto') || '').trim();
+  const params = new URLSearchParams(idxQuery >= 0 ? hashRaw.slice(idxQuery + 1) : '');
+  return {
+    categoria: String(params.get('categoria') || 'todas').trim().toLowerCase() || 'todas',
+    producto: String(params.get('producto') || '').trim(),
+    info: String(params.get('info') || '').trim().toLowerCase()
+  };
 }
 
-function actualizarHashProductoDetalle(slugProducto = '') {
+function construirRutaPublicaTienda(ruta = {}) {
+  const params = new URLSearchParams();
+  const categoria = String(ruta?.categoria || 'todas').trim().toLowerCase() || 'todas';
+  const producto = String(ruta?.producto || '').trim();
+  const info = String(ruta?.info || '').trim().toLowerCase();
+
+  if (categoria && categoria !== 'todas') params.set('categoria', categoria);
+  if (producto) params.set('producto', producto);
+  if (!producto && info) params.set('info', info);
+
+  return `/vitrina${params.toString() ? `?${params.toString()}` : ''}`;
+}
+
+function actualizarRutaPublicaTiendaHash(ruta = {}, opciones = {}) {
   if (typeof window === 'undefined') return;
-  const hashRaw = String(window.location.hash || '#/tienda').trim() || '#/tienda';
-  if (!hashRaw.startsWith('#/tienda')) return;
+  const siguiente = construirRutaPublicaTienda(ruta);
+  const actual = `${window.location.pathname}${window.location.search}`;
+  if (siguiente === actual) return;
 
-  const idxQuery = hashRaw.indexOf('?');
-  const rutaBase = idxQuery >= 0 ? hashRaw.slice(0, idxQuery) : hashRaw;
-  const params = new URLSearchParams(idxQuery >= 0 ? hashRaw.slice(idxQuery + 1) : '');
+  if (opciones?.replace) {
+    window.history.replaceState({}, document.title, siguiente);
+    return;
+  }
 
-  const slug = String(slugProducto || '').trim();
-  if (slug) params.set('producto', slug);
-  else params.delete('producto');
-
-  const hashSiguiente = `${rutaBase}${params.toString() ? `?${params.toString()}` : ''}`;
-  if (hashSiguiente === hashRaw) return;
-
-  const url = new URL(window.location.href);
-  const siguiente = `${url.pathname}${url.search}${hashSiguiente}`;
-  window.history.replaceState({}, document.title, siguiente);
+  window.history.pushState({}, document.title, siguiente);
 }
 
 function construirLinkCompartirProducto(producto = null) {
@@ -292,8 +322,7 @@ function construirLinkCompartirProducto(producto = null) {
     : (slugPestanaMenu(slugRaw) || slugRaw);
   if (!slug) return '';
 
-  const base = `${window.location.origin}${window.location.pathname}${window.location.search}`;
-  return `${base}#/tienda?producto=${encodeURIComponent(slug)}`;
+  return `${window.location.origin}${construirRutaPublicaTienda({ producto: slug })}`;
 }
 
 function obtenerSesionVisitaId() {
@@ -416,6 +445,42 @@ function slugPestanaMenu(valor) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .trim();
+}
+
+function obtenerIdentificadorFavoritoProducto(producto = null) {
+  const slug = String(producto?.slug || '').trim();
+  if (slug) return `slug:${slug.toLowerCase()}`;
+
+  const nombre = slugPestanaMenu(String(producto?.nombre_receta || producto?.nombre || '').trim());
+  if (nombre) return `nombre:${nombre}`;
+
+  return '';
+}
+
+function productoPaqueteDisponibleTienda(producto = null) {
+  const tipo = String(producto?.tipo_producto || '').trim().toLowerCase();
+  if (tipo !== 'paquete') return false;
+  const visible = producto?.visible_publico == null ? true : Boolean(producto?.visible_publico);
+  const detalles = Array.isArray(producto?.paquete_detalle) ? producto.paquete_detalle : [];
+  return visible && detalles.length > 0;
+}
+
+function obtenerClaveFavoritosVitrina(idCliente = 0) {
+  const idNormalizado = Number(idCliente) || 0;
+  return `${CLAVE_TIENDA_FAVORITOS_PREFIJO}:${idNormalizado || 'invitado'}`;
+}
+
+function cargarFavoritosVitrina(idCliente = 0) {
+  try {
+    const raw = localStorage.getItem(obtenerClaveFavoritosVitrina(idCliente));
+    const lista = JSON.parse(String(raw || '[]'));
+    if (!Array.isArray(lista)) return [];
+    return lista
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function obtenerTabsNavegacionConfig(valor) {
@@ -653,7 +718,26 @@ async function removerFondoBlancoPng(url = '', umbral = 245) {
 }
 
 function apiUrl(path) {
-  return `${API_TIENDA}${path}`;
+  const ruta = String(path || '').trim();
+  return `${API_TIENDA}${ruta}`;
+}
+
+function normalizarUrlMediaTienda(valor) {
+  const txt = String(valor || '').trim();
+  if (!txt) return '';
+  if (/^https?:\/\//i.test(txt)) return txt;
+  if (txt.startsWith('/uploads/')) return apiUrl(txt);
+  if (txt.startsWith('uploads/')) return apiUrl(`/${txt}`);
+  return txt;
+}
+
+function normalizarClaveCategoriaTienda(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 async function fetchJson(path, options = {}) {
@@ -850,12 +934,13 @@ function extraerIdClienteToken(token) {
   }
 }
 
-export default function Tienda({
+function Tienda({
   modo = 'tienda',
   mostrarLogoAccesoSistema = false,
   onClickLogoAccesoSistema = null,
   mostrarAccesoRapidoPwa = false,
-  onActivarAccesoRapidoPwa = null
+  onActivarAccesoRapidoPwa = null,
+  integradaEnPanelInterno = false
 }) {
   const esVistaTrastienda = modo === 'trastienda';
   const [productos, setProductos] = useState([]);
@@ -864,6 +949,21 @@ export default function Tienda({
     : leerValorPersistidoPermitido(CLAVE_TIENDA_VISTA_ACTIVA, ['tienda', 'detalle', 'info'], 'tienda')));
   const [seccionActiva, setSeccionActiva] = useState(() => leerValorPersistido(CLAVE_TIENDA_SECCION_ACTIVA, 'todos'));
   const [categoriaActiva, setCategoriaActiva] = useState(() => leerValorPersistido(CLAVE_TIENDA_CATEGORIA_ACTIVA, 'todas'));
+  const [categoriasAdmin, setCategoriasAdmin] = useState([]);
+  const [cargandoCategoriasAdmin, setCargandoCategoriasAdmin] = useState(false);
+  const [subiendoImagenCategoriaId, setSubiendoImagenCategoriaId] = useState(0);
+  const [categoriaEntrandoKey, setCategoriaEntrandoKey] = useState('');
+  const [categoriaFlashKey, setCategoriaFlashKey] = useState('');
+  const [animandoEntradaCategoria, setAnimandoEntradaCategoria] = useState(false);
+  const [transicionCategoriaVentana, setTransicionCategoriaVentana] = useState({
+    activa: false,
+    top: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    imageUrl: '',
+    label: ''
+  });
   const [filtro, setFiltro] = useState('');
   const [cargando, setCargando] = useState(true);
   const [seleccionado, setSeleccionado] = useState(null);
@@ -874,6 +974,7 @@ export default function Tienda({
   const [carrito, setCarrito] = useState(carritoInicial.items || []);
   const [carritoCreadoEn, setCarritoCreadoEn] = useState(carritoInicial.creadoEn || Date.now());
   const [mostrarCarrito, setMostrarCarrito] = useState(false);
+  const [mostrarMenuMovil, setMostrarMenuMovil] = useState(false);
   const [pasoCheckout, setPasoCheckout] = useState(1);
   const [creandoOrden, setCreandoOrden] = useState(false);
   const [procesandoPagoMp, setProcesandoPagoMp] = useState(false);
@@ -900,6 +1001,13 @@ export default function Tienda({
   const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
   const excluirMetricasVisitas = Boolean(tokenInterno) || esVistaTrastienda || vistaActiva === 'trastienda';
   const [cliente, setCliente] = useState(null);
+  const idClienteFavoritos = Number(cliente?.id) || extraerIdClienteToken(clienteToken) || 0;
+  const claveFavoritosVitrina = useMemo(
+    () => obtenerClaveFavoritosVitrina(idClienteFavoritos),
+    [idClienteFavoritos]
+  );
+  const [favoritosVitrina, setFavoritosVitrina] = useState(() => cargarFavoritosVitrina(extraerIdClienteToken(localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '')));
+  const [favoritoBurst, setFavoritoBurst] = useState({ id: '', nonce: 0 });
   const [perfil, setPerfil] = useState({
     nombre: '',
     apellido_paterno: '',
@@ -1047,8 +1155,12 @@ export default function Tienda({
   const ubicacionVisitanteRef = useRef(null);
   const cargandoUbicacionVisitanteRef = useRef(false);
   const inputLogoPagoArchivoRef = useRef(null);
+  const inputImagenCategoriaArchivoRef = useRef(null);
   const inputImagenCampanaArchivoRef = useRef(null);
+  const categoriaImagenUploadTargetRef = useRef(0);
   const metodoPagoUploadTargetRef = useRef('');
+  const animacionCategoriaTimerRef = useRef(null);
+  const transicionCategoriaTimerRef = useRef(null);
   const contenedorScrollRef = useRef(null);
   const detalleTouchStartRef = useRef({ x: 0, y: 0 });
   const detalleTouchTrackingRef = useRef(false);
@@ -1067,6 +1179,10 @@ export default function Tienda({
   const carritoCreadoEnActualRef = useRef(carritoCreadoEn);
   const clienteTokenActualRef = useRef(clienteToken);
   const cuponesAplicadosRef = useRef(cuponesAplicados);
+  const categoriaActivaRef = useRef(categoriaActiva);
+  const vistaActivaRef = useRef(vistaActiva);
+  const seleccionadoRef = useRef(seleccionado);
+  const infoSeleccionadaRef = useRef(infoSeleccionada);
 
   const usuarioInterno = useMemo(() => {
     try {
@@ -1139,6 +1255,22 @@ export default function Tienda({
     cuponesAplicadosRef.current = cuponesAplicados;
   }, [cuponesAplicados]);
 
+  useEffect(() => {
+    categoriaActivaRef.current = categoriaActiva;
+  }, [categoriaActiva]);
+
+  useEffect(() => {
+    vistaActivaRef.current = vistaActiva;
+  }, [vistaActiva]);
+
+  useEffect(() => {
+    seleccionadoRef.current = seleccionado;
+  }, [seleccionado]);
+
+  useEffect(() => {
+    infoSeleccionadaRef.current = infoSeleccionada;
+  }, [infoSeleccionada]);
+
   const totalNoLeidasCliente = useMemo(() => (
     (notificacionesClientePedidos || []).filter((item) => !item?.leida).length
   ), [notificacionesClientePedidos]);
@@ -1189,6 +1321,71 @@ export default function Tienda({
     () => new Set(obtenerTabsBaseEliminadasConfig(configTienda?.menu_tabs_base_eliminadas)),
     [configTienda?.menu_tabs_base_eliminadas]
   );
+
+  useEffect(() => {
+    const favoritosGuardados = cargarFavoritosVitrina(idClienteFavoritos);
+    setFavoritosVitrina(favoritosGuardados);
+  }, [idClienteFavoritos, claveFavoritosVitrina]);
+
+  useEffect(() => {
+    if (!idClienteFavoritos) return;
+    const favoritosInvitado = cargarFavoritosVitrina(0);
+    if (!favoritosInvitado.length) return;
+
+    setFavoritosVitrina((prev) => {
+      const unidos = Array.from(new Set([...(Array.isArray(prev) ? prev : []), ...favoritosInvitado]));
+      try {
+        localStorage.setItem(claveFavoritosVitrina, JSON.stringify(unidos));
+        localStorage.removeItem(obtenerClaveFavoritosVitrina(0));
+      } catch {
+      }
+      return unidos;
+    });
+  }, [idClienteFavoritos, claveFavoritosVitrina]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(claveFavoritosVitrina, JSON.stringify(Array.isArray(favoritosVitrina) ? favoritosVitrina : []));
+    } catch {
+    }
+  }, [claveFavoritosVitrina, favoritosVitrina]);
+
+  const favoritosVitrinaSet = useMemo(
+    () => new Set((Array.isArray(favoritosVitrina) ? favoritosVitrina : []).map((item) => String(item || '').trim()).filter(Boolean)),
+    [favoritosVitrina]
+  );
+
+  function productoEsFavoritoCliente(producto = null) {
+    const identificador = obtenerIdentificadorFavoritoProducto(producto);
+    if (!identificador) return false;
+    return favoritosVitrinaSet.has(identificador);
+  }
+
+  function toggleFavoritoProducto(producto = null) {
+    const identificador = obtenerIdentificadorFavoritoProducto(producto);
+    if (!identificador) return;
+
+    const nonce = Date.now();
+    setFavoritoBurst({ id: identificador, nonce });
+    setTimeout(() => {
+      setFavoritoBurst((actual) => {
+        if (actual.id !== identificador || actual.nonce !== nonce) {
+          return actual;
+        }
+        return { id: '', nonce: 0 };
+      });
+    }, 720);
+
+    setFavoritosVitrina((prev) => {
+      const actual = new Set((Array.isArray(prev) ? prev : []).map((item) => String(item || '').trim()).filter(Boolean));
+      if (actual.has(identificador)) {
+        actual.delete(identificador);
+      } else {
+        actual.add(identificador);
+      }
+      return Array.from(actual);
+    });
+  }
 
   const metodosPagoFooter = useMemo(
     () => obtenerMetodosPagoConfig(configTienda?.footer_pagos_metodos, configTienda),
@@ -1277,7 +1474,7 @@ export default function Tienda({
     const mapa = new Map();
     tabsNavegacionCliente.forEach((tab) => {
       if (!tab?.activo) return;
-      mapa.set(`custom:${tab.id}`, String(tab?.categoria || '').trim().toLowerCase());
+      mapa.set(`custom:${tab.id}`, normalizarClaveCategoriaTienda(tab?.categoria));
     });
     return mapa;
   }, [tabsNavegacionCliente]);
@@ -1399,7 +1596,7 @@ export default function Tienda({
 
         const zonaHoraria = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone || '';
         const idioma = String(window?.navigator?.language || '').trim();
-        const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/tienda')).trim();
+        const ruta = String(window?.location?.hash || (esVistaTrastienda ? '#/trastienda' : '#/vitrina')).trim();
         const geo = await resolverUbicacionVisitante();
         const data = await fetchJson('/visitas/ping', {
           method: 'POST',
@@ -1761,6 +1958,67 @@ export default function Tienda({
     }
   }
 
+  function abrirSelectorImagenCategoria(idCategoria) {
+    categoriaImagenUploadTargetRef.current = Number(idCategoria) || 0;
+    inputImagenCategoriaArchivoRef.current?.click();
+  }
+
+  async function guardarImagenCategoriaAdmin(idCategoria, imageUrl) {
+    const id = Number(idCategoria) || 0;
+    if (!id || !tokenInterno) return;
+    const categoria = (Array.isArray(categoriasAdmin) ? categoriasAdmin : []).find((item) => Number(item?.id) === id);
+    const nombre = String(categoria?.nombre || '').trim();
+    if (!nombre) throw new Error('Categoría inválida para actualizar imagen.');
+
+    await fetchAdmin(`/categorias/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre, image_url: String(imageUrl || '').trim() })
+    });
+
+    await cargarCategoriasAdmin({ silencioso: true });
+    await cargarProductos({ silencioso: true });
+  }
+
+  async function subirImagenCategoriaDesdeComputadora(event) {
+    const archivo = event?.target?.files?.[0] || null;
+    const idCategoria = Number(categoriaImagenUploadTargetRef.current) || 0;
+    if (!archivo) return;
+
+    if (!idCategoria) {
+      mostrarNotificacion('Selecciona una categoría para subir imagen.', 'error');
+      if (event?.target) event.target.value = '';
+      return;
+    }
+
+    try {
+      setSubiendoImagenCategoriaId(idCategoria);
+      const url = await subirImagenTiendaArchivo(archivo);
+      await guardarImagenCategoriaAdmin(idCategoria, url);
+      mostrarNotificacion('Imagen de categoría guardada.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo subir la imagen de categoría.', 'error');
+    } finally {
+      setSubiendoImagenCategoriaId(0);
+      categoriaImagenUploadTargetRef.current = 0;
+      if (event?.target) event.target.value = '';
+    }
+  }
+
+  async function quitarImagenCategoriaAdmin(idCategoria) {
+    const id = Number(idCategoria) || 0;
+    if (!id) return;
+    try {
+      setSubiendoImagenCategoriaId(id);
+      await guardarImagenCategoriaAdmin(id, '');
+      mostrarNotificacion('Imagen de categoría eliminada.', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo quitar la imagen de categoría.', 'error');
+    } finally {
+      setSubiendoImagenCategoriaId(0);
+    }
+  }
+
   async function subirImagenCampanaDesdeArchivo(archivo) {
     const url = await subirMediaCampanaArchivo(archivo);
     setConfigTiendaAdmin((prev) => ({ ...prev, correo_campana_imagen_url: url }));
@@ -1955,36 +2213,6 @@ export default function Tienda({
       setVistaActiva('tienda');
     }
   }, [esVistaTrastienda, vistaActiva, infoSeleccionada, seleccionado]);
-
-  useEffect(() => {
-    if (esVistaTrastienda) return;
-    const slugDetalle = vistaActiva === 'detalle'
-      ? String(seleccionado?.slug || '').trim()
-      : '';
-    actualizarHashProductoDetalle(slugDetalle);
-  }, [esVistaTrastienda, vistaActiva, seleccionado]);
-
-  useEffect(() => {
-    if (esVistaTrastienda) return undefined;
-
-    const abrirDesdeHash = () => {
-      const slugObjetivo = leerSlugProductoDesdeHash();
-      if (!slugObjetivo) return;
-
-      const objetivo = (productos || []).find((item) => (
-        String(item?.slug || '').trim().toLowerCase() === slugObjetivo.toLowerCase()
-      ));
-      if (!objetivo) return;
-
-      const slugActual = String(seleccionado?.slug || '').trim().toLowerCase();
-      if (vistaActiva === 'detalle' && slugActual === slugObjetivo.toLowerCase()) return;
-      abrirDetalle(objetivo);
-    };
-
-    abrirDesdeHash();
-    window.addEventListener('hashchange', abrirDesdeHash);
-    return () => window.removeEventListener('hashchange', abrirDesdeHash);
-  }, [esVistaTrastienda, productos, vistaActiva, seleccionado]);
 
   useEffect(() => {
     if (esVistaTrastienda) return;
@@ -2302,8 +2530,25 @@ export default function Tienda({
 
   useEffect(() => {
     cargarProductos();
+    cargarCategoriasAdmin({ silencioso: true });
     cargarPuntosEntrega();
     cargarConfigTienda();
+  }, []);
+
+  useEffect(() => {
+    if (esVistaTrastienda) return;
+    setCategoriaActiva('todas');
+  }, [esVistaTrastienda]);
+
+  useEffect(() => () => {
+    if (animacionCategoriaTimerRef.current) {
+      clearTimeout(animacionCategoriaTimerRef.current);
+      animacionCategoriaTimerRef.current = null;
+    }
+    if (transicionCategoriaTimerRef.current) {
+      clearTimeout(transicionCategoriaTimerRef.current);
+      transicionCategoriaTimerRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -2479,9 +2724,13 @@ export default function Tienda({
   const productosFiltrados = useMemo(() => {
     const termino = filtro.trim().toLowerCase();
     return productos.filter((item) => {
+      if (String(item?.tipo_producto || '').trim().toLowerCase() === 'paquete' && !productoPaqueteDisponibleTienda(item)) {
+        return false;
+      }
+
       const nombre = String(item?.nombre_receta || '').toLowerCase();
       const descripcion = String(item?.descripcion || '').toLowerCase();
-      const categoria = String(item?.categoria_nombre || '').trim().toLowerCase();
+      const categoria = normalizarClaveCategoriaTienda(item?.categoria_nombre);
 
       const matchTexto = !termino || nombre.includes(termino) || descripcion.includes(termino);
       if (!matchTexto) return false;
@@ -2489,7 +2738,7 @@ export default function Tienda({
       if (categoriaActiva !== 'todas' && categoria !== categoriaActiva) return false;
 
       if (seccionActiva === 'lanzamientos') return Boolean(item?.es_lanzamiento);
-      if (seccionActiva === 'favoritos') return Boolean(item?.es_favorito);
+      if (seccionActiva === 'favoritos') return productoEsFavoritoCliente(item);
       if (seccionActiva === 'ofertas') return Boolean(item?.es_oferta);
       if (seccionActiva === 'accesorios') return Boolean(item?.es_accesorio);
 
@@ -2498,26 +2747,199 @@ export default function Tienda({
 
       return true;
     });
-  }, [productos, filtro, categoriaActiva, seccionActiva, mapaSeccionesPersonalizadas]);
+  }, [productos, filtro, categoriaActiva, seccionActiva, mapaSeccionesPersonalizadas, favoritosVitrinaSet]);
 
   const categoriasDisponibles = useMemo(() => {
     const setCategorias = new Set();
     for (const item of productos) {
+      if (String(item?.tipo_producto || '').trim().toLowerCase() === 'paquete' && !productoPaqueteDisponibleTienda(item)) {
+        continue;
+      }
       const categoria = String(item?.categoria_nombre || '').trim();
       if (categoria) setCategorias.add(categoria);
     }
     return Array.from(setCategorias).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   }, [productos]);
 
+  const categoriasDisponiblesNormalizadas = useMemo(
+    () => new Set(categoriasDisponibles.map((cat) => normalizarClaveCategoriaTienda(cat)).filter(Boolean)),
+    [categoriasDisponibles]
+  );
+
+  const mapaImagenCategoria = useMemo(() => {
+    const mapaPorId = new Map();
+    const mapaPorNombre = new Map();
+    for (const item of (Array.isArray(categoriasAdmin) ? categoriasAdmin : [])) {
+      const id = Number(item?.id) || 0;
+      const nombre = normalizarClaveCategoriaTienda(item?.nombre);
+      const imageUrl = normalizarUrlMediaTienda(item?.image_url);
+      if (!imageUrl) continue;
+      if (id > 0) {
+        mapaPorId.set(id, imageUrl);
+      }
+      if (nombre) {
+        mapaPorNombre.set(nombre, imageUrl);
+      }
+    }
+    return { mapaPorId, mapaPorNombre };
+  }, [categoriasAdmin]);
+
+  const categoriasTarjetas = useMemo(() => {
+    const termino = filtro.trim().toLowerCase();
+    const mapa = new Map();
+
+    for (const item of productos) {
+      if (String(item?.tipo_producto || '').trim().toLowerCase() === 'paquete' && !productoPaqueteDisponibleTienda(item)) {
+        continue;
+      }
+
+      const nombre = String(item?.nombre_receta || '').toLowerCase();
+      const descripcion = String(item?.descripcion || '').toLowerCase();
+      const categoriaTexto = String(item?.categoria_nombre || '').trim() || 'Sin categoría';
+      const categoria = normalizarClaveCategoriaTienda(categoriaTexto);
+      const categoriaId = Number(item?.categoria_id) || 0;
+
+      const matchTexto = !termino || nombre.includes(termino) || descripcion.includes(termino) || categoria.includes(termino);
+      if (!matchTexto) continue;
+
+      if (seccionActiva === 'lanzamientos' && !Boolean(item?.es_lanzamiento)) continue;
+      if (seccionActiva === 'favoritos' && !productoEsFavoritoCliente(item)) continue;
+      if (seccionActiva === 'ofertas' && !Boolean(item?.es_oferta)) continue;
+      if (seccionActiva === 'accesorios' && !Boolean(item?.es_accesorio)) continue;
+
+      const categoriaCustom = mapaSeccionesPersonalizadas.get(seccionActiva);
+      if (categoriaCustom && categoria !== categoriaCustom) continue;
+
+      if (!mapa.has(categoria)) {
+        const imageUrlCategoria = categoriaId > 0
+          ? String(mapaImagenCategoria?.mapaPorId?.get(categoriaId) || mapaImagenCategoria?.mapaPorNombre?.get(categoria) || '').trim()
+          : String(mapaImagenCategoria?.mapaPorNombre?.get(categoria) || '').trim();
+        mapa.set(categoria, {
+          key: categoria,
+          label: categoriaTexto,
+          total: 0,
+          imageUrl: imageUrlCategoria
+        });
+      }
+
+      const actual = mapa.get(categoria);
+      actual.total += 1;
+
+      const mediaUrl = String(item?.image_url || '').trim();
+      if (!actual.imageUrl && mediaUrl && !esUrlVideoTienda(mediaUrl)) {
+        actual.imageUrl = mediaUrl;
+      }
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
+  }, [productos, filtro, seccionActiva, mapaSeccionesPersonalizadas, mapaImagenCategoria, favoritosVitrinaSet]);
+
+  const categoriasTarjetasVisibles = useMemo(() => {
+    if (categoriaActiva === 'todas') return categoriasTarjetas;
+    return categoriasTarjetas.filter((cat) => cat.key === categoriaActiva);
+  }, [categoriaActiva, categoriasTarjetas]);
+
+  function entrarCategoriaDesdeVista(categoriaKey, origenEl = null, datosCategoria = null, opciones = {}) {
+    const key = String(categoriaKey || '').trim().toLowerCase();
+    if (!key || key === 'todas') {
+      if (!opciones?.sinHash) {
+        navegarRutaPublicaTienda({ categoria: 'todas' });
+      }
+      // Animación inversa al regresar a categorías
+      if (categoriaActiva !== 'todas') {
+        // Buscar el botón de la categoría activa para animar la salida
+        const idx = categoriasTarjetas.findIndex(c => c.key === categoriaActiva);
+        const card = document.querySelectorAll('.tiendaCategoriasVista .tiendaCategoriaCard')[idx];
+        let rect, imageUrl, label;
+        if (card) {
+          rect = card.getBoundingClientRect();
+          imageUrl = categoriasTarjetas[idx]?.imageUrl || '';
+          label = categoriasTarjetas[idx]?.label || '';
+        } else {
+          rect = { left: window.innerWidth/2-100, top: window.innerHeight/2-100, width: 200, height: 200 };
+          imageUrl = '';
+          label = '';
+        }
+        setTransicionCategoriaVentana({
+          activa: true,
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+          imageUrl,
+          label,
+          entrando: false,
+          salidaRapida: true
+        });
+        if (transicionCategoriaTimerRef.current) {
+          clearTimeout(transicionCategoriaTimerRef.current);
+        }
+        transicionCategoriaTimerRef.current = setTimeout(() => {
+          setTransicionCategoriaVentana((prev) => ({ ...prev, activa: false }));
+          setCategoriaActiva('todas');
+          setCategoriaEntrandoKey('');
+          setAnimandoEntradaCategoria(false);
+          transicionCategoriaTimerRef.current = null;
+        }, 220);
+        return;
+      }
+      setCategoriaActiva('todas');
+      setCategoriaEntrandoKey('');
+      setAnimandoEntradaCategoria(false);
+      return;
+    }
+
+    if (!opciones?.sinHash) {
+      navegarRutaPublicaTienda({ categoria: key });
+    }
+
+    if (origenEl && typeof window !== 'undefined' && typeof origenEl.getBoundingClientRect === 'function') {
+      const rect = origenEl.getBoundingClientRect();
+      const imageUrl = String(datosCategoria?.imageUrl || '').trim();
+      const label = String(datosCategoria?.label || '').trim();
+      setTransicionCategoriaVentana({
+        activa: true,
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        imageUrl,
+        label,
+        entrando: true,
+        salidaRapida: false
+      });
+      if (transicionCategoriaTimerRef.current) {
+        clearTimeout(transicionCategoriaTimerRef.current);
+      }
+      transicionCategoriaTimerRef.current = setTimeout(() => {
+        setTransicionCategoriaVentana((prev) => ({ ...prev, activa: false }));
+        transicionCategoriaTimerRef.current = null;
+      }, 180);
+    }
+    setCategoriaActiva(key);
+    setCategoriaEntrandoKey(key);
+    setAnimandoEntradaCategoria(true);
+    if (animacionCategoriaTimerRef.current) {
+      clearTimeout(animacionCategoriaTimerRef.current);
+    }
+    animacionCategoriaTimerRef.current = setTimeout(() => {
+      setAnimandoEntradaCategoria(false);
+      setCategoriaEntrandoKey('');
+      animacionCategoriaTimerRef.current = null;
+    }, 120);
+  }
+
   useEffect(() => {
     if (esVistaTrastienda) return;
     if (categoriaActiva === 'todas') return;
 
-    const existe = categoriasDisponibles.some((cat) => cat.toLowerCase() === categoriaActiva);
+    if (seccionActiva === 'favoritos') return;
+
+    const existe = categoriasDisponiblesNormalizadas.has(categoriaActiva);
     if (!existe) {
       setCategoriaActiva('todas');
     }
-  }, [esVistaTrastienda, categoriaActiva, categoriasDisponibles]);
+  }, [esVistaTrastienda, categoriaActiva, seccionActiva, categoriasDisponiblesNormalizadas]);
 
   const controlesSecciones = useMemo(() => {
     const opciones = [
@@ -2528,6 +2950,7 @@ export default function Tienda({
       { id: 'accesorios', key: 'accesorios', label: 'Accesorios', configKey: 'menu_accesorios_activo', predeterminado: true }
     ];
     const fijas = opciones.filter((item) => {
+      if (item.key === 'favoritos') return true;
       if (tabsBaseEliminadasClienteSet.has(item.id)) return false;
       return configActivo(configTienda?.[item.configKey], item.predeterminado);
     });
@@ -2540,16 +2963,81 @@ export default function Tienda({
   const mostrarFiltroCategoria = !tabsBaseEliminadasClienteSet.has('menu_categoria')
     && configActivo(configTienda?.menu_categoria_activo, true);
 
+  const seccionCatalogoPrincipal = useMemo(
+    () => controlesSecciones.find((item) => item.key !== 'favoritos')?.key || 'todos',
+    [controlesSecciones]
+  );
+
+  const mostrandoVistaCategorias = categoriaActiva === 'todas' && seccionActiva !== 'favoritos';
+
+  const abrirSesionCliente = () => {
+    setModoAuth('login');
+    setPasoRegistro(1);
+    setMostrarModalAuthCliente(true);
+    setMostrarMenuMovil(false);
+  };
+
+  const abrirPerfilCliente = () => {
+    setPerfilModalTab('datos');
+    setMostrarModalPerfilCliente(true);
+    setMostrarMenuMovil(false);
+  };
+
+  const abrirCarritoDesdeMenuMovil = () => {
+    setMostrarMenuMovil(false);
+    abrirCarrito();
+  };
+
+  const abrirCategoriaDesdeMenuMovil = (categoriaKey) => {
+    setSeccionActiva(seccionCatalogoPrincipal);
+    entrarCategoriaDesdeVista(categoriaKey);
+    setMostrarMenuMovil(false);
+  };
+
+  const abrirFavoritosDesdeMenuMovil = () => {
+    setSeccionActiva('favoritos');
+    setCategoriaActiva('todas');
+    setMostrarMenuMovil(false);
+  };
+
   useEffect(() => {
     if (esVistaTrastienda) return;
     if (!controlesSecciones.length) {
       if (seccionActiva !== 'todos') setSeccionActiva('todos');
       return;
     }
+    if (seccionActiva === 'favoritos') return;
     if (!controlesSecciones.some((item) => item.key === seccionActiva)) {
       setSeccionActiva(controlesSecciones[0].key);
     }
   }, [controlesSecciones, seccionActiva, esVistaTrastienda]);
+
+  useEffect(() => {
+    if (esVistaTrastienda) {
+      setMostrarMenuMovil(false);
+    }
+  }, [esVistaTrastienda]);
+
+  useEffect(() => {
+    if (!mostrarMenuMovil) return undefined;
+
+    const html = document.documentElement;
+    const body = document.body;
+    const esMovil = window.matchMedia('(max-width: 768px)').matches;
+
+    if (!esMovil) return undefined;
+
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyOverflow = body.style.overflow;
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      body.style.overflow = prevBodyOverflow;
+    };
+  }, [mostrarMenuMovil]);
 
   const subtotalCarrito = useMemo(() => {
     return carrito.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0);
@@ -2619,6 +3107,15 @@ export default function Tienda({
     });
   }, [configTienda]);
 
+  const linksInformacionPorSlug = useMemo(() => {
+    const mapa = new Map();
+    linksInformacion.forEach((item) => {
+      const slug = slugPestanaMenu(item?.label || '');
+      if (slug) mapa.set(slug, item);
+    });
+    return mapa;
+  }, [linksInformacion]);
+
   useEffect(() => {
     if (!SECCIONES_INFO_LINKS.some((item) => item.idx === infoLinkAdminTab)) {
       setInfoLinkAdminTab(SECCIONES_INFO_LINKS[0].idx);
@@ -2655,24 +3152,110 @@ export default function Tienda({
     }));
   }, [configTienda]);
 
-  function abrirLinkInformacion(item) {
+  function navegarRutaPublicaTienda(ruta = {}, opciones = {}) {
+    actualizarRutaPublicaTiendaHash(ruta, opciones);
+  }
+
+  function abrirLinkInformacion(item, opciones = {}) {
     setInfoSeleccionada({
       titulo: String(item?.label || 'Información').trim() || 'Información',
       texto: String(item?.texto || '').trim() || 'Aún no hay contenido configurado para esta sección.',
       href: String(item?.href || '').trim()
     });
     setVistaActiva('info');
+    if (!opciones?.sinHash) {
+      navegarRutaPublicaTienda({
+        categoria: categoriaActiva,
+        info: slugPestanaMenu(item?.label || 'informacion')
+      });
+    }
   }
 
-  function restablecerVistaTienda() {
+  function volverAVitrinaActual(opciones = {}) {
+    setVistaActiva('tienda');
+    setInfoSeleccionada(null);
+    setSeleccionado(null);
+    if (!opciones?.sinHash) {
+      navegarRutaPublicaTienda({ categoria: categoriaActiva });
+    }
+  }
+
+  function restablecerVistaTienda(opciones = {}) {
     setVistaActiva('tienda');
     setSeccionActiva('todos');
     setCategoriaActiva('todas');
     setFiltro('');
     setInfoSeleccionada(null);
     setSeleccionado(null);
-    mostrarNotificacion('Vitrina restablecida', 'exito');
+    if (!opciones?.sinHash) {
+      navegarRutaPublicaTienda({ categoria: 'todas' });
+    }
+    if (!opciones?.silencioso) {
+      mostrarNotificacion('Vitrina restablecida', 'exito');
+    }
   }
+
+  useEffect(() => {
+    if (esVistaTrastienda) return undefined;
+
+    const aplicarRutaPublica = () => {
+      const ruta = leerRutaPublicaTiendaDesdeUrl();
+      if (!ruta) return;
+
+      const categoriaHash = normalizarClaveCategoriaTienda(ruta?.categoria || 'todas') || 'todas';
+      const categoriaExiste = categoriaHash === 'todas' || categoriasTarjetas.some((item) => item.key === categoriaHash);
+      const categoriaFinal = categoriaExiste ? categoriaHash : 'todas';
+
+      if (categoriaActivaRef.current !== categoriaFinal) {
+        setCategoriaActiva(categoriaFinal);
+        setCategoriaEntrandoKey('');
+        setAnimandoEntradaCategoria(false);
+      }
+
+      const slugProducto = String(ruta?.producto || '').trim().toLowerCase();
+      if (slugProducto) {
+        const objetivo = (productos || []).find((item) => (
+          String(item?.slug || '').trim().toLowerCase() === slugProducto
+        ));
+        if (objetivo) {
+          const slugActual = String(seleccionadoRef.current?.slug || '').trim().toLowerCase();
+          if (!(vistaActivaRef.current === 'detalle' && slugActual === slugProducto)) {
+            abrirDetalle(objetivo, { sinHash: true, scroll: false, registrar: false });
+          }
+          return;
+        }
+      }
+
+      const slugInfo = String(ruta?.info || '').trim().toLowerCase();
+      if (slugInfo) {
+        const itemInfo = linksInformacionPorSlug.get(slugInfo) || null;
+        if (itemInfo) {
+          const slugInfoActual = slugPestanaMenu(infoSeleccionadaRef.current?.titulo || '');
+          if (!(vistaActivaRef.current === 'info' && slugInfoActual === slugInfo)) {
+            abrirLinkInformacion(itemInfo, { sinHash: true });
+          }
+          return;
+        }
+      }
+
+      if (vistaActivaRef.current !== 'tienda' || infoSeleccionadaRef.current || seleccionadoRef.current) {
+        volverAVitrinaActual({ sinHash: true });
+      }
+    };
+
+    aplicarRutaPublica();
+    window.addEventListener('hashchange', aplicarRutaPublica);
+    window.addEventListener('popstate', aplicarRutaPublica);
+    return () => {
+      window.removeEventListener('hashchange', aplicarRutaPublica);
+      window.removeEventListener('popstate', aplicarRutaPublica);
+    };
+  }, [
+    esVistaTrastienda,
+    productos,
+    categoriasTarjetas,
+    linksInformacionPorSlug
+  ]);
 
   async function compartirProducto(producto) {
     const nombre = String(producto?.nombre_receta || 'Producto CHIPACTLI').trim();
@@ -3070,9 +3653,28 @@ export default function Tienda({
       }
       setClasificacionGuardada(base);
     } catch (error) {
-      mostrarNotificacion(error?.message || 'No se pudo cargar la tienda', 'error');
+      mostrarNotificacion(error?.message || 'No se pudo cargar la vitrina', 'error');
     } finally {
       if (!silencioso) setCargando(false);
+    }
+  }
+
+  async function cargarCategoriasAdmin(opciones = {}) {
+    const silencioso = Boolean(opciones?.silencioso);
+    if (!silencioso) setCargandoCategoriasAdmin(true);
+    try {
+      const data = await fetchJson('/categorias');
+      const lista = Array.isArray(data) ? data : [];
+      setCategoriasAdmin(lista.map((item) => ({
+        id: Number(item?.id) || 0,
+        nombre: String(item?.nombre || '').trim(),
+        image_url: normalizarUrlMediaTienda(item?.image_url)
+      })).filter((item) => item.id && item.nombre));
+    } catch {
+      if (!silencioso) mostrarNotificacion('No se pudieron cargar las categorías', 'error');
+      setCategoriasAdmin([]);
+    } finally {
+      if (!silencioso) setCargandoCategoriasAdmin(false);
     }
   }
 
@@ -3658,6 +4260,7 @@ export default function Tienda({
       const requiereRefrescoProductos = (
         tipo === 'tienda_catalogo_actualizado'
         || tipo === 'tienda_descuentos_actualizados'
+        || tipo === 'categorias_actualizado'
         || tipo === 'recetas_actualizado'
         || tipo === 'produccion_actualizado'
         || tipo === 'inventario_actualizado'
@@ -3668,6 +4271,7 @@ export default function Tienda({
         if (timerRefresco) clearTimeout(timerRefresco);
         timerRefresco = setTimeout(() => {
           cargarProductos({ silencioso: true });
+          cargarCategoriasAdmin({ silencioso: true });
         }, 100);
       }
 
@@ -3828,7 +4432,7 @@ export default function Tienda({
       setConfigTiendaAdmin(conf);
       setConfigTienda(conf);
       sincronizarTabsNavegacionAdminDesdeConfig(conf);
-      mostrarNotificacion('Configuración de tienda guardada', 'exito');
+      mostrarNotificacion('Configuración de vitrina guardada', 'exito');
     } catch (error) {
       mostrarNotificacion(error?.message || 'No se pudo guardar configuración', 'error');
     }
@@ -4189,8 +4793,8 @@ export default function Tienda({
           minimoTxt,
           topeTxt,
           '',
-          'Canjéalo desde la tienda en línea.',
-          'Visita nuestra tienda: {{url_tienda}}'
+          'Canjéalo desde la vitrina en línea.',
+          'Visita nuestra vitrina: {{url_tienda}}'
         ].join('\n').replace(/\n{3,}/g, '\n\n'),
         max_destinatarios: 1000
       })
@@ -4435,7 +5039,7 @@ export default function Tienda({
       accion: String(accion || '').trim().slice(0, 64),
       producto: String(producto || '').trim().slice(0, 140),
       seccion: String(seccionActiva || '').trim().slice(0, 64),
-      ruta: String(window?.location?.hash || '#/tienda').trim().slice(0, 120),
+      ruta: String(window?.location?.hash || '#/vitrina').trim().slice(0, 120),
       zonaHoraria: String(zonaHoraria || '').trim().slice(0, 64),
       esTrastienda: excluirMetricasVisitas
     };
@@ -5050,7 +5654,7 @@ export default function Tienda({
     return `${texto.slice(0, limite).trimEnd()}...`;
   }
 
-  function abrirDetalle(producto) {
+  function abrirDetalle(producto, opciones = {}) {
     const variantes = normalizarVariantes(producto?.variantes);
     const primeraDisponible = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
     const detallePaquete = Array.isArray(producto?.paquete_detalle) ? producto.paquete_detalle : [];
@@ -5077,12 +5681,22 @@ export default function Tienda({
     setResenaDetalleModal(null);
     cargarResenasProducto(producto?.nombre_receta);
     setVistaActiva('detalle');
-    registrarEventoComportamiento('ver_detalle_producto', producto?.nombre_receta || 'producto');
-    const contenedor = contenedorScrollRef.current;
-    if (contenedor && typeof contenedor.scrollTo === 'function') {
-      contenedor.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!opciones?.sinHash) {
+      navegarRutaPublicaTienda({
+        categoria: categoriaActiva,
+        producto: String(producto?.slug || '').trim()
+      });
+    }
+    if (opciones?.registrar !== false) {
+      registrarEventoComportamiento('ver_detalle_producto', producto?.nombre_receta || 'producto');
+    }
+    if (opciones?.scroll !== false) {
+      const contenedor = contenedorScrollRef.current;
+      if (contenedor && typeof contenedor.scrollTo === 'function') {
+        contenedor.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     }
   }
 
@@ -5570,12 +6184,22 @@ export default function Tienda({
   return (
     <div
       ref={contenedorScrollRef}
-      className={`tiendaRootScroll ${(esVistaTrastienda || vistaActiva === 'trastienda') ? 'tiendaRootScrollAdminMovil' : ''}`.trim()}
+      className={[
+        'tiendaRootScroll',
+        !esVistaTrastienda ? 'tiendaPublica' : '',
+        (esVistaTrastienda || vistaActiva === 'trastienda') ? 'tiendaRootScrollAdminMovil' : '',
+        integradaEnPanelInterno && !esVistaTrastienda ? 'tiendaEnPanelInterno' : ''
+      ].filter(Boolean).join(' ')}
       tabIndex={0}
     >
-      {!esVistaTrastienda && (
-      <div className="tiendaPromoBar">
-        {configTienda.promo_texto}
+      {!esVistaTrastienda && String(configTienda.promo_texto || '').trim() && (
+      <div className="tiendaPromoBar" aria-label={configTienda.promo_texto}>
+        <div className="tiendaPromoBarPista">
+          <span className="tiendaPromoBarTexto">{configTienda.promo_texto}</span>
+          <span className="tiendaPromoBarSeparador" aria-hidden="true">•</span>
+          <span className="tiendaPromoBarTexto" aria-hidden="true">{configTienda.promo_texto}</span>
+          <span className="tiendaPromoBarSeparador" aria-hidden="true">•</span>
+        </div>
       </div>
       )}
 
@@ -5592,6 +6216,19 @@ export default function Tienda({
 
       {!esVistaTrastienda && (
       <div className="tiendaMainHeader">
+        <button
+          type="button"
+          className={mostrarMenuMovil ? 'tiendaMenuMovilToggle tiendaSoloMovil abierta' : 'tiendaMenuMovilToggle tiendaSoloMovil'}
+          onClick={() => setMostrarMenuMovil((prev) => !prev)}
+          aria-label={mostrarMenuMovil ? 'Cerrar menú móvil' : 'Abrir menú móvil'}
+          aria-expanded={mostrarMenuMovil}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 6.5h18" />
+            <path d="M3 12h18" />
+            <path d="M3 17.5h18" />
+          </svg>
+        </button>
         <div className="tiendaHeaderLogoLado">
           {mostrarLogoAccesoSistema && (
             <button
@@ -5601,12 +6238,32 @@ export default function Tienda({
               title="Acceso al sistema"
               aria-label="Acceso al sistema"
             >
-              <img src="/images/logo.png" alt="Acceso" className="tiendaBrandLogoImg" />
+              <img src="/images/banner chipactli.png" alt="Acceso" className="tiendaBrandLogoImg" />
             </button>
           )}
         </div>
-        <div className="tiendaHeaderCentroShop" aria-label="VITRINA">VITRINA</div>
-        <div className="tiendaHeaderAcciones">
+        <button
+          type="button"
+          className="tiendaCartBtn tiendaCartBtnMovil tiendaSoloMovil"
+          onClick={abrirCarrito}
+          aria-label="Abrir carrito"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="9" cy="19" r="1.75" />
+            <circle cx="17" cy="19" r="1.75" />
+            <path d="M3.5 5h2.1l1.85 8.1a1 1 0 0 0 .98.78h8.25a1 1 0 0 0 .97-.76l1.45-5.62H7.1" />
+          </svg>
+          {carrito.length > 0 && <span className="tiendaCartCount">{carrito.length}</span>}
+        </button>
+        <div className="tiendaHeaderBusquedaWrap">
+          <input
+            className="cajaBusqueda"
+            placeholder="🔍 Buscar producto..."
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+          />
+        </div>
+        <div className="tiendaHeaderAcciones tiendaSoloDesktop">
           {mostrarAccesoRapidoPwa && typeof onActivarAccesoRapidoPwa === 'function' && (
             <button
               type="button"
@@ -5618,13 +6275,14 @@ export default function Tienda({
             </button>
           )}
           {!clienteToken ? (
-            <>
-              <button className="boton" onClick={() => { setModoAuth('login'); setMostrarModalAuthCliente(true); }}>Iniciar sesión</button>
-              <button className="boton botonExito" onClick={() => { setModoAuth('register'); setPasoRegistro(1); setMostrarModalAuthCliente(true); }}>Registrarme</button>
-            </>
-          ) : (
-            <>
-              <div className="tiendaSaludoCliente" aria-label={`Cliente ${nombreClienteHeader}`}>
+            <button
+              type="button"
+              className="tiendaSaludoCliente tiendaSesionBtnInvitado"
+              onClick={abrirSesionCliente}
+              title="Iniciar sesión"
+              aria-label="Iniciar sesión"
+            >
+              <span className="tiendaSaludoContenido">
                 <span className="tiendaSaludoEnredadera" aria-hidden="true">
                   <svg viewBox="0 0 140 18" role="presentation" focusable="false" preserveAspectRatio="none">
                     <path d="M1 9 C20 2, 40 16, 60 9 C80 2, 100 16, 120 9 C128 6, 134 8, 139 9" />
@@ -5638,19 +6296,43 @@ export default function Tienda({
                     <ellipse cx="126" cy="12" rx="4" ry="2.2" transform="rotate(20 126 12)" />
                   </svg>
                 </span>
-                <span className="tiendaSaludoLabel">Hola</span>
-                <strong className="tiendaSaludoNombre">{nombreClienteHeader}</strong>
-              </div>
+                <span className="tiendaSaludoLabel">Bienvenido</span>
+                <strong className="tiendaSaludoNombre">Inicia sesión</strong>
+              </span>
+              <span className="tiendaSaludoIcono" aria-hidden="true">
+                <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                  <circle cx="12" cy="8" r="4.2" />
+                  <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
+                </svg>
+              </span>
+            </button>
+          ) : (
+            <>
               <button
-                className="tiendaPerfilBtnNotifs"
-                onClick={() => {
-                  setPerfilModalTab('datos');
-                  setMostrarModalPerfilCliente(true);
-                }}
-                title="Perfil"
-                aria-label="Perfil"
+                type="button"
+                className="tiendaSaludoCliente"
+                onClick={abrirPerfilCliente}
+                title={`Perfil de ${nombreClienteHeader}`}
+                aria-label={`Perfil de ${nombreClienteHeader}`}
               >
-                <span className="tiendaPerfilIcon" aria-hidden="true">
+                <span className="tiendaSaludoContenido">
+                  <span className="tiendaSaludoEnredadera" aria-hidden="true">
+                    <svg viewBox="0 0 140 18" role="presentation" focusable="false" preserveAspectRatio="none">
+                      <path d="M1 9 C20 2, 40 16, 60 9 C80 2, 100 16, 120 9 C128 6, 134 8, 139 9" />
+                      <ellipse cx="14" cy="5" rx="4" ry="2.2" transform="rotate(-25 14 5)" />
+                      <ellipse cx="29" cy="13" rx="4.3" ry="2.4" transform="rotate(22 29 13)" />
+                      <ellipse cx="45" cy="5" rx="4" ry="2.2" transform="rotate(-20 45 5)" />
+                      <ellipse cx="61" cy="13" rx="4.3" ry="2.4" transform="rotate(22 61 13)" />
+                      <ellipse cx="77" cy="5" rx="4" ry="2.2" transform="rotate(-24 77 5)" />
+                      <ellipse cx="93" cy="13" rx="4.3" ry="2.4" transform="rotate(22 93 13)" />
+                      <ellipse cx="109" cy="5" rx="4" ry="2.2" transform="rotate(-20 109 5)" />
+                      <ellipse cx="126" cy="12" rx="4" ry="2.2" transform="rotate(20 126 12)" />
+                    </svg>
+                  </span>
+                  <span className="tiendaSaludoLabel">Bienvenido</span>
+                  <strong className="tiendaSaludoNombre">{nombreClienteHeader}</strong>
+                </span>
+                <span className="tiendaSaludoIcono" aria-hidden="true">
                   <svg viewBox="0 0 24 24" role="presentation" focusable="false">
                     <circle cx="12" cy="8" r="4.2" />
                     <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
@@ -5660,23 +6342,128 @@ export default function Tienda({
               </button>
             </>
           )}
-          <button className="tiendaCartBtn" onClick={abrirCarrito}>
-            🛒
+          <button className="tiendaCartBtn" onClick={abrirCarrito} aria-label="Abrir carrito">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="9" cy="19" r="1.75" />
+              <circle cx="17" cy="19" r="1.75" />
+              <path d="M3.5 5h2.1l1.85 8.1a1 1 0 0 0 .98.78h8.25a1 1 0 0 0 .97-.76l1.45-5.62H7.1" />
+            </svg>
             {carrito.length > 0 && <span className="tiendaCartCount">{carrito.length}</span>}
           </button>
         </div>
-        <div className="tiendaHeaderBusquedaWrap tiendaSoloMovil">
-          <input
-            className="cajaBusqueda"
-            placeholder="🔍 Buscar producto..."
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-          />
-          <button type="button" className="tiendaResetBtn" onClick={restablecerVistaTienda}>
-            Restablecer vitrina
-          </button>
-        </div>
       </div>
+      )}
+
+      {!esVistaTrastienda && (
+        <div
+          className={mostrarMenuMovil ? 'tiendaMenuMovilOverlay tiendaSoloMovil abierta' : 'tiendaMenuMovilOverlay tiendaSoloMovil'}
+          onClick={() => setMostrarMenuMovil(false)}
+          aria-hidden={!mostrarMenuMovil}
+        >
+          <aside
+            className={mostrarMenuMovil ? 'tiendaMenuMovilPanel abierta' : 'tiendaMenuMovilPanel'}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menú móvil"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="tiendaMenuMovilHeader">
+              {!clienteToken ? (
+                <button
+                  type="button"
+                  className="tiendaMenuMovilCuentaBtn"
+                  onClick={abrirSesionCliente}
+                >
+                  <span className="tiendaMenuMovilCuentaIcono" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                      <circle cx="12" cy="8" r="4.2" />
+                      <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
+                    </svg>
+                  </span>
+                  <span>Iniciar sesión</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="tiendaMenuMovilCuentaBtn"
+                  onClick={abrirPerfilCliente}
+                >
+                  <span className="tiendaMenuMovilCuentaIcono" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+                      <circle cx="12" cy="8" r="4.2" />
+                      <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
+                    </svg>
+                  </span>
+                  <span>{nombreClienteHeader}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="tiendaMenuMovilCerrar"
+                onClick={() => setMostrarMenuMovil(false)}
+                aria-label="Cerrar menú móvil"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="tiendaMenuMovilBody">
+              <div className="tiendaMenuMovilAcciones">
+                {mostrarAccesoRapidoPwa && typeof onActivarAccesoRapidoPwa === 'function' && (
+                  <button
+                    type="button"
+                    className="tiendaMenuMovilAccion"
+                    onClick={() => {
+                      setMostrarMenuMovil(false);
+                      onActivarAccesoRapidoPwa();
+                    }}
+                  >
+                    Acceso rápido
+                  </button>
+                )}
+              </div>
+
+              {vistaActiva === 'tienda' && (
+                <section className="tiendaMenuMovilSeccion" aria-label="Categorías móviles">
+                  <h3>Categorías</h3>
+                  <div className="tiendaMenuMovilLista">
+                    <button
+                      type="button"
+                      className={seccionActiva !== 'favoritos' && categoriaActiva === 'todas'
+                        ? 'tiendaMenuMovilCategoriaBtn activa'
+                        : 'tiendaMenuMovilCategoriaBtn'}
+                      onClick={() => abrirCategoriaDesdeMenuMovil('todas')}
+                    >
+                      <span>Todos los productos</span>
+                      <span className="tiendaMenuMovilFlecha" aria-hidden="true">›</span>
+                    </button>
+                    {categoriasTarjetas.map((categoria) => (
+                      <button
+                        key={`menu-${categoria.key}`}
+                        type="button"
+                        className={categoriaActiva === categoria.key ? 'tiendaMenuMovilCategoriaBtn activa' : 'tiendaMenuMovilCategoriaBtn'}
+                        onClick={() => abrirCategoriaDesdeMenuMovil(categoria.key)}
+                      >
+                        <span>{categoria.label}</span>
+                        <span className="tiendaMenuMovilFlecha" aria-hidden="true">›</span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className={seccionActiva === 'favoritos'
+                        ? 'tiendaMenuMovilCategoriaBtn tiendaMenuMovilCategoriaBtnFavoritos activa'
+                        : 'tiendaMenuMovilCategoriaBtn tiendaMenuMovilCategoriaBtnFavoritos'}
+                      onClick={abrirFavoritosDesdeMenuMovil}
+                    >
+                      <span>Favoritos</span>
+                      <span className="tiendaMenuMovilFlecha" aria-hidden="true">›</span>
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
+          </aside>
+        </div>
       )}
 
       {!esVistaTrastienda && clienteToken && mostrarPromptNotificacionesPedidos && (
@@ -5688,165 +6475,228 @@ export default function Tienda({
         </div>
       )}
 
-      {!esVistaTrastienda && (
-      <div className="tiendaCategoriasBar">
-        {controlesSecciones.map((item) => (
-          <button
-            key={item.key}
-            className={seccionActiva === item.key ? 'tiendaTab activa' : 'tiendaTab'}
-            onClick={() => setSeccionActiva(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-        {mostrarFiltroCategoria && (
-          <select className="tiendaCategoriaSelect" value={categoriaActiva} onChange={(e) => setCategoriaActiva(e.target.value)}>
-            <option value="todas">Todas las categorías</option>
-            {categoriasDisponibles.map((categoria) => (
-              <option key={categoria} value={categoria.toLowerCase()}>{categoria}</option>
-            ))}
-          </select>
-        )}
-        {vistaActiva === 'info' && (
-          <button className="tiendaTab activa" onClick={() => setVistaActiva('info')}>
-            {infoSeleccionada?.titulo || 'Información'}
-          </button>
-        )}
-        {vistaActiva === 'detalle' && seleccionado && (
-          <button className="tiendaTab activa" onClick={() => setVistaActiva('detalle')}>
-            {seleccionado?.nombre_receta || 'Detalle'}
-          </button>
-        )}
-        <div className="tiendaCategoriasBusqueda tiendaSoloDesktop">
-          <input
-            className="cajaBusqueda"
-            placeholder="🔍 Buscar producto..."
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          className="tiendaResetBtn tiendaResetBtnIcon tiendaSoloDesktop"
-          onClick={restablecerVistaTienda}
-          title="Restablecer vitrina"
-          aria-label="Restablecer vitrina"
-        >
-          ↺
-        </button>
-      </div>
-      )}
-
       <div className={esVistaTrastienda ? 'tiendaGrid tiendaGridAdminFull' : 'tiendaGrid'}>
       {!esVistaTrastienda && vistaActiva === 'tienda' && (
       <section className="tarjeta tiendaCatalogo">
         <div className="tiendaHeader">
-          <h2>Tienda de productos</h2>
+          <h2>VITRINA</h2>
         </div>
 
         {cargando ? (
           <div className="tiendaVacio">Cargando productos...</div>
         ) : (
-          <div className="tiendaProductos">
-            {productosFiltrados.map((producto) => {
-              const variantes = normalizarVariantes(producto?.variantes);
-              const varianteActiva = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
-              const disponible = varianteActiva ? Boolean(varianteActiva?.disponible) : ((Number(producto?.stock) || 0) > 0);
-              const precioFicha = Number(producto?.tienda_precio_publico) || 0;
-              const tienePrecioConfigurado = precioFicha > 0;
-              const categoriaProducto = String(producto?.categoria_nombre || '').trim() || 'Sin categoría';
-              const totalResenas = Number(producto?.resenas_total) || 0;
-              const promedioResenas = Number(producto?.resenas_promedio) || 0;
-              const hojitas = pintarHojitas(promedioResenas);
-              return (
-                <article key={producto.slug || producto.nombre_receta} className="tiendaProductoCard">
-                  <div className="tiendaImagenWrap">
-                    {producto?.image_url ? (
-                      esUrlVideoTienda(producto.image_url) ? (
-                        <video
-                          src={producto.image_url}
-                          className="tiendaImagen"
-                          autoPlay
-                          muted
-                          loop
-                          playsInline
-                          preload="metadata"
-                        />
-                      ) : (
-                        <img src={producto.image_url} alt={producto.nombre_receta} className="tiendaImagen" />
-                      )
+          <>
+            {mostrandoVistaCategorias ? (
+            <div className="tiendaCategoriasVista">
+              <aside className="tiendaCategoriasSidebarFina" aria-label="Categorías">
+                <button
+                  type="button"
+                  className={seccionActiva !== 'favoritos' && categoriaActiva === 'todas' ? 'tiendaCategoriaSidebarBtn activa' : 'tiendaCategoriaSidebarBtn'}
+                  onClick={() => {
+                    setSeccionActiva(seccionCatalogoPrincipal);
+                    entrarCategoriaDesdeVista('todas');
+                  }}
+                >
+                  Todos los productos
+                </button>
+                {categoriasTarjetas.map((categoria) => (
+                  <button
+                    key={categoria.key}
+                    type="button"
+                    className={categoriaActiva === categoria.key ? 'tiendaCategoriaSidebarBtn activa' : 'tiendaCategoriaSidebarBtn'}
+                    onClick={() => entrarCategoriaDesdeVista(categoria.key)}
+                  >
+                    {categoria.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={seccionActiva === 'favoritos' ? 'tiendaCategoriaSidebarBtn tiendaCategoriaSidebarBtnFavoritos activa' : 'tiendaCategoriaSidebarBtn tiendaCategoriaSidebarBtnFavoritos'}
+                  onClick={() => {
+                    setSeccionActiva('favoritos');
+                    setCategoriaActiva('todas');
+                  }}
+                >
+                  Favoritos
+                </button>
+              </aside>
+
+              <div className="tiendaCategoriasCardsGrid">
+                {(categoriasTarjetasVisibles.length ? categoriasTarjetasVisibles : categoriasTarjetas).map((categoria) => (
+                  <button
+                    key={`card-${categoria.key}`}
+                    type="button"
+                    className={[
+                      'tiendaCategoriaVisualCard',
+                      categoriaActiva === categoria.key ? 'activa' : '',
+                      categoriaEntrandoKey === categoria.key ? 'entrando' : '',
+                      categoria.key === categoriaFlashKey ? 'flash' : ''
+                    ].filter(Boolean).join(' ')}
+                    onClick={(e) => {
+                      setCategoriaFlashKey(categoria.key);
+                      setTimeout(() => setCategoriaFlashKey(''), 180);
+                      entrarCategoriaDesdeVista(categoria.key, e.currentTarget, categoria);
+                    }}
+                    aria-label={`Abrir categoría ${categoria.label}`}
+                  >
+                    {categoria.imageUrl ? (
+                      <img src={categoria.imageUrl} alt={categoria.label} className="tiendaCategoriaVisualImg" />
                     ) : (
-                      <div className="tiendaImagenPlaceholder">Sin imagen</div>
+                      <div className="tiendaCategoriaVisualPlaceholder">{categoria.label}</div>
                     )}
-                  </div>
-                  <div className="tiendaShareIconRow">
+                    <span className="tiendaCategoriaVisualCapa"></span>
+                    <span className="tiendaCategoriaVisualTitulo">{categoria.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            ) : (
+              <div className="tiendaVistaCategoriaAcciones">
+                <button
+                  type="button"
+                  className="tiendaCategoriaVolverBtn"
+                  onClick={() => {
+                    if (seccionActiva === 'favoritos' && categoriaActiva === 'todas') {
+                      setSeccionActiva(seccionCatalogoPrincipal);
+                      setCategoriaActiva('todas');
+                      return;
+                    }
+                    entrarCategoriaDesdeVista('todas');
+                  }}
+                >
+                  {seccionActiva === 'favoritos' && categoriaActiva === 'todas' ? '← Volver a vitrina' : '← Volver a categorías'}
+                </button>
+              </div>
+            )}
+
+            {mostrandoVistaCategorias ? null : (
+            <div key={`productos-${categoriaActiva}`} className={animandoEntradaCategoria ? 'tiendaProductos tiendaProductosEntrada' : 'tiendaProductos'}>
+              {productosFiltrados.map((producto) => {
+                const variantes = normalizarVariantes(producto?.variantes);
+                const varianteActiva = variantes.find((v) => Boolean(v?.disponible)) || variantes[0] || null;
+                const disponible = varianteActiva ? Boolean(varianteActiva?.disponible) : ((Number(producto?.stock) || 0) > 0);
+                const precioFicha = Number(producto?.tienda_precio_publico) || 0;
+                const tienePrecioConfigurado = precioFicha > 0;
+                const categoriaProducto = String(producto?.categoria_nombre || '').trim() || 'Sin categoría';
+                const totalResenas = Number(producto?.resenas_total) || 0;
+                const promedioResenas = Number(producto?.resenas_promedio) || 0;
+                const hojitas = pintarHojitas(promedioResenas);
+                const identificadorFavorito = obtenerIdentificadorFavoritoProducto(producto);
+                const favoritoActivo = identificadorFavorito ? favoritosVitrinaSet.has(identificadorFavorito) : false;
+                const burstFavoritoActivo = identificadorFavorito && favoritoBurst.id === identificadorFavorito
+                  ? favoritoBurst.nonce
+                  : 0;
+                return (
+                  <article key={producto.slug || producto.nombre_receta} className="tiendaProductoCard">
                     <button
                       type="button"
-                      className="tiendaShareIconBtn"
-                      onClick={() => compartirProducto(producto)}
-                      aria-label={`Compartir ${producto.nombre_receta}`}
-                      title="Compartir"
+                      className={favoritoActivo ? 'tiendaFavoritoBtn activa' : 'tiendaFavoritoBtn'}
+                      onClick={() => toggleFavoritoProducto(producto)}
+                      aria-label={favoritoActivo ? `Quitar ${producto.nombre_receta} de favoritos` : `Agregar ${producto.nombre_receta} a favoritos`}
+                      title={favoritoActivo ? 'Quitar de favoritos' : 'Agregar a favoritos'}
                     >
-                      <svg viewBox="0 0 24 24" role="presentation" focusable="false" aria-hidden="true">
-                        <path d="M18 16a3 3 0 0 0-2.29 1.06l-6.72-3.36a3.14 3.14 0 0 0 0-1.4l6.72-3.36A3 3 0 1 0 15 7a3.2 3.2 0 0 0 .03.41L8.3 10.77a3 3 0 1 0 0 2.46l6.73 3.36A3 3 0 1 0 18 16z" />
-                      </svg>
+                      {burstFavoritoActivo ? (
+                        <span key={`burst-${burstFavoritoActivo}`} className="tiendaFavoritoBurst" aria-hidden="true">
+                          <span className="tiendaFavoritoBurstPart">♥</span>
+                          <span className="tiendaFavoritoBurstPart">♥</span>
+                          <span className="tiendaFavoritoBurstPart">♥</span>
+                          <span className="tiendaFavoritoBurstPart">♥</span>
+                          <span className="tiendaFavoritoBurstPart">♥</span>
+                        </span>
+                      ) : null}
+                      <span className="tiendaFavoritoIcono" aria-hidden="true">♥</span>
                     </button>
-                  </div>
-                  <div className="tiendaCategoriaBadge">{categoriaProducto}</div>
-                  <h3>{producto.nombre_receta}</h3>
-                  <div className={totalResenas > 0 ? 'tiendaCalificacionCard' : 'tiendaCalificacionCard sinTexto'} title={totalResenas ? `${promedioResenas.toFixed(1)} de 5` : 'Sin calificaciones'}>
-                    <div className="tiendaHojitasFila">
-                      {hojitas.map((activa, idx) => (
-                        <span key={`hojita-${producto.nombre_receta}-${idx}`} className={activa ? 'tiendaHojita activa' : 'tiendaHojita'}>🍃</span>
-                      ))}
+                    <div className="tiendaImagenWrap">
+                      {producto?.image_url ? (
+                        esUrlVideoTienda(producto.image_url) ? (
+                          <video
+                            src={producto.image_url}
+                            className="tiendaImagen"
+                            autoPlay
+                            muted
+                            loop
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : (
+                          <img src={producto.image_url} alt={producto.nombre_receta} className="tiendaImagen" />
+                        )
+                      ) : (
+                        <div className="tiendaImagenPlaceholder">Sin imagen</div>
+                      )}
                     </div>
-                    {totalResenas > 0 && (
-                      <span className="tiendaCalificacionTxt">
-                        {totalResenas >= 5
-                          ? `${promedioResenas.toFixed(1)} / 5`
-                          : `${totalResenas} calificaciones`}
-                      </span>
-                    )}
-                  </div>
-                  {!!variantes.length && (
-                    <div className="tiendaVariantes tiendaVariantesCard">
-                      <div className="tiendaVariantesLista">
-                        {variantes.map((v) => (
-                          <span key={`${producto.nombre_receta}-${v.nombre}`} className="tiendaChipVariante">{v.nombre}</span>
-                        ))}
-                      </div>
-                      <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
-                        {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
-                      </span>
-                    </div>
-                  )}
-                  {!variantes.length && (
-                    <div className="tiendaMeta tiendaMetaFallback">
-                      <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
-                        {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
-                      </span>
-                    </div>
-                  )}
-                  {String(producto.descripcion || '').trim() && (
-                    <p className="tiendaDescripcion">{producto.descripcion}</p>
-                  )}
-                  <div className="tiendaCardFooter">
-                    <div className="tiendaAccionesCard">
-                      <button className="boton" onClick={() => abrirDetalle(producto)}>Ver detalle</button>
+                    <div className="tiendaShareIconRow">
                       <button
-                        className="boton botonExito"
-                        onClick={() => agregarAlCarrito(producto, varianteActiva?.nombre || '')}
-                        disabled={!tienePrecioConfigurado}
+                        type="button"
+                        className="tiendaShareIconBtn"
+                        onClick={() => compartirProducto(producto)}
+                        aria-label={`Compartir ${producto.nombre_receta}`}
+                        title="Compartir"
                       >
-                        Agregar
+                        <svg viewBox="0 0 24 24" role="presentation" focusable="false" aria-hidden="true">
+                          <path d="M18 16a3 3 0 0 0-2.29 1.06l-6.72-3.36a3.14 3.14 0 0 0 0-1.4l6.72-3.36A3 3 0 1 0 15 7a3.2 3.2 0 0 0 .03.41L8.3 10.77a3 3 0 1 0 0 2.46l6.73 3.36A3 3 0 1 0 18 16z" />
+                        </svg>
                       </button>
                     </div>
-                  </div>
-                </article>
-              );
-            })}
-            {!productosFiltrados.length && <div className="tiendaVacio">No hay productos disponibles.</div>}
-          </div>
+                    <div className="tiendaCategoriaBadge">{categoriaProducto}</div>
+                    <h3>{producto.nombre_receta}</h3>
+                    <div className={totalResenas > 0 ? 'tiendaCalificacionCard' : 'tiendaCalificacionCard sinTexto'} title={totalResenas ? `${promedioResenas.toFixed(1)} de 5` : 'Sin calificaciones'}>
+                      <div className="tiendaHojitasFila">
+                        {hojitas.map((activa, idx) => (
+                          <span key={`hojita-${producto.nombre_receta}-${idx}`} className={activa ? 'tiendaHojita activa' : 'tiendaHojita'}>🍃</span>
+                        ))}
+                      </div>
+                      {totalResenas > 0 && (
+                        <span className="tiendaCalificacionTxt">
+                          {totalResenas >= 5
+                            ? `${promedioResenas.toFixed(1)} / 5`
+                            : `${totalResenas} calificaciones`}
+                        </span>
+                      )}
+                    </div>
+                    {!!variantes.length && (
+                      <div className="tiendaVariantes tiendaVariantesCard">
+                        <div className="tiendaVariantesLista">
+                          {variantes.map((v) => (
+                            <span key={`${producto.nombre_receta}-${v.nombre}`} className="tiendaChipVariante">{v.nombre}</span>
+                          ))}
+                        </div>
+                        <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
+                          {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
+                        </span>
+                      </div>
+                    )}
+                    {!variantes.length && (
+                      <div className="tiendaMeta tiendaMetaFallback">
+                        <span className={tienePrecioConfigurado ? 'tiendaMetaPrecio tiendaMetaPrecioInline' : 'tiendaMetaSolo tiendaMetaPrecioInline'}>
+                          {tienePrecioConfigurado ? precio(precioFicha) : 'Próximamente'}
+                        </span>
+                      </div>
+                    )}
+                    {String(producto.descripcion || '').trim() && (
+                      <p className="tiendaDescripcion">{producto.descripcion}</p>
+                    )}
+                    <div className="tiendaCardFooter">
+                      <div className="tiendaAccionesCard">
+                        <button className="boton" onClick={() => abrirDetalle(producto)}>Ver detalle</button>
+                        <button
+                          className="boton botonExito"
+                          onClick={() => agregarAlCarrito(producto, varianteActiva?.nombre || '')}
+                          disabled={!tienePrecioConfigurado}
+                        >
+                          Agregar
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+              {!productosFiltrados.length && <div className="tiendaVacio">{seccionActiva === 'favoritos' ? 'Aún no tienes productos favoritos.' : 'No hay productos disponibles.'}</div>}
+            </div>
+            )}
+
+            {/* Animación de overlay de categoría eliminada por solicitud */}
+          </>
         )}
       </section>
       )}
@@ -6084,7 +6934,7 @@ export default function Tienda({
       {(esVistaTrastienda || vistaActiva === 'trastienda') && tokenInterno && (
         <section className="tarjeta tiendaCatalogo">
           <div className={puedeEditarTrastienda ? 'tiendaAdminPanel' : 'tiendaAdminPanel soloLectura'}>
-            <h3>Panel interno tienda</h3>
+            <h3>Panel interno vitrina</h3>
 
             {!puedeEditarTrastienda && (
               <div className="tiendaAdminSoloLecturaAviso">
@@ -6460,7 +7310,7 @@ export default function Tienda({
 
             {adminVista === 'config' && (
             <div className="tiendaAdminForm">
-              <strong>Configuración tienda y atención</strong>
+              <strong>Configuración de vitrina y atención</strong>
               <div className="tiendaAdminTabs tiendaAdminTabsConfigInternas">
                 <button type="button" className={configAdminTab === 'general' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('general')}>General</button>
                 <button type="button" className={configAdminTab === 'correos' ? 'tiendaTab activa' : 'tiendaTab'} onClick={() => setConfigAdminTab('correos')}>Correos</button>
@@ -7048,7 +7898,15 @@ export default function Tienda({
 
             {adminVista === 'catalogo' && (
             <div className="tiendaAdminForm">
-              <strong>Clasificación de productos (tienda)</strong>
+              <input
+                ref={inputImagenCategoriaArchivoRef}
+                type="file"
+                accept="image/*"
+                className="tiendaInputOculto"
+                onChange={subirImagenCategoriaDesdeComputadora}
+              />
+
+              <strong>Clasificación de productos (vitrina)</strong>
               <div className="tiendaAdminPendientes">
                 Cambios pendientes: <strong>{pendientesClasificacion}</strong>
               </div>
@@ -7084,6 +7942,49 @@ export default function Tienda({
                   ))}
                 </select>
               </div>
+
+              <div className="tiendaAdminCategoriasImagenes">
+                <div className="tiendaAdminCategoriasImagenesHead">
+                  <strong>Imagen por categoría</strong>
+                  {cargandoCategoriasAdmin && <span className="tiendaAdminSubtexto">Cargando categorías...</span>}
+                </div>
+                <div className="tiendaAdminCategoriasImagenesGrid">
+                  {(Array.isArray(categoriasAdmin) ? categoriasAdmin : []).map((categoria) => {
+                    const idCat = Number(categoria?.id) || 0;
+                    const imageUrl = String(categoria?.image_url || '').trim();
+                    const subiendo = subiendoImagenCategoriaId === idCat;
+                    return (
+                      <div key={`cat-img-${idCat}`} className="tiendaAdminCategoriaImagenCard">
+                        <div className="tiendaAdminCategoriaImagenTitulo">{categoria?.nombre || 'Categoría'}</div>
+                        {imageUrl ? (
+                          <img src={imageUrl} alt={categoria?.nombre || 'Categoría'} className="tiendaAdminCategoriaImagenPreview" />
+                        ) : (
+                          <div className="tiendaAdminCategoriaImagenPlaceholder">Sin imagen</div>
+                        )}
+                        <div className="tiendaAdminCategoriaImagenAcciones">
+                          <button
+                            type="button"
+                            className="botonPequeno"
+                            onClick={() => abrirSelectorImagenCategoria(idCat)}
+                            disabled={subiendo}
+                          >
+                            {subiendo ? 'Subiendo...' : 'Subir imagen'}
+                          </button>
+                          <button
+                            type="button"
+                            className="botonPequeno botonDanger"
+                            onClick={() => quitarImagenCategoriaAdmin(idCat)}
+                            disabled={subiendo || !imageUrl}
+                          >
+                            Quitar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="tiendaAdminListado tiendaAdminCatalogoClasificacion">
                 <div className="tiendaAdminFilaCatalogoHead" aria-hidden="true">
                   <span>Producto</span>
@@ -7997,7 +8898,7 @@ export default function Tienda({
               type="button"
               aria-label="Volver a productos"
               title="Volver a productos"
-              onClick={() => setVistaActiva('tienda')}
+              onClick={() => volverAVitrinaActual()}
             >
               ←
             </button>
@@ -8066,7 +8967,7 @@ export default function Tienda({
                     type="button"
                     aria-label="Volver a productos"
                     title="Volver a productos"
-                    onClick={() => setVistaActiva('tienda')}
+                    onClick={() => volverAVitrinaActual()}
                   >
                     ←
                   </button>
@@ -8825,8 +9726,12 @@ export default function Tienda({
                         Si tu consulta o incidencia está relacionada con una compra, incluye tu número de pedido para atenderte más rápido.
                       </p>
                       <div className="tiendaAtencionMeta">
-                        <span><strong>Correo:</strong> {configTienda.atencion_correo || 'atc@chipactli.mx'}</span>
-                        <span><strong>Horario:</strong> {configTienda.atencion_horario_lunes_viernes || '09:00 a.m. - 06:00 p.m.'}</span>
+                        {String(configTienda.atencion_correo || '').trim() && (
+                          <span><strong>Correo:</strong> {configTienda.atencion_correo}</span>
+                        )}
+                        {String(configTienda.atencion_horario_lunes_viernes || '').trim() && (
+                          <span><strong>Horario:</strong> {configTienda.atencion_horario_lunes_viernes}</span>
+                        )}
                       </div>
                     </div>
 
@@ -9203,11 +10108,11 @@ export default function Tienda({
       )}
 
       {!esVistaTrastienda && <footer className="tiendaFooter">
-        <div className="tiendaFooterCol">
+        <div className="tiendaFooterCol tiendaFooterColMarca">
           <h4>{configTienda.footer_marca_titulo}</h4>
           <p>{configTienda.footer_marca_texto}</p>
           {!!redesDisponibles.length && (
-            <div className="tiendaFooterRedes">
+            <div className="tiendaFooterRedes tiendaFooterRedesDesktop">
               {redesDisponibles.map((red) => (
                 <div key={`red-footer-${red.clave}`} className="tiendaRedSocialItem">
                   <a
@@ -9228,14 +10133,47 @@ export default function Tienda({
             </div>
           )}
         </div>
-        <div className="tiendaFooterCol">
+        <div className="tiendaFooterCol tiendaFooterColAtencion">
           <h4>Atención al cliente</h4>
-          <p><strong>Lunes a viernes:</strong> {horariosAtencion.lunesViernes || '-'}</p>
-          <p><strong>Sábado:</strong> {horariosAtencion.sabado || '-'}</p>
-          <p><strong>Domingo:</strong> {horariosAtencion.domingo || '-'}</p>
-          <p>{configTienda.atencion_correo}</p>
+          {String(horariosAtencion.lunesViernes || '').trim() && (
+            <p className="tiendaFooterHorario"><strong>Lunes a viernes:</strong><span>{horariosAtencion.lunesViernes}</span></p>
+          )}
+          {String(horariosAtencion.sabado || '').trim() && (
+            <p className="tiendaFooterHorario"><strong>Sábado:</strong><span>{horariosAtencion.sabado}</span></p>
+          )}
+          {String(horariosAtencion.domingo || '').trim() && (
+            <p className="tiendaFooterHorario"><strong>Domingo:</strong><span>{horariosAtencion.domingo}</span></p>
+          )}
+          {String(configTienda.atencion_correo || '').trim() && (
+            <p>
+              <a href={`mailto:${String(configTienda.atencion_correo || '').trim()}`}>
+                {configTienda.atencion_correo}
+              </a>
+            </p>
+          )}
         </div>
-        <div className="tiendaFooterCol">
+        {!!redesDisponibles.length && (
+          <div className="tiendaFooterRedes tiendaFooterRedesMovil">
+            {redesDisponibles.map((red) => (
+              <div key={`red-footer-movil-${red.clave}`} className="tiendaRedSocialItem">
+                <a
+                  href={red.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tiendaRedSocialBtn"
+                  title={red.label}
+                  aria-label={red.label}
+                >
+                  {red.logo
+                    ? <img src={red.logo} alt={red.label} className="tiendaRedSocialImg" />
+                    : red.icono}
+                </a>
+                <span className="tiendaRedSocialPerfil">{obtenerNombrePerfilRed(red.url, red.clave)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="tiendaFooterCol tiendaFooterColInfo">
           <h4>Información</h4>
           {linksInformacion.map((item) => (
             <button
@@ -9247,7 +10185,7 @@ export default function Tienda({
               {item.label}
             </button>
           ))}
-          <div className="tiendaFooterPagos">
+          <div className="tiendaFooterPagos tiendaFooterPagosDesktop">
             {metodosPagoRenderFooter.length ? (
               <div className="tiendaFooterPagosLogosWrap">
                 {metodosPagoRenderFooter.map((metodo, idx) => (
@@ -9271,6 +10209,30 @@ export default function Tienda({
               <span>{configTienda.footer_pagos_texto}</span>
             )}
           </div>
+        </div>
+        <div className="tiendaFooterPagos tiendaFooterPagosMovil">
+          {metodosPagoRenderFooter.length ? (
+            <div className="tiendaFooterPagosLogosWrap">
+              {metodosPagoRenderFooter.map((metodo, idx) => (
+                String(metodo?.logo_render_url || '').trim() ? (
+                  <span key={`footer-logo-pago-movil-${metodo.id}-${idx}`} className="tiendaFooterPagoLogoItem">
+                    <img
+                      src={String(metodo.logo_render_url).trim()}
+                      alt={metodo?.label || `Método de pago ${idx + 1}`}
+                      className="tiendaFooterPagosLogos"
+                      loading="lazy"
+                    />
+                  </span>
+                ) : (
+                  <span key={`footer-txt-pago-movil-${metodo.id}-${idx}`} className="tiendaFooterPagoTextoItem">
+                    {metodo?.label || `Método de pago ${idx + 1}`}
+                  </span>
+                )
+              ))}
+            </div>
+          ) : (
+            <span>{configTienda.footer_pagos_texto}</span>
+          )}
         </div>
       </footer>}
 
@@ -9531,3 +10493,5 @@ export default function Tienda({
     </div>
   );
 }
+
+export default Tienda;

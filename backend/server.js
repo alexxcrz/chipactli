@@ -92,6 +92,12 @@ inicializarWss(wss);
 app.use(cors());
 app.use(express.json({ limit: BODY_JSON_LIMIT }));
 
+// Alias para liberar /tienda como ruta limpia del frontend sin duplicar endpoints existentes.
+app.use('/api/tienda', (req, _res, next) => {
+  req.url = `/tienda${req.url}`;
+  next();
+});
+
 // Configurar multer para uploads
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -1649,7 +1655,6 @@ const reglasPermisos = [
   { metodos: ['PATCH'], prefijo: '/inventario', pestana: 'inventario', accion: 'editar' },
   { metodos: ['DELETE'], prefijo: '/inventario', pestana: 'inventario', accion: 'eliminar' },
 
-  { metodos: ['GET'], exacto: '/categorias', pestana: 'recetas', accion: 'categorias_ver' },
   { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/categorias', pestana: 'recetas', accion: 'categorias_gestionar' },
   { metodos: ['POST'], exacto: '/recetas/calcular', pestana: 'recetas', accion: 'calcular' },
   { metodos: ['GET'], prefijo: '/recetas', pestana: 'recetas', accion: 'ver' },
@@ -3375,6 +3380,8 @@ if (usarBuildReact && frontendPath) {
 
   function esRutaBackend(pathname = '') {
     const ruta = String(pathname || '').toLowerCase();
+    if (ruta === '/vitrina') return false;
+    if (ruta === '/tienda') return false;
     return prefijosBackend.some((prefijo) => ruta.startsWith(prefijo));
   }
 

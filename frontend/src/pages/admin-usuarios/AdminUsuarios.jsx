@@ -438,7 +438,7 @@ export default function AdminUsuarios() {
       <h2>Administración de Usuarios</h2>
       <div className="adminActualInfo">Administrador: {adminActual?.nombre || adminActual?.username || 'N/D'}</div>
       <div className="respaldoTotalAdminUsuarios">
-        <span className="respaldoTotalLeyenda">Respaldo total (incluye trastienda/configuración tienda)</span>
+        <span className="respaldoTotalLeyenda">Respaldo total (incluye trastienda/configuración tienda y archivos multimedia)</span>
         <div className="respaldoTotalAcciones">
           <button className="botonImportar" onClick={() => document.getElementById('importarTodoAdminUsuarios')?.click()}>Importar TODO</button>
           <input

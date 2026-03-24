@@ -87,8 +87,8 @@ const TITULOS_PAGINA = {
   recetas: 'Chipactli - recetas',
   produccion: 'Chipactli - produccion',
   ventas: 'Chipactli - ventas',
-  tienda: 'Chipactli - tienda',
-  trastienda: 'Chipactli - tienda',
+  tienda: 'Chipactli - vitrina',
+  trastienda: 'Chipactli - trastienda',
   utensilios: 'Chipactli - utensilios',
   'admin-usuarios': 'Chipactli - admin usuarios'
 };
@@ -135,10 +135,9 @@ function normalizarPermisos(permisos, rol) {
 function limpiarPayloadImportacionTodo(datos) {
   const payload = (datos && typeof datos === 'object' && !Array.isArray(datos)) ? { ...datos } : datos;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
-  if (Object.prototype.hasOwnProperty.call(payload, 'archivos_uploads_tienda')) {
-    delete payload.archivos_uploads_tienda;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'incluye_uploads_tienda')) {
+    payload.incluye_uploads_tienda = Array.isArray(payload.archivos_uploads_tienda) && payload.archivos_uploads_tienda.length > 0;
   }
-  payload.incluye_uploads_tienda = false;
   return payload;
 }
 
@@ -165,7 +164,6 @@ export default function App() {
   const [trastiendaDesbloqueada, setTrastiendaDesbloqueada] = useState(false);
   const [menuContextoTrastienda, setMenuContextoTrastienda] = useState({ visible: false, x: 0, y: 0 });
   const [importacionTodoPendiente, setImportacionTodoPendiente] = useState(null);
-  const inputImportarTodoMenuRef = useRef(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showPendientes, setShowPendientes] = useState(false);
   const [showAlertas, setShowAlertas] = useState(false);
@@ -253,19 +251,41 @@ export default function App() {
     recetas: '#/recetas',
     produccion: '#/produccion',
     ventas: '#/ventas',
-    tienda: '#/tienda',
     trastienda: '#/trastienda',
     utensilios: '#/utensilios',
     'admin-usuarios': '#/admin-usuarios'
   };
 
-  const getPageFromHash = () => {
-    const h = window.location.hash || '#/tienda';
+  const getPageFromLocation = () => {
+    const pathname = String(window.location.pathname || '/').trim().toLowerCase();
+    if (pathname === '/vitrina' || pathname.startsWith('/vitrina/')) return 'tienda';
+    if (pathname === '/tienda' || pathname.startsWith('/tienda/')) return 'tienda';
+
+    const h = window.location.hash || '';
     if (h.startsWith('#/trastienda')) return 'trastienda';
+    if (h.startsWith('#/vitrina')) return 'tienda';
     if (h.startsWith('#/tienda')) return 'tienda';
     const entry = Object.entries(hashMap).find(([key, hash]) => hash === h);
     return entry ? entry[0] : 'tienda';
   };
+
+  const navegarASeccion = useCallback((key, opciones = {}) => {
+    const url = new URL(window.location.href);
+    let siguiente = `${url.pathname}${url.search}${url.hash}`;
+
+    if (key === 'tienda') {
+      siguiente = '/vitrina';
+    } else {
+      const hash = hashMap[key] || '#/inventario';
+      siguiente = `/${hash}`;
+    }
+
+    if (opciones?.replace) {
+      window.history.replaceState({}, document.title, siguiente);
+    } else {
+      window.history.pushState({}, document.title, siguiente);
+    }
+  }, []);
 
   // synchronise page state with URL hash
   React.useEffect(() => {
@@ -280,20 +300,24 @@ export default function App() {
   }, []);
 
   React.useEffect(() => {
-    const onHashChange = () => {
+    const sincronizarRuta = () => {
       if (!isAuthenticated) {
         setPage('tienda');
-        if (window.location.hash !== '#/tienda') {
-          window.location.hash = '#/tienda';
+        if (window.location.pathname !== '/vitrina') {
+          navegarASeccion('tienda', { replace: true });
         }
         return;
       }
-      setPage(getPageFromHash());
+      setPage(getPageFromLocation());
     };
-    window.addEventListener('hashchange', onHashChange);
-    onHashChange();
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, [isAuthenticated]);
+    window.addEventListener('hashchange', sincronizarRuta);
+    window.addEventListener('popstate', sincronizarRuta);
+    sincronizarRuta();
+    return () => {
+      window.removeEventListener('hashchange', sincronizarRuta);
+      window.removeEventListener('popstate', sincronizarRuta);
+    };
+  }, [getPageFromLocation, isAuthenticated, navegarASeccion]);
 
   React.useEffect(() => {
     document.title = TITULO_PESTANA;
@@ -335,9 +359,26 @@ export default function App() {
   const changePage = (key) => {
     setPage(key);
     setShowSidebar(false);
-    const h = hashMap[key];
-    if (h) window.location.hash = h;
+    navegarASeccion(key);
   };
+
+  const toggleSidebar = useCallback((event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+
+    const scrollYActual = window.scrollY || window.pageYOffset || 0;
+    const contenedorScrollable = document.querySelector('.tiendaRootScroll, #app-content');
+    const scrollTopActual = contenedorScrollable instanceof HTMLElement ? contenedorScrollable.scrollTop : 0;
+
+    setShowSidebar((prev) => !prev);
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, scrollYActual);
+      if (contenedorScrollable instanceof HTMLElement) {
+        contenedorScrollable.scrollTop = scrollTopActual;
+      }
+    });
+  }, []);
 
   const canEditSection = useCallback((permisoClave) => {
     if (!currentUser) return false;
@@ -569,7 +610,7 @@ export default function App() {
       setToken(loginRes.token);
       setCurrentUser(usuario);
       setShowAccesoSistema(false);
-      setPage(getPageFromHash());
+      setPage(getPageFromLocation());
 
       setConfigInicial((prev) => ({
         ...prev,
@@ -635,7 +676,7 @@ export default function App() {
       setCurrentUser(usuario);
       setShowAccesoSistema(false);
       setLoginForm({ username: '', password: '' });
-      setPage(getPageFromHash());
+      setPage(getPageFromLocation());
 
       if (importacionTodoPendiente?.datos) {
         try {
@@ -699,8 +740,8 @@ export default function App() {
     setShowSidebar(false);
     setShowAlertas(false);
     setPage('tienda');
-    window.location.hash = '#/tienda';
-  }, []);
+    navegarASeccion('tienda', { replace: true });
+  }, [navegarASeccion]);
 
   React.useEffect(() => {
     const onAuthInvalid = (event) => {
@@ -815,7 +856,7 @@ export default function App() {
 
       window.dispatchEvent(new CustomEvent('chipactli:realtime', { detail: evento }));
 
-      // Keep realtime updates available for public views (e.g. tienda),
+      // Keep realtime updates available for public views (e.g. vitrina),
       // but only show internal alert feed to authenticated users.
       if (!isAuthenticated) return;
 
@@ -825,7 +866,7 @@ export default function App() {
         const metodo = String(evento?.metodo_pago || '').trim() || 'pago no definido';
         const total = formatearMoneda(evento?.total);
         const partes = [
-          folio ? `Nueva orden ${folio}` : 'Nueva orden en tienda',
+          folio ? `Nueva orden ${folio}` : 'Nueva orden en vitrina',
           `Cliente: ${cliente}`,
           total ? `Total: ${total}` : null,
           `Pago: ${metodo}`
@@ -1083,7 +1124,7 @@ export default function App() {
         { key: 'recetas', label: 'Recetas' },
         { key: 'produccion', label: 'Producción' },
         { key: 'ventas', label: 'Ventas' },
-        { key: 'tienda', label: 'Tienda' },
+        { key: 'tienda', label: 'Vitrina' },
         { key: 'trastienda', label: 'Trastienda' }
       ]
     },
@@ -1116,58 +1157,46 @@ export default function App() {
     }
   }, [isAuthenticated, page, currentUser]);
 
-  const pageComponents = {
-    inventario: Inventario,
-    recetas: Recetas,
-    produccion: Produccion,
-    ventas: Ventas,
-    tienda: () => (
-      <Tienda
-        modo="tienda"
-        mostrarAccesoRapidoPwa={mostrarInstalarPwa}
-        onActivarAccesoRapidoPwa={instalarAppPwa}
-      />
-    ),
-    trastienda: () => <Tienda modo="trastienda" />,
-    utensilios: Utensilios,
-    'admin-usuarios': AdminUsuarios
-  };
-  const PageComponent = pageComponents[page] || (() => null);
+  let pageContent = null;
+  switch (page) {
+    case 'inventario':
+      pageContent = <Inventario />;
+      break;
+    case 'recetas':
+      pageContent = <Recetas />;
+      break;
+    case 'produccion':
+      pageContent = <Produccion />;
+      break;
+    case 'ventas':
+      pageContent = <Ventas />;
+      break;
+    case 'tienda':
+      pageContent = (
+        <Tienda
+          modo="tienda"
+          mostrarLogoAccesoSistema
+          mostrarAccesoRapidoPwa={mostrarInstalarPwa}
+          onActivarAccesoRapidoPwa={instalarAppPwa}
+          integradaEnPanelInterno
+        />
+      );
+      break;
+    case 'trastienda':
+      pageContent = <Tienda modo="trastienda" />;
+      break;
+    case 'utensilios':
+      pageContent = <Utensilios />;
+      break;
+    case 'admin-usuarios':
+      pageContent = <AdminUsuarios />;
+      break;
+    default:
+      pageContent = null;
+      break;
+  }
 
   if (!isAuthenticated) {
-    const onArchivoImportarTodoMenu = async (event) => {
-      const input = event.target;
-      const archivo = input?.files?.[0];
-      if (!archivo) return;
-
-      try {
-        if (!String(archivo?.name || '').toLowerCase().endsWith('.json')) {
-          throw new Error('El archivo debe ser JSON');
-        }
-
-        const contenido = await archivo.text();
-        const datos = JSON.parse(contenido);
-        if (!datos || (Array.isArray(datos) && !datos.length)) {
-          throw new Error('El archivo está vacío');
-        }
-
-        const payloadImportacion = limpiarPayloadImportacionTodo(datos);
-
-        setMenuContextoTrastienda({ visible: false, x: 0, y: 0 });
-
-        await fetchAPIJSON('/api/importar/todo', {
-          method: 'POST',
-          body: payloadImportacion
-        });
-        mostrarNotificacion('✅ Respaldo TOTAL importado correctamente', 'exito');
-        refrescarDatosSinRecargar();
-      } catch (error) {
-        mostrarNotificacion(`❌ Error al importar: ${error?.message || 'Error desconocido'}`, 'error');
-      } finally {
-        if (input) input.value = '';
-      }
-    };
-
     const registrarToqueLogo = (event) => {
       const el = event.currentTarget;
       const rect = el.getBoundingClientRect();
@@ -1202,7 +1231,7 @@ export default function App() {
     };
 
     return (
-      <div className="app" style={{ minHeight: '100vh', padding: '20px' }} onContextMenu={abrirMenuTrastienda}>
+      <div className="app" style={{ minHeight: '100vh', padding: 0, backgroundColor: '#f4f1eb' }} onContextMenu={abrirMenuTrastienda}>
         <Tienda
           key="tienda-publica"
           modo="tienda"
@@ -1228,23 +1257,8 @@ export default function App() {
             >
               Entrar a trastienda
             </button>
-            <button
-              type="button"
-              className="menuContextoTrastiendaItem"
-              onClick={() => inputImportarTodoMenuRef.current?.click()}
-            >
-              Importar TODO
-            </button>
           </div>
         )}
-
-        <input
-          ref={inputImportarTodoMenuRef}
-          type="file"
-          accept=".json"
-          style={{ display: 'none' }}
-          onChange={onArchivoImportarTodoMenu}
-        />
 
         {showAccesoSistema && (
           <div className="accesoSistemaOverlay" onClick={() => { if (!configInicial.visible) setShowAccesoSistema(false); }}>
@@ -1489,7 +1503,7 @@ export default function App() {
                   {visibleItems.map(item => (
                     <li key={item.key} className="elementoMenuContenedor">
                       <a
-                        href={hashMap[item.key] || '#/inventario'}
+                        href={item.key === 'tienda' ? '/vitrina' : (hashMap[item.key] || '#/inventario')}
                         className={page === item.key ? 'activo elementoMenu enlaceMenu' : 'elementoMenu enlaceMenu'}
                         onClick={(event) => {
                           event.preventDefault();
@@ -1525,7 +1539,7 @@ export default function App() {
         <div className="headerCardFijo">
           <div className="headerLeft">
             <img id="logoEncabezado" src="/images/logo.png" alt="logo" />
-            <button className="botonToggleMenu botonPuntos" onClick={() => setShowSidebar(s => !s)} title="Abrir menú">⋮</button>
+            <button type="button" className="botonToggleMenu botonPuntos" onClick={toggleSidebar} title="Abrir menú">⋮</button>
           </div>
           <div className="tituloEncabezado">CHIPACTLI</div>
           <div className="headerRight">
@@ -1552,9 +1566,9 @@ export default function App() {
         </div>
 
         {/* legacy menu-toggle kept for smaller screens if needed */}
-        <button className="menu-toggle" onClick={() => setShowSidebar(s => !s)}>☰</button>
+        <button type="button" className="menu-toggle" onClick={toggleSidebar}>☰</button>
         <div id="app-content">
-          <PageComponent />
+          {pageContent}
         </div>
       </main>
 

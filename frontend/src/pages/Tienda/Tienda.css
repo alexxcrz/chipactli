@@ -1,11 +1,63 @@
+.tiendaCategoriaVisualCard.flash {
+  box-shadow: 0 0 0 4px #4a7c59, 0 10px 24px rgba(24, 49, 37, 0.22);
+  animation: tiendaCategoriaFlash 0.18s cubic-bezier(0.2, 0.9, 0.22, 1.05);
+  z-index: 2;
+}
+
+@keyframes tiendaCategoriaFlash {
+  0% {
+    box-shadow: 0 0 0 0 #4a7c59, 0 10px 24px rgba(24, 49, 37, 0.22);
+    filter: brightness(1.12);
+  }
+  60% {
+    box-shadow: 0 0 0 8px #4a7c59, 0 10px 24px rgba(24, 49, 37, 0.22);
+    filter: brightness(1.18);
+  }
+  100% {
+    box-shadow: 0 0 0 0 #4a7c59, 0 10px 24px rgba(24, 49, 37, 0.22);
+    filter: brightness(1.0);
+  }
+}
 .tiendaPromoBar {
   background: #1f1f1f;
   color: #fff;
   border-radius: 12px;
-  padding: 10px 16px;
+  padding: 10px 0;
   margin-bottom: 10px;
-  text-align: center;
   font-weight: 700;
+  overflow: hidden;
+  position: relative;
+  white-space: nowrap;
+}
+
+.tiendaPromoBarPista {
+  display: inline-flex;
+  align-items: center;
+  min-width: max-content;
+  gap: 18px;
+  padding-left: 18px;
+  animation: tiendaPromoMarquee 18s linear infinite;
+}
+
+.tiendaPromoBarTexto {
+  display: inline-block;
+}
+
+.tiendaPromoBarSeparador {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  font-size: 14px;
+}
+
+@keyframes tiendaPromoMarquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-50% - 9px));
+  }
 }
 
 .tiendaVisitasActivas {
@@ -170,79 +222,7 @@
   font-weight: 700;
 }
 
-.tiendaMetricasHorasFlecha:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.tiendaMetricasHorasRango {
-  font-size: 12px;
-  color: #476457;
-  font-variant-numeric: tabular-nums;
-}
-
-.tiendaMetricasLista {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tiendaMetricasLista li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border: 1px solid #edf2ef;
-  border-radius: 10px;
-  padding: 6px 8px;
-  background: #fafcfb;
-}
-
-.tiendaMetricasListaHoras li {
-  font-variant-numeric: tabular-nums;
-}
-
-.tiendaMetricasListaHoras li.tiendaHoraActual {
-  border-color: #9ec2ad;
-  background: #eef7f1;
-}
-
-.tiendaMetricasListaHoras li.tiendaHoraFutura {
-  opacity: 0.72;
-}
-
-.tiendaMetricasAyuda {
-  margin: 0;
-  border: 1px solid #dae5df;
-  border-radius: 10px;
-  background: #f8fcfa;
-  color: #365246;
-  padding: 8px 10px;
-  font-size: 12px;
-}
-
-.tiendaMetricasActualizado {
-  font-size: 12px;
-  color: #557264;
-}
-
-.tiendaHistorialVisitasChart {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tiendaHistorialVisitasFila {
-  display: grid;
-  grid-template-columns: 96px 1fr 46px;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #334f43;
-}
+/* Animaciones de overlay de categoría eliminadas por solicitud */
 
 .tiendaHistorialVisitasFila strong {
   text-align: right;
@@ -299,39 +279,30 @@
 }
 
 .tiendaHeaderLogoLado {
-  min-width: 86px;
+  min-width: 352px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .tiendaHeaderCentroShop {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 38px;
-  font-weight: 900;
-  color: var(--primary);
-  letter-spacing: 2px;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 6px rgba(33, 78, 56, 0.18);
-  /* pointer-events: none; */
+  display: none;
 }
 
 .tiendaBrandLogoBtn {
-  width: 66px;
-  height: 66px;
-  min-width: 66px;
-  min-height: 66px;
-  border: 3px solid #2a2a2a;
-  border-radius: 50%;
+  width: 336px;
+  height: 58px;
+  min-width: 336px;
+  min-height: 58px;
+  border: 1px solid rgba(201, 188, 169, 0.9);
+  border-radius: 16px;
   appearance: none;
   -webkit-appearance: none;
   background: #f5f1e8;
   padding: 0;
   cursor: pointer;
   overflow: hidden;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 16px rgba(64, 54, 38, 0.12);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -342,12 +313,237 @@
   transform: scale(1.03);
 }
 
+
 .tiendaBrandLogoImg {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 50%;
+  object-position: center;
+  transform: scaleY(1.14);
+  border-radius: inherit;
   display: block;
+}
+
+.tiendaMenuMovilToggle {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-direction: column;
+  padding: 0;
+  box-shadow: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.tiendaMenuMovilToggle svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.tiendaMenuMovilToggle path {
+  stroke: #1f8f57 !important;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.tiendaHeaderMovilEspaciador {
+  display: none;
+}
+
+.tiendaCartBtnMovil {
+  display: none;
+}
+
+.tiendaCartBtnMovil.tiendaSoloMovil {
+  display: none;
+}
+
+.tiendaMenuMovilOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4200;
+  background: rgba(18, 26, 22, 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+  display: none;
+}
+
+.tiendaMenuMovilOverlay.abierta {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tiendaMenuMovilPanel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: min(92vw, 380px);
+  height: 100dvh;
+  background: #fbf8f2;
+  box-shadow: 18px 0 42px rgba(12, 18, 15, 0.24);
+  transform: translateX(-100%);
+  transition: transform 0.24s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.tiendaMenuMovilPanel.abierta {
+  transform: translateX(0);
+}
+
+.tiendaMenuMovilHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: max(18px, calc(env(safe-area-inset-top, 0px) + 14px)) 14px 14px;
+  border-bottom: 1px solid rgba(169, 173, 165, 0.46);
+}
+
+.tiendaMenuMovilCuentaBtn {
+  border: none;
+  border-radius: 999px;
+  background: #f1eee7;
+  color: #1f2c24;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tiendaMenuMovilCuentaIcono {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1f2c24;
+}
+
+.tiendaMenuMovilCuentaIcono svg {
+  width: 100%;
+  height: 100%;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tiendaMenuMovilCerrar {
+  border: none;
+  background: transparent;
+  color: #2e3832;
+  font-size: 34px;
+  line-height: 1;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tiendaMenuMovilBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 14px max(24px, calc(env(safe-area-inset-bottom, 0px) + 18px));
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tiendaMenuMovilAcciones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tiendaMenuMovilAccion {
+  min-height: 48px;
+  border: 1px solid rgba(176, 185, 177, 0.44);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #23372d;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tiendaMenuMovilSeccion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(169, 173, 165, 0.46);
+}
+
+.tiendaMenuMovilSeccion h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 900;
+  color: #20362c;
+}
+
+.tiendaMenuMovilLista {
+  display: flex;
+  flex-direction: column;
+}
+
+.tiendaMenuMovilAccionCarrito strong {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #2b7a52;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.tiendaMenuMovilCategoriaBtn {
+  border: none;
+  border-bottom: 1px solid rgba(169, 173, 165, 0.34);
+  background: transparent;
+  color: #24342d;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 14px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.tiendaMenuMovilCategoriaBtn.activa {
+  background: transparent;
+  color: #1f6b46;
+}
+
+.tiendaMenuMovilCategoriaBtnFavoritos {
+  color: #9c4150;
+}
+
+.tiendaMenuMovilFlecha {
+  font-size: 24px;
+  line-height: 1;
+  color: rgba(31, 54, 43, 0.72);
 }
 
 .tiendaCategoriasBar {
@@ -483,23 +679,73 @@
   overflow-x: hidden;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: 56px;
+  padding-bottom: 0;
+  background: #f4f1eb;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.tiendaRootScroll::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+.tiendaPromoBar,
+.tiendaVisitasActivas,
+.tiendaMainHeader,
+.tiendaNotifPedidosInline,
+.tiendaCategoriasBar {
+  margin-bottom: 0;
 }
 
-.tiendaGridAdminFull {
-  padding-top: 6px;
-  padding-bottom: 26px;
-  overscroll-behavior-y: contain;
+.tiendaGrid {
+  gap: 0;
 }
 
+.categoria-ventana-overlay {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  background: white;
+  box-shadow: 0 0 40px 10px rgba(0,0,0,0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: none;
+}
+/* Animación de entrada (zoom in) */
+.categoria-ventana-overlay.entrando {
+  animation: ventana-zoom-in 0.18s cubic-bezier(0.9,0.1,0.2,1) forwards;
+}
+/* Animación de salida (zoom out) */
+.categoria-ventana-overlay.saliendo {
+  animation: ventana-zoom-out 0.12s cubic-bezier(0.9,0.1,0.2,1) forwards;
+}
+@keyframes ventana-zoom-in {
+  0% {
+    filter: blur(0px);
+    transform: scale(1);
+    opacity: 1;
+  }
+  60% {
+    filter: blur(2px);
+    opacity: 1;
+  }
+  100% {
+    filter: blur(0px);
+    transform: scale(8);
+    opacity: 0;
+  }
+}
+@keyframes ventana-zoom-out {
+  0% {
+    filter: blur(0px);
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    filter: blur(0px);
+    transform: scale(8);
+    opacity: 0;
+  }
+}
 .tiendaGridAdminFull .tiendaCatalogo {
   min-height: calc(100vh - 120px);
   overscroll-behavior-y: contain;
@@ -509,17 +755,493 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaCatalogo.tarjeta:hover {
+  transform: none;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+  border-color: #2a2a2a;
+}
+
+.tiendaHeader h2 {
+  margin: 0;
+  text-align: center;
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: 1px;
+  width: 100%;
+}
+
+.tiendaHeaderBusquedaCatalogo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(500px, 100%);
+  margin-left: auto;
+}
+
+.tiendaHeaderBusquedaCatalogo .cajaBusqueda {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tiendaCategoriasVista {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 18px;
   margin-bottom: 12px;
+}
+
+.tiendaCategoriasSidebarFina {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-right: 1px solid #ffffff;
+  padding-right: 12px;
+}
+
+.tiendaCategoriaSidebarBtn {
+  border: none;
+  background: transparent;
+  color: #2f2f2f;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  padding: 5px 2px;
+  border-radius: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.tiendaCategoriaSidebarBtn:hover {
+  color: #1f6b46;
+  text-decoration: underline;
+}
+
+.tiendaCategoriaSidebarBtn.activa {
+  color: #1f6b46;
+  text-decoration: underline;
+}
+
+.tiendaCategoriaSidebarBtnFavoritos {
+  color: #b45461;
+  margin-top: 12px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-top: 1px solid rgba(180, 84, 97, 0.24);
+  border-bottom: 1px solid rgba(180, 84, 97, 0.24);
+}
+
+.tiendaCategoriaSidebarBtnFavoritos:hover,
+.tiendaCategoriaSidebarBtnFavoritos.activa {
+  color: #b45461;
+}
+
+.tiendaCategoriasCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+  gap: 8px;
+  padding-left: 16px;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasVista {
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasSidebarFina {
+  padding-right: 12px;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasCardsGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding-left: 18px;
+  min-width: 0;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno,
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaGrid,
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCatalogo,
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaHeader,
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaHeaderBusquedaCatalogo {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCatalogo {
+  overflow-x: hidden;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriaVisualCard {
+  min-height: 146px;
+  aspect-ratio: 3 / 4;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriaVisualTitulo {
+  font-size: 15px;
+  bottom: 18px;
+}
+
+.tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriaVisualMeta {
+  font-size: 11px;
+  bottom: 8px;
+}
+
+.tiendaCategoriaVisualCard {
+  position: relative;
+  border: 1px solid #ffffff;
+  border-radius: 13px;
+  overflow: hidden;
+  aspect-ratio: 4 / 5;
+  min-height: 192px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  background: #f4f1eb;
+  transform: translateZ(0);
+  transition: box-shadow 0.28s ease;
+}
+
+.tiendaCategoriaVisualCard.activa {
+  box-shadow: 0 0 0 2px rgba(31, 107, 70, 0.35);
+}
+
+.tiendaCategoriaVisualCard:hover {
+  box-shadow: 0 10px 24px rgba(24, 49, 37, 0.22);
+}
+
+.tiendaCategoriaVisualCard.entrando {
+  animation: tiendaCategoriaEntrando 0.4s ease-out;
+}
+
+.tiendaCategoriaVisualImg,
+.tiendaCategoriaVisualPlaceholder {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.tiendaCategoriaVisualImg {
+  display: block;
+  max-width: none !important;
+  min-width: 100%;
+  min-height: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  transition: transform 0.45s ease;
+}
+
+@media (max-width: 1320px) {
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasCardsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasVista {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasSidebarFina {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid #ffffff;
+    padding-right: 0;
+    padding-bottom: 10px;
+    gap: 12px;
+  }
+
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriaSidebarBtn {
+    white-space: nowrap;
+    padding: 6px 0;
+  }
+
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasCardsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .tiendaRootScroll.tiendaEnPanelInterno .tiendaCategoriasCardsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tiendaCategoriaVisualCard:hover .tiendaCategoriaVisualImg {
+  transform: scale(1.09);
+}
+
+.tiendaCategoriaVisualPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2e4b3f;
+  font-weight: 800;
+  font-size: 16px;
+  background: linear-gradient(150deg, #dfe9e2 0%, #f4f1eb 100%);
+}
+
+.tiendaCategoriaVisualCapa {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.04) 35%, rgba(0, 0, 0, 0.56) 100%);
+}
+
+.tiendaCategoriaVisualTitulo,
+.tiendaCategoriaVisualMeta {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  z-index: 1;
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.tiendaCategoriaVisualTitulo {
+  bottom: 20px;
+  font-weight: 900;
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.tiendaCategoriaVisualMeta {
+  bottom: 9px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.tiendaCategoriasHint {
+  border: 1px dashed #ffffff;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  color: #2f4f3f;
+  font-weight: 700;
+  background: #f4f1eb;
+}
+
+.tiendaVistaCategoriaAcciones {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.tiendaCategoriaVolverBtn {
+  border: 1px solid #ffffff;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #2f4f3f;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.tiendaCategoriaVolverBtn:hover {
+  background: #f6fbf8;
+}
+
+.tiendaProductosEntrada {
+  animation: tiendaVentanaEntrada 0.38s cubic-bezier(0.2, 0.9, 0.22, 1.05);
+}
+
+/* Animación overlay de transición de categoría */
+.tiendaCategoriaTransicionVentana {
+  position: fixed;
+  z-index: 3600;
+  pointer-events: none;
+  border-radius: 14px;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 14px 36px rgba(11, 30, 21, 0.34);
+  transform-origin: center center;
+}
+
+.tiendaCategoriaTransicionVentana.entrando {
+  animation: tiendaEntrarPorVentanaReal 0.56s cubic-bezier(0.18, 0.9, 0.22, 1.03) forwards;
+}
+.tiendaCategoriaTransicionVentana.saliendo {
+  animation: tiendaSalirPorVentanaReal 0.22s cubic-bezier(0.9,0.1,0.2,1) forwards;
+}
+
+@keyframes tiendaSalirPorVentanaReal {
+  0% {
+    opacity: 0.98;
+    transform: scale(1);
+    border-radius: 14px;
+    filter: saturate(1);
+  }
+  40% {
+    opacity: 0.92;
+    transform: scale(0.7);
+    border-radius: 18px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.15);
+    border-radius: 40px;
+    filter: blur(2.5px) saturate(0.85);
+  }
+}
+
+.tiendaCategoriaTransicionVentana::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.48) 100%);
+}
+
+.tiendaCategoriaTransicionEtiqueta {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes tiendaCategoriaEntrando {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1.02);
+  }
+}
+
+@keyframes tiendaVentanaEntrada {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes tiendaEntrarPorVentanaReal {
+  0% {
+    opacity: 0.98;
+    transform: scale(1);
+    border-radius: 14px;
+    filter: saturate(1);
+  }
+  45% {
+    opacity: 0.92;
+    transform: scale(2.7);
+    border-radius: 12px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(7.5);
+    border-radius: 2px;
+    filter: blur(1.5px) saturate(0.95);
+  }
+}
+
+.tiendaAdminCategoriasImagenes {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dbe5df;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fbfdfb;
+}
+
+.tiendaAdminCategoriasImagenesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tiendaAdminCategoriasImagenesGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.tiendaAdminCategoriaImagenCard {
+  border: 1px solid #dce6df;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.tiendaAdminCategoriaImagenTitulo {
+  font-size: 12px;
+  font-weight: 800;
+  color: #2f4f3f;
+}
+
+.tiendaAdminCategoriaImagenPreview,
+.tiendaAdminCategoriaImagenPlaceholder {
+  width: 100%;
+  height: 96px;
+  border-radius: 10px;
+  border: 1px solid #e1e9e4;
+}
+
+.tiendaAdminCategoriaImagenPreview {
+  object-fit: cover;
+  display: block;
+}
+
+.tiendaAdminCategoriaImagenPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7c74;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f7faf8;
+}
+
+.tiendaAdminCategoriaImagenAcciones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
 
 .tiendaHeaderAcciones {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   position: relative;
+  flex: 0 0 auto;
+}
+
+.tiendaHeaderAcciones.tiendaSoloDesktop {
+  display: flex;
+}
+
+.tiendaSesionBtnInvitado {
+  max-width: min(32vw, 196px);
 }
 
 .tiendaAccesoRapidoBtn {
@@ -546,11 +1268,14 @@
 }
 
 .tiendaHeaderBusquedaWrap {
-  width: 100%;
+  flex: 1 1 320px;
+  min-width: 220px;
+  max-width: 560px;
 }
 
 .tiendaHeaderBusquedaWrap .cajaBusqueda {
   width: 100%;
+  min-width: 0;
 }
 
 .tiendaResetBtn {
@@ -590,19 +1315,36 @@
 }
 
 .tiendaCartBtn {
-  width: 46px;
-  height: 46px;
+  width: 44px;
+  height: 44px;
   padding: 0;
-  border-radius: 999px;
-  border: 2px solid #5e8f66;
-  background: linear-gradient(180deg, #f5fbf7 0%, #e7f3eb 100%);
+  border-radius: 0;
+  border: none;
+  background: transparent;
   position: relative;
-  font-size: 21px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6px 16px rgba(80, 55, 20, 0.2);
+  color: #3f8a52;
+  box-shadow: none;
+  transition: color 0.18s ease, transform 0.18s ease, filter 0.18s ease;
+}
+
+.tiendaCartBtn:hover {
+  color: #2f7441;
+  filter: drop-shadow(0 2px 6px rgba(63, 138, 82, 0.18));
+  transform: translateY(-1px);
+}
+
+.tiendaCartBtn svg {
+  width: 29px;
+  height: 29px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .tiendaBellBtn {
@@ -690,49 +1432,91 @@
 .tiendaSaludoCliente {
   position: relative;
   min-width: 0;
-  max-width: min(30vw, 180px);
-  padding: 0 0 0 2px;
+  max-width: min(31vw, 188px);
+  min-height: 44px;
+  padding: 5px 10px 5px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  line-height: 1.05;
+  overflow: visible;
+  border: 1px solid #c8d7c9;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(249, 246, 239, 0.98) 0%, rgba(241, 236, 226, 0.98) 100%),
+    radial-gradient(circle at top left, rgba(116, 161, 121, 0.16), transparent 58%);
+  box-shadow: 0 5px 14px rgba(67, 51, 28, 0.09);
+  cursor: pointer;
+  text-align: left;
+}
+
+.tiendaSaludoCliente:hover {
+  border-color: #b8c9b6;
+  box-shadow: 0 8px 18px rgba(67, 51, 28, 0.13);
+}
+
+.tiendaSaludoContenido {
+  min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  line-height: 1.05;
-  overflow: visible;
 }
 
 .tiendaSaludoEnredadera {
   display: block;
   width: 100%;
-  min-width: 88px;
-  height: 14px;
-  margin-bottom: 1px;
+  min-width: 76px;
+  height: 11px;
+  margin-bottom: 2px;
 }
 
 .tiendaSaludoEnredadera svg {
   width: 100%;
   height: 100%;
-  fill: rgba(116, 161, 121, 0.35);
-  stroke: #6a9a6f;
+  fill: rgba(116, 161, 121, 0.22);
+  stroke: #73a277;
   stroke-width: 1.25;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .tiendaSaludoLabel {
-  color: #99a3ac;
-  font-size: 11px;
+  color: #6c8c72;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   margin-bottom: 1px;
 }
 
 .tiendaSaludoNombre {
-  color: #212121;
-  font-size: clamp(14px, 1.35vw, 21px);
-  font-weight: 800;
-  letter-spacing: 0;
+  color: #1f2a21;
+  font-size: clamp(13px, 1.15vw, 18px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tiendaSaludoIcono {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tiendaSaludoIcono svg {
+  width: 29px;
+  height: 29px;
+  stroke: #4f8659;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .tiendaNotifsClientePanel {
@@ -788,30 +1572,35 @@
 
 .tiendaCartCount {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
   border-radius: 999px;
-  background: #d9534f;
+  border: 1.5px solid #f3ede1;
+  background: #bc5a43;
   color: #fff;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
 }
 
 .tiendaProductos {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
+  padding-right: 10px;
+  box-sizing: border-box;
 }
 
 .tiendaCategoriaBloque {
   display: grid;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .tiendaCategoriaTitulo {
@@ -834,27 +1623,143 @@
 }
 
 .tiendaProductoCard {
+  position: relative;
   border: 1px solid #d8dfdb;
-  border-radius: 16px;
-  padding: 9px;
+  border-radius: 14px;
+  padding: 38px 8px 8px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   background: #fff;
   height: 100%;
   min-width: 0;
 }
 
+.tiendaFavoritoBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid #d8dfdb;
+  background: rgba(255, 255, 255, 0.96);
+  color: #8b9b91;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  overflow: visible;
+  isolation: isolate;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.18s ease;
+}
+
+.tiendaFavoritoBtn:active {
+  transform: scale(0.92);
+}
+
+.tiendaFavoritoIcono {
+  font-size: 15px;
+  line-height: 1;
+  position: relative;
+  z-index: 2;
+  transition: transform 0.2s ease;
+}
+
+.tiendaFavoritoBtn:hover {
+  background: #fff4f5;
+  color: #cf5d68;
+  border-color: #e2b3b8;
+}
+
+.tiendaFavoritoBtn.activa {
+  background: #fff1f2;
+  color: #cf5d68;
+  border-color: #e2b3b8;
+}
+
+.tiendaFavoritoBtn:hover .tiendaFavoritoIcono,
+.tiendaFavoritoBtn.activa .tiendaFavoritoIcono {
+  transform: scale(1.08);
+}
+
+.tiendaFavoritoBurst {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tiendaFavoritoBurstPart {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: #dd6a77;
+  opacity: 0;
+  text-shadow: 0 0 10px rgba(221, 106, 119, 0.28);
+  animation: tiendaFavoritoBurst 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.tiendaFavoritoBurstPart:nth-child(1) {
+  --burst-x: 0px;
+  --burst-y: -20px;
+}
+
+.tiendaFavoritoBurstPart:nth-child(2) {
+  --burst-x: 15px;
+  --burst-y: -11px;
+  animation-delay: 0.03s;
+}
+
+.tiendaFavoritoBurstPart:nth-child(3) {
+  --burst-x: 17px;
+  --burst-y: 7px;
+  animation-delay: 0.06s;
+}
+
+.tiendaFavoritoBurstPart:nth-child(4) {
+  --burst-x: -15px;
+  --burst-y: -9px;
+  animation-delay: 0.04s;
+}
+
+.tiendaFavoritoBurstPart:nth-child(5) {
+  --burst-x: -17px;
+  --burst-y: 8px;
+  animation-delay: 0.08s;
+}
+
+@keyframes tiendaFavoritoBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--burst-x, 0px)), calc(-50% + var(--burst-y, -18px))) scale(1.05);
+  }
+}
+
 .tiendaProductoCard h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.2;
 }
 
 .tiendaCardFooter {
   margin-top: 2px;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -866,7 +1771,7 @@
   border: 1px solid #dde6e0;
   border-radius: 10px;
   background: #f8fcf9;
-  padding: 6px 8px;
+  padding: 5px 7px;
   min-width: 0;
 }
 
@@ -926,7 +1831,7 @@
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 1 / 1;
-  width: 92%;
+  width: 88%;
   height: auto;
   margin: 0 auto;
   background: #f2f5f3;
@@ -1460,6 +2365,10 @@
   margin-top: 4px;
 }
 
+.tiendaFooterRedesMovil {
+  display: none;
+}
+
 .tiendaRedSocialItem {
   display: flex;
   flex-direction: column;
@@ -1511,6 +2420,14 @@
   color: #2f2f2f;
   font-weight: 700;
   text-decoration: underline;
+}
+
+.tiendaFooterHorario {
+  margin: 0;
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
 .tiendaFooterInfoBtn {
@@ -1780,6 +2697,10 @@
 .tiendaFooterPagos {
   margin-top: 10px;
   font-weight: 800;
+}
+
+.tiendaFooterPagosMovil {
+  display: none;
 }
 
 .tiendaFooterPagosLogos {
@@ -3068,22 +3989,64 @@
 
 @media (max-width: 768px) {
   .tiendaMainHeader {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      'logo . acciones'
-      'titulo titulo titulo'
-      'busqueda busqueda busqueda';
-    align-items: start;
-    column-gap: 14px;
-    row-gap: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    position: relative;
+    min-height: 0;
+    row-gap: 8px;
   }
 
   .tiendaHeaderLogoLado {
-    grid-area: logo;
-    width: auto;
+    width: 100%;
+    max-width: none;
     min-width: 0;
-    justify-content: flex-start;
+    order: 0;
+    flex: 0 0 auto;
+    justify-content: center;
+    margin: 0 auto 8px;
+  }
+
+  .tiendaMenuMovilToggle {
+    display: inline-flex;
+    position: absolute;
+    top: 8px;
+    left: 0;
+    justify-self: start;
+    align-self: flex-start;
+    z-index: 3;
+  }
+
+  .tiendaCartBtnMovil {
+    display: inline-flex;
+    position: absolute;
+    top: 8px;
+    right: 0;
+    z-index: 3;
+  }
+
+  .tiendaCartBtnMovil.tiendaSoloMovil {
+    display: inline-flex;
+  }
+
+  .tiendaRootScrollAdminMovil .tiendaAdminTabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .tiendaRootScrollAdminMovil .tiendaAdminTabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tiendaRootScrollAdminMovil .tiendaAdminTabs .tiendaTab {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .tiendaHeaderAcciones {
@@ -3100,8 +4063,10 @@
   }
 
   .tiendaHeaderBusquedaWrap {
-    grid-area: busqueda;
+    order: 1;
+    flex: 0 0 auto;
     width: 100%;
+    margin-top: 0;
   }
 
   .tiendaSoloMovil {
@@ -3110,13 +4075,6 @@
 
   .tiendaSoloDesktop {
     display: none;
-  }
-
-  .tiendaHeaderCentroShop {
-    grid-area: titulo;
-    order: initial;
-    text-align: center;
-    width: 100%;
   }
 
   .tiendaCatalogo.tarjeta {
@@ -3129,12 +4087,22 @@
     font-size: 12px;
     line-height: 1.25;
     font-weight: 600;
-    padding: 8px 10px;
+    padding: 8px 0;
+  }
+
+  .tiendaPromoBarPista {
+    gap: 14px;
+    padding-left: 14px;
+    animation-duration: 14s;
   }
 
   .tiendaMainHeader {
-    padding: 8px 10px;
+    padding: 0;
     gap: 8px;
+    margin-bottom: 10px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
   }
 
   .tiendaHeaderBusquedaWrap .cajaBusqueda {
@@ -3149,20 +4117,72 @@
     padding: 6px 10px;
   }
 
-  .tiendaHeaderCentroShop {
-    font-size: 24px;
-    letter-spacing: 1px;
-  }
-
   .tiendaHeader {
     margin-bottom: 8px;
   }
 
+  .tiendaHeader h2 {
+    font-size: 28px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .tiendaHeaderBusquedaCatalogo {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .tiendaHeaderBusquedaCatalogo .cajaBusqueda {
+    width: 100%;
+  }
+
+  .tiendaCategoriasVista {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .tiendaCategoriasSidebarFina {
+    display: none;
+  }
+
+  .tiendaCategoriaSidebarBtn {
+    white-space: nowrap;
+    padding: 6px 0;
+  }
+
+  .tiendaCategoriaSidebarBtnFavoritos {
+    margin-top: 0;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    padding-left: 12px;
+    border-top: none;
+    border-bottom: none;
+    border-left: 1px solid rgba(180, 84, 97, 0.24);
+    border-right: 1px solid rgba(180, 84, 97, 0.24);
+    margin-left: 8px;
+    padding-right: 2px;
+  }
+
+  .tiendaCategoriasCardsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiendaCategoriaVisualTitulo {
+    font-size: 18px;
+    bottom: 24px;
+  }
+
   .tiendaBrandLogoBtn {
-    width: 54px;
-    height: 54px;
-    min-width: 54px;
-    min-height: 54px;
+    width: min(calc(100vw - 96px), 300px);
+    height: 56px;
+    min-width: min(calc(100vw - 96px), 300px);
+    min-height: 56px;
+    border-radius: 14px;
+    margin: 0 auto;
+  }
+
+  .tiendaMenuMovilOverlay {
+    display: block;
   }
 
   .tiendaHeaderAcciones .boton {
@@ -3172,10 +4192,18 @@
     margin-right: 0;
   }
 
+  .tiendaSesionBtnInvitado {
+    max-width: min(45vw, 148px);
+  }
+
   .tiendaCartBtn {
-    width: 38px;
-    height: 38px;
-    font-size: 17px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .tiendaCartBtn svg {
+    width: 26px;
+    height: 26px;
   }
 
   .tiendaCategoriasBar {
@@ -3197,7 +4225,7 @@
 
   .tiendaProductoCard {
     border-radius: 12px;
-    padding: 8px;
+    padding: 40px 8px 8px;
     gap: 6px;
   }
 
@@ -5416,41 +6444,37 @@
   height: 16px;
 }
 
-@media (max-width: 1080px) {
+@media (min-width: 769px) and (max-width: 1080px) {
   .tiendaGrid {
     grid-template-columns: 1fr;
   }
 
   .tiendaMainHeader {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-
-  .tiendaHeaderCentroShop {
-    position: static;
-    transform: none;
-    width: 100%;
-    text-align: center;
-    order: 2;
+    flex-wrap: nowrap;
+    justify-content: space-between;
   }
 
   .tiendaHeaderLogoLado {
-    width: 100%;
-    order: 1;
-    justify-content: flex-start;
+    width: auto;
+    min-width: 236px;
+    order: 0;
+    justify-content: center;
   }
 
   .tiendaBrandLogoBtn {
-    width: 60px;
-    height: 60px;
-    min-width: 60px;
-    min-height: 60px;
+    width: 236px;
+    height: 46px;
+    min-width: 236px;
+    min-height: 46px;
+    border-radius: 13px;
   }
 
   .tiendaHeaderAcciones {
-    width: 100%;
-    justify-content: flex-start;
-    order: 3;
+    width: max-content;
+    justify-content: flex-end;
+    order: 0;
+    flex-wrap: nowrap;
+    margin-left: 0;
   }
 
   .tiendaFooter {
@@ -5507,6 +6531,106 @@
   }
 }
 
+@media (max-width: 700px) {
+  .tiendaFooter {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'marca marca'
+      'redes redes'
+      'atencion info'
+      'pagos pagos';
+    gap: 12px;
+  }
+
+  .tiendaFooterColMarca {
+    grid-area: marca;
+    align-items: center;
+    text-align: center;
+  }
+
+  .tiendaFooterColMarca p {
+    order: 2;
+    width: 100%;
+    margin: 0;
+    text-align: center;
+  }
+
+  .tiendaFooterColMarca h4 {
+    order: 1;
+    width: 100%;
+    text-align: center;
+  }
+
+  .tiendaFooterColAtencion {
+    grid-area: atencion;
+  }
+
+  .tiendaFooterRedesDesktop {
+    display: none;
+  }
+
+  .tiendaFooterRedesMovil {
+    display: flex;
+    grid-area: redes;
+    justify-content: center;
+    margin-top: 2px;
+    margin-bottom: 2px;
+  }
+
+  .tiendaFooterColInfo {
+    grid-area: info;
+    min-width: 0;
+  }
+
+  .tiendaFooterPagos {
+    margin-top: auto;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .tiendaFooterPagosDesktop {
+    display: none;
+  }
+
+  .tiendaFooterPagosMovil {
+    display: block;
+    grid-area: pagos;
+    margin-top: 2px;
+  }
+
+  .tiendaFooterPagosLogosWrap {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .tiendaFooterPagosLogosWrap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tiendaFooterPagoTextoItem {
+    white-space: nowrap;
+  }
+
+  .tiendaFooterPagos > span {
+    display: block;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tiendaFooterPagos > span::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tiendaFooterCol h4 {
+    font-size: 24px;
+  }
+}
+
 @media (max-width: 980px) {
   .tiendaRootScroll {
     min-height: auto;
@@ -5514,7 +6638,7 @@
     height: auto !important;
     overflow-y: visible;
     overscroll-behavior-y: auto;
-    padding-bottom: 78px;
+    padding-bottom: 0;
   }
 
   .tiendaRootScroll.tiendaRootScrollAdminMovil {
@@ -5638,21 +6762,40 @@
     gap: 4px;
   }
 
+  .tiendaSesionBtnInvitado {
+    max-width: min(45vw, 156px);
+  }
+
   .tiendaSaludoCliente {
-    max-width: min(40vw, 130px);
+    max-width: min(45vw, 148px);
+    min-height: 40px;
+    padding: 5px 9px 5px 9px;
+    border-radius: 13px;
+    gap: 7px;
+  }
+
+  .tiendaSaludoIcono {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .tiendaSaludoIcono svg {
+    width: 26px;
+    height: 26px;
   }
 
   .tiendaSaludoEnredadera {
-    min-width: 70px;
-    height: 12px;
+    min-width: 62px;
+    height: 10px;
   }
 
   .tiendaSaludoLabel {
-    font-size: 10px;
+    font-size: 9px;
   }
 
   .tiendaSaludoNombre {
-    font-size: clamp(12px, 3.8vw, 16px);
+    font-size: clamp(11px, 3.4vw, 15px);
   }
 
   .tiendaHeaderAcciones .boton {

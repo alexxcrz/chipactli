@@ -51,10 +51,10 @@ export async function exportarDatos(tipo) {
       throw new Error('Solo está habilitado exportar TODO');
     }
 
-    const endpointTodo = `${obtenerURLAPI()}/api/exportar/todo?include_uploads=0`;
+    const endpointTodo = `${obtenerURLAPI()}/api/exportar/todo?include_uploads=1`;
     const datosTodo = await fetchAPIJSON(endpointTodo);
     descargarJson(datosTodo, tipo);
-    mostrarNotificacion('✅ Respaldo TOTAL exportado correctamente (sin archivos multimedia)', 'exito');
+    mostrarNotificacion('✅ Respaldo TOTAL exportado correctamente con archivos multimedia', 'exito');
   } catch (error) {
     console.error('Error al exportar:', error);
     mostrarNotificacion(`❌ Error al exportar ${tipo}: ${error.message}`, 'error');

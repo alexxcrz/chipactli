@@ -391,8 +391,8 @@ function resolverBasePublicaTienda() {
 function construirLinkProductoResena(slugProducto = '') {
   const base = resolverBasePublicaTienda();
   const slug = String(slugProducto || '').trim();
-  if (!slug) return `${base}/#/tienda`;
-  return `${base}/#/tienda?producto=${encodeURIComponent(slug)}`;
+  if (!slug) return `${base}/vitrina`;
+  return `${base}/vitrina?producto=${encodeURIComponent(slug)}`;
 }
 
 function construirCorreoRecordatorioResena({

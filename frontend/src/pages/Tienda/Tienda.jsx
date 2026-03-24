@@ -6437,7 +6437,10 @@ function Tienda({
                       <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
                     </svg>
                   </span>
-                  <span>Iniciar sesión</span>
+                  <span className="tiendaMenuMovilCuentaTexto">
+                    <span className="tiendaMenuMovilCuentaLabel">Bienvenido</span>
+                    <strong className="tiendaMenuMovilCuentaNombre">Inicia sesión</strong>
+                  </span>
                 </button>
               ) : (
                 <button
@@ -6451,7 +6454,10 @@ function Tienda({
                       <path d="M4.5 19.5c0-3.8 3.3-6.4 7.5-6.4s7.5 2.6 7.5 6.4" />
                     </svg>
                   </span>
-                  <span>{nombreClienteHeader}</span>
+                  <span className="tiendaMenuMovilCuentaTexto">
+                    <span className="tiendaMenuMovilCuentaLabel">Bienvenido</span>
+                    <strong className="tiendaMenuMovilCuentaNombre">{nombreClienteHeader}</strong>
+                  </span>
                 </button>
               )}
               <button

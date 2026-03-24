@@ -4204,6 +4204,63 @@ function Tienda({
   }, []);
 
   useEffect(() => {
+    if (!(esVistaTrastienda || vistaActiva === 'trastienda')) return undefined;
+    if (typeof window === 'undefined' || window.innerWidth > 980) return undefined;
+
+    const contenedor = contenedorScrollRef.current;
+    if (!contenedor) return undefined;
+
+    const tieneScrollPropio = (objetivo) => {
+      let nodo = objetivo instanceof Element ? objetivo : null;
+      while (nodo && nodo !== contenedor) {
+        const estilo = window.getComputedStyle(nodo);
+        const overflowY = String(estilo?.overflowY || '').toLowerCase();
+        const desplazable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+          && nodo.scrollHeight > nodo.clientHeight;
+        if (desplazable) return true;
+        nodo = nodo.parentElement;
+      }
+      return false;
+    };
+
+    let startX = 0;
+    let startY = 0;
+
+    const onTouchStart = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      startX = Number(touch.clientX) || 0;
+      startY = Number(touch.clientY) || 0;
+    };
+
+    const onTouchMove = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) return;
+      if (tieneScrollPropio(event.target)) return;
+
+      const deltaX = (Number(touch.clientX) || 0) - startX;
+      const deltaY = (Number(touch.clientY) || 0) - startY;
+      if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
+
+      const maxScroll = Math.max(0, contenedor.scrollHeight - contenedor.clientHeight);
+      const estaArriba = contenedor.scrollTop <= 0;
+      const estaAbajo = contenedor.scrollTop >= maxScroll - 1;
+
+      if ((estaArriba && deltaY > 0) || (estaAbajo && deltaY < 0)) {
+        event.preventDefault();
+      }
+    };
+
+    contenedor.addEventListener('touchstart', onTouchStart, { passive: true });
+    contenedor.addEventListener('touchmove', onTouchMove, { passive: false });
+
+    return () => {
+      contenedor.removeEventListener('touchstart', onTouchStart);
+      contenedor.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [esVistaTrastienda, vistaActiva]);
+
+  useEffect(() => {
     const contenedor = contenedorScrollRef.current;
     if (!contenedor) return undefined;
 

@@ -6647,7 +6647,7 @@
     height: calc(100dvh - 96px) !important;
     overflow-y: auto;
     overflow-x: hidden;
-    overscroll-behavior-y: contain;
+    overscroll-behavior-y: none;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
   }
@@ -6656,7 +6656,7 @@
   .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminPanel,
   .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminForm {
     touch-action: pan-y;
-    overscroll-behavior-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .tiendaGridAdminFull .tiendaCatalogo {

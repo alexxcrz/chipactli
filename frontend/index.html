@@ -27,14 +27,6 @@
     <meta name="apple-mobile-web-app-title" content="Chipactli">
     <!-- legacy styles (kept for reference, most rules now in App.css) -->
     <link rel="stylesheet" href="/styles/login.css">
-    <!-- suppress distracting Chrome extension errors -->
-    <script>
-      window.addEventListener('error', (e) => {
-        if (e.message && e.message.includes('message channel closed')) {
-          e.preventDefault();
-        }
-      }, true);
-    </script>
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   </head>
   <body>

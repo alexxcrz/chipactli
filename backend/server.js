@@ -251,12 +251,12 @@ app.use(helmet({
         useDefaults: true,
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
+          scriptSrc: ["'self'", 'https://challenges.cloudflare.com'],
           styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           connectSrc: ["'self'", 'https:', 'wss:'],
           fontSrc: ["'self'", 'data:', 'https:'],
-          frameSrc: ["'self'", 'https://www.mercadopago.com', 'https://www.mercadopago.com.mx', 'https://*.mercadopago.com', 'https://*.mercadopago.com.mx'],
+          frameSrc: ["'self'", 'https://challenges.cloudflare.com', 'https://www.mercadopago.com', 'https://www.mercadopago.com.mx', 'https://*.mercadopago.com', 'https://*.mercadopago.com.mx'],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: []
         }

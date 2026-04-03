@@ -35,6 +35,44 @@
   margin: 10px 0 14px 0;
 }
 
+.produccionControlesEncabezado {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.produccionFiltrosRapidos {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chipFiltroProduccion {
+  border: 1px solid #d8d1c6;
+  background: #fff9f1;
+  color: #5d5243;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.chipFiltroProduccion:hover {
+  transform: translateY(-1px);
+  border-color: #b89d74;
+}
+
+.chipFiltroProduccion.activo {
+  background: linear-gradient(135deg, #4a7c59 0%, #7ea16b 100%);
+  color: #fff;
+  border-color: #4a7c59;
+  box-shadow: 0 8px 18px rgba(74,124,89,0.18);
+}
+
 .botonHojitaProduccion {
   display: inline-flex;
   align-items: center;
@@ -256,6 +294,21 @@
   border-radius: 12px;
   padding: 20px;
   background: #fff;
+}
+
+@media (max-width: 900px) {
+  .produccionControlesEncabezado {
+    justify-content: flex-start;
+  }
+
+  .produccionFiltrosRapidos {
+    width: 100%;
+  }
+
+  .chipFiltroProduccion {
+    flex: 1 1 150px;
+    text-align: center;
+  }
 }
 
 .produccionHistorialTabs {

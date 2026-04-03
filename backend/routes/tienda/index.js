@@ -4,8 +4,23 @@ import nodemailer from "nodemailer";
 import crypto from "crypto";
 import { convertirCantidadDetallada } from "../../utils/index.js";
 import { transmitir } from "../../utils/index.js";
+import { resolveTiendaJwtSecret } from "../../utils/security-secrets/index.js";
+import { createLoginAttemptManager } from "../../utils/login-protection/index.js";
+import { validarPasswordSegura } from "../../utils/password-policy/index.js";
+import { verificarTurnstile } from "../../utils/turnstile/index.js";
 
-const TIENDA_JWT_SECRET = process.env.TIENDA_JWT_SECRET || process.env.JWT_SECRET || "chipactli_tienda_jwt_secret";
+const TIENDA_JWT_SECRET = resolveTiendaJwtSecret();
+const TIENDA_LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.TIENDA_LOGIN_MAX_ATTEMPTS || 5));
+const TIENDA_LOGIN_WINDOW_MS = Math.max(60_000, Number(process.env.TIENDA_LOGIN_WINDOW_MS || (15 * 60 * 1000)));
+const TIENDA_LOGIN_LOCK_MS = Math.max(60_000, Number(process.env.TIENDA_LOGIN_LOCK_MS || (15 * 60 * 1000)));
+const TIENDA_AUTH_COOKIE = 'chipactli_cliente_session';
+const TIENDA_AUTH_COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const tiendaLoginProtection = createLoginAttemptManager({
+  scope: 'tienda-auth',
+  maxAttempts: TIENDA_LOGIN_MAX_ATTEMPTS,
+  windowMs: TIENDA_LOGIN_WINDOW_MS,
+  lockMs: TIENDA_LOGIN_LOCK_MS
+});
 const PREFIJO_FOLIO_TIENDA_WEB = 'CHIVT';
 const PREFIJO_FOLIO_TIENDA_APP = 'CHIAPP';
 const LONGITUD_CONSECUTIVO_TIENDA = 6;
@@ -15,6 +30,52 @@ const INTERVALO_RECORDATORIO_RESENA_MS = Math.max(60 * 60 * 1000, Number(process
 
 let mailTransporter = null;
 let schedulerRecordatorioResenaIniciado = false;
+
+function textoSeguroTienda(valor, max = 180) {
+  return String(valor || '').trim().slice(0, max);
+}
+
+function esCorreoValidoTienda(valor = '') {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(valor || '').trim());
+}
+
+function obtenerIpSolicitudTienda(req) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  return forwarded || String(req.ip || req.socket?.remoteAddress || '').trim();
+}
+
+async function exigirTurnstileTienda(req, res, action = '') {
+  const resultado = await verificarTurnstile({
+    token: req.body?.turnstile_token,
+    ip: obtenerIpSolicitudTienda(req),
+    action
+  });
+
+  if (!resultado.ok) {
+    res.status(resultado.status || 400).json({ exito: false, mensaje: resultado.message });
+    return false;
+  }
+
+  return true;
+}
+
+function responderBloqueoLoginTienda(res, retryAfterSec) {
+  if (retryAfterSec > 0) {
+    res.set('Retry-After', String(retryAfterSec));
+  }
+  return res.status(429).json({
+    exito: false,
+    mensaje: 'Demasiados intentos fallidos. Espera unos minutos e intenta nuevamente.',
+    retry_after_sec: retryAfterSec
+  });
+}
+
+function respuestaRecuperacionTiendaGenerica() {
+  return {
+    exito: true,
+    mensaje: 'Si la cuenta existe y el correo está habilitado, te enviaremos una contraseña temporal. Revisa bandeja y spam.'
+  };
+}
 
 function obtenerConfigCorreo() {
   const mailEnabled = String(process.env.MAIL_ENABLED || '1').trim() !== '0';
@@ -694,13 +755,66 @@ function crearTokenCliente(cliente) {
     {
       tipo: "tienda_cliente",
       id: cliente.id,
-      nombre: cliente.nombre,
-      email: cliente.email,
       token_version: Number(cliente?.token_version || 0)
     },
     TIENDA_JWT_SECRET,
     { expiresIn: "30d" }
   );
+}
+
+function parsearCookiesTienda(req) {
+  const raw = String(req.get('cookie') || '').trim();
+  if (!raw) return {};
+
+  return raw.split(';').reduce((acc, item) => {
+    const [claveRaw, ...resto] = String(item || '').split('=');
+    const clave = String(claveRaw || '').trim();
+    if (!clave) return acc;
+    const valor = resto.join('=').trim();
+    try {
+      acc[clave] = decodeURIComponent(valor);
+    } catch {
+      acc[clave] = valor;
+    }
+    return acc;
+  }, {});
+}
+
+function opcionesCookieTienda() {
+  const secure = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/'
+  };
+}
+
+function aplicarNoStoreTiendaPrivado(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+}
+
+function obtenerTokenClienteSolicitud(req) {
+  const auth = String(req.get('Authorization') || '').trim();
+  if (auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim();
+  }
+
+  const cookies = parsearCookiesTienda(req);
+  return String(cookies?.[TIENDA_AUTH_COOKIE] || '').trim();
+}
+
+function establecerCookieSesionCliente(res, token) {
+  res.cookie(TIENDA_AUTH_COOKIE, String(token || ''), {
+    ...opcionesCookieTienda(),
+    maxAge: TIENDA_AUTH_COOKIE_MAX_AGE_MS
+  });
+}
+
+function limpiarCookieSesionCliente(res) {
+  res.clearCookie(TIENDA_AUTH_COOKIE, opcionesCookieTienda());
 }
 
 function generarPasswordTemporalCliente() {
@@ -709,19 +823,21 @@ function generarPasswordTemporalCliente() {
 }
 
 function authCliente(req, res, next) {
-  const auth = req.get("Authorization") || "";
-  if (!auth.startsWith("Bearer ")) {
+  aplicarNoStoreTiendaPrivado(res);
+  const token = obtenerTokenClienteSolicitud(req);
+  if (!token) {
     return res.status(401).json({ exito: false, mensaje: "No autenticado" });
   }
-  const token = auth.replace("Bearer ", "");
   try {
     const decoded = jwt.verify(token, TIENDA_JWT_SECRET);
-    if (decoded?.tipo !== "tienda_cliente") {
+    if (decoded?.tipo !== "tienda_cliente" || !decoded?.id) {
+      limpiarCookieSesionCliente(res);
       return res.status(401).json({ exito: false, mensaje: "Token inválido" });
     }
     req.cliente = decoded;
     next();
   } catch {
+    limpiarCookieSesionCliente(res);
     return res.status(401).json({ exito: false, mensaje: "Token inválido" });
   }
 }
@@ -731,6 +847,32 @@ function authInterno(req, res, next) {
     return res.status(401).json({ exito: false, mensaje: "No autenticado" });
   }
   next();
+}
+
+function esFechaIsoValida(valor = '') {
+  const txt = String(valor || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(txt)) return false;
+  const fecha = new Date(`${txt}T12:00:00`);
+  if (Number.isNaN(fecha.getTime())) return false;
+  return fecha.toISOString().slice(0, 10) === txt;
+}
+
+function sumarDiasIso(valor = '', dias = 0) {
+  const base = new Date(`${String(valor || '').trim()}T12:00:00`);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setDate(base.getDate() + (Number(dias) || 0));
+  return base.toISOString().slice(0, 10);
+}
+
+function diferenciaDiasIso(desde = '', hasta = '') {
+  const inicio = new Date(`${String(desde || '').trim()}T12:00:00`);
+  const fin = new Date(`${String(hasta || '').trim()}T12:00:00`);
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fin.getTime())) return 0;
+  return Math.floor((fin.getTime() - inicio.getTime()) / 86400000);
+}
+
+function normalizarEtiquetaAnalitica(valor = '') {
+  return String(valor || '').trim() || 'Desconocido';
 }
 
 const CONFIG_DEFAULT = {
@@ -2348,20 +2490,22 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   });
 
   async function authClienteConVersion(req, res, next) {
-    const auth = req.get("Authorization") || "";
-    if (!auth.startsWith("Bearer ")) {
+    aplicarNoStoreTiendaPrivado(res);
+    const token = obtenerTokenClienteSolicitud(req);
+    if (!token) {
       return res.status(401).json({ exito: false, mensaje: "No autenticado" });
     }
 
-    const token = auth.replace("Bearer ", "");
     let decoded = null;
     try {
       decoded = jwt.verify(token, TIENDA_JWT_SECRET);
     } catch {
+      limpiarCookieSesionCliente(res);
       return res.status(401).json({ exito: false, mensaje: "Token inválido" });
     }
 
     if (decoded?.tipo !== "tienda_cliente" || !decoded?.id) {
+      limpiarCookieSesionCliente(res);
       return res.status(401).json({ exito: false, mensaje: "Token inválido" });
     }
 
@@ -2373,12 +2517,14 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       );
 
       if (!cliente) {
+        limpiarCookieSesionCliente(res);
         return res.status(401).json({ exito: false, mensaje: "Sesión no válida" });
       }
 
       const versionToken = Number(decoded?.token_version || 0);
       const versionActual = Number(cliente?.token_version || 0);
       if (versionToken !== versionActual) {
+        limpiarCookieSesionCliente(res);
         return res.status(401).json({ exito: false, mensaje: "Tu sesión fue cerrada. Inicia sesión nuevamente." });
       }
 
@@ -2864,6 +3010,126 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       }
     } catch {
       res.status(500).json({ error: 'No se pudieron reiniciar las métricas' });
+    }
+  });
+
+  app.get(['/tienda/admin/visitas/analisis', '/api/tienda/admin/visitas/analisis'], authInterno, async (req, res) => {
+    try {
+      const desde = String(req.query?.desde || '').trim();
+      const hasta = String(req.query?.hasta || '').trim();
+
+      if (!esFechaIsoValida(desde) || !esFechaIsoValida(hasta)) {
+        return res.status(400).json({ ok: false, error: 'Debes enviar fechas válidas en formato YYYY-MM-DD' });
+      }
+
+      const diffDias = diferenciaDiasIso(desde, hasta);
+      if (diffDias < 0) {
+        return res.status(400).json({ ok: false, error: 'La fecha inicial no puede ser mayor que la final' });
+      }
+
+      const totalDias = diffDias + 1;
+      if (totalDias > 1826) {
+        return res.status(400).json({ ok: false, error: 'El rango máximo permitido es de 1826 días' });
+      }
+
+      const filas = await dbAll(
+        bdVentas,
+        `SELECT dia_clave, total_eventos, sesiones_unicas
+         FROM tienda_visitas_diarias
+         WHERE dia_clave >= ? AND dia_clave <= ?
+         ORDER BY dia_clave ASC`,
+        [desde, hasta]
+      );
+
+      const ubicaciones = await dbAll(
+        bdVentas,
+        `SELECT pais, SUM(total) AS total
+         FROM tienda_visitas_diarias_paises
+         WHERE dia_clave >= ? AND dia_clave <= ?
+         GROUP BY pais
+         ORDER BY CASE WHEN INSTR(pais, ',') > 0 THEN 1 ELSE 0 END DESC,
+                  total DESC
+         LIMIT 15`,
+        [desde, hasta]
+      );
+
+      const topAcciones = await dbAll(
+        bdVentas,
+        `SELECT accion, COUNT(*) AS total
+         FROM tienda_visitas_eventos
+         WHERE dia_clave >= ? AND dia_clave <= ?
+         GROUP BY accion
+         ORDER BY total DESC
+         LIMIT 20`,
+        [desde, hasta]
+      );
+
+      const topProductos = await dbAll(
+        bdVentas,
+        `SELECT producto, COUNT(*) AS total
+         FROM tienda_visitas_eventos
+         WHERE dia_clave >= ? AND dia_clave <= ?
+           AND COALESCE(TRIM(producto), '') <> ''
+         GROUP BY producto
+         ORDER BY total DESC
+         LIMIT 20`,
+        [desde, hasta]
+      );
+
+      const mapaPorDia = new Map(
+        (filas || []).map((item) => [
+          String(item?.dia_clave || '').trim(),
+          {
+            visitas: Number(item?.sesiones_unicas) || 0,
+            eventos: Number(item?.total_eventos) || 0
+          }
+        ])
+      );
+
+      const porDia = [];
+      for (let offset = 0; offset < totalDias; offset += 1) {
+        const fecha = sumarDiasIso(desde, offset);
+        const stats = mapaPorDia.get(fecha) || { visitas: 0, eventos: 0 };
+        porDia.push({
+          fecha,
+          visitas: Number(stats.visitas) || 0,
+          eventos: Number(stats.eventos) || 0
+        });
+      }
+
+      const totalVisitas = porDia.reduce((acc, item) => acc + (Number(item?.visitas) || 0), 0);
+      const totalEventos = porDia.reduce((acc, item) => acc + (Number(item?.eventos) || 0), 0);
+      const diaConMasVisitas = porDia.reduce(
+        (max, item) => ((Number(item?.visitas) || 0) > (Number(max?.visitas) || 0) ? item : max),
+        { fecha: '', visitas: 0, eventos: 0 }
+      );
+
+      return res.json({
+        ok: true,
+        desde,
+        hasta,
+        totalDias,
+        porDia,
+        totalVisitas,
+        totalEventos,
+        promedioVisitasDia: porDia.length ? Number((totalVisitas / porDia.length).toFixed(2)) : 0,
+        diaConMasVisitas,
+        topUbicaciones: (ubicaciones || []).map((item) => ({
+          ubicacion: normalizarEtiquetaAnalitica(item?.pais),
+          pais: normalizarEtiquetaAnalitica(item?.pais),
+          total: Number(item?.total) || 0
+        })),
+        topAcciones: (topAcciones || []).map((item) => ({
+          accion: normalizarEtiquetaAnalitica(item?.accion || 'accion'),
+          total: Number(item?.total) || 0
+        })),
+        topProductos: (topProductos || []).map((item) => ({
+          producto: normalizarEtiquetaAnalitica(item?.producto || 'Producto'),
+          total: Number(item?.total) || 0
+        }))
+      });
+    } catch {
+      return res.status(500).json({ ok: false, error: 'No se pudo cargar el análisis de visitas' });
     }
   });
 
@@ -3655,17 +3921,27 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   });
 
   app.post("/tienda/auth/register", async (req, res) => {
+    aplicarNoStoreTiendaPrivado(res);
     try {
-      const nombre = String(req.body?.nombre || "").trim();
-      const apellidoPaterno = String(req.body?.apellido_paterno || "").trim();
-      const apellidoMaterno = String(req.body?.apellido_materno || "").trim();
-      const email = String(req.body?.email || "").trim().toLowerCase();
-      const password = String(req.body?.password || "");
-      const telefono = String(req.body?.telefono || "").trim();
+      if (!await exigirTurnstileTienda(req, res, 'tienda_register')) return;
+
+      const nombre = textoSeguroTienda(req.body?.nombre, 80);
+      const apellidoPaterno = textoSeguroTienda(req.body?.apellido_paterno, 80);
+      const apellidoMaterno = textoSeguroTienda(req.body?.apellido_materno, 80);
+      const email = textoSeguroTienda(req.body?.email, 160).toLowerCase();
+      const password = String(req.body?.password || '').slice(0, 160);
+      const telefono = textoSeguroTienda(req.body?.telefono, 30);
       const recibePromociones = boolToInt(req.body?.recibe_promociones);
 
       if (!nombre || !apellidoPaterno || !apellidoMaterno || !email || !password) {
         return res.status(400).json({ exito: false, mensaje: "Nombre, apellido paterno, apellido materno, email y contraseña son obligatorios" });
+      }
+      if (!esCorreoValidoTienda(email)) {
+        return res.status(400).json({ exito: false, mensaje: 'El correo no es válido' });
+      }
+      const validacionPassword = validarPasswordSegura(password);
+      if (!validacionPassword.ok) {
+        return res.status(400).json({ exito: false, mensaje: validacionPassword.mensaje });
       }
 
       const existente = await dbGet(bdVentas, "SELECT id FROM tienda_clientes WHERE email = ?", [email]);
@@ -3704,6 +3980,7 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
 
       const cliente = { id: creado.lastID, nombre, email, recibe_promociones: recibePromociones, token_version: 0 };
       const token = crearTokenCliente(cliente);
+      establecerCookieSesionCliente(res, token);
       return res.json({
         exito: true,
         token,
@@ -3719,24 +3996,51 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   });
 
   app.post("/tienda/auth/login", async (req, res) => {
+    aplicarNoStoreTiendaPrivado(res);
     try {
-      const email = String(req.body?.email || "").trim().toLowerCase();
-      const password = String(req.body?.password || "");
+      if (!await exigirTurnstileTienda(req, res, 'tienda_login')) return;
+
+      const email = textoSeguroTienda(req.body?.email, 160).toLowerCase();
+      const password = String(req.body?.password || '').slice(0, 160);
+      const clientIp = obtenerIpSolicitudTienda(req);
       if (!email || !password) {
         return res.status(400).json({ exito: false, mensaje: "Email y contraseña son obligatorios" });
       }
+      if (!esCorreoValidoTienda(email)) {
+        return res.status(400).json({ exito: false, mensaje: 'El correo no es válido' });
+      }
 
-      const cliente = await dbGet(bdVentas, "SELECT * FROM tienda_clientes WHERE email = ?", [email]);
+      const bloqueoActual = tiendaLoginProtection.getStatus({ identifier: email, ip: clientIp });
+      if (bloqueoActual.blocked) {
+        return responderBloqueoLoginTienda(res, bloqueoActual.retryAfterSec);
+      }
+
+      const cliente = await dbGet(
+        bdVentas,
+        "SELECT * FROM tienda_clientes WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1",
+        [email]
+      );
       if (!cliente) {
+        const bloqueo = tiendaLoginProtection.registerFailure({ identifier: email, ip: clientIp });
+        if (bloqueo.blocked) {
+          return responderBloqueoLoginTienda(res, bloqueo.retryAfterSec);
+        }
         return res.status(401).json({ exito: false, mensaje: "Credenciales inválidas" });
       }
 
       const match = await bcrypt.compare(password, cliente.password_hash || "");
       if (!match) {
+        const bloqueo = tiendaLoginProtection.registerFailure({ identifier: email, ip: clientIp });
+        if (bloqueo.blocked) {
+          return responderBloqueoLoginTienda(res, bloqueo.retryAfterSec);
+        }
         return res.status(401).json({ exito: false, mensaje: "Credenciales inválidas" });
       }
 
+      tiendaLoginProtection.reset({ identifier: email, ip: clientIp });
+
       const token = crearTokenCliente(cliente);
+      establecerCookieSesionCliente(res, token);
       return res.json({
         exito: true,
         token,
@@ -3760,25 +4064,37 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
     }
   });
 
+  app.post('/tienda/auth/logout', (_req, res) => {
+    aplicarNoStoreTiendaPrivado(res);
+    limpiarCookieSesionCliente(res);
+    return res.json({ exito: true });
+  });
+
   app.post('/tienda/auth/olvide-password', async (req, res) => {
+    aplicarNoStoreTiendaPrivado(res);
     try {
-      const email = String(req.body?.email || '').trim().toLowerCase();
+      if (!await exigirTurnstileTienda(req, res, 'tienda_recovery')) return;
+
+      const email = textoSeguroTienda(req.body?.email, 160).toLowerCase();
       if (!email) {
         return res.status(400).json({ exito: false, mensaje: 'Debes escribir tu correo' });
       }
-
-      const cliente = await dbGet(
-        bdVentas,
-        'SELECT id, nombre, email FROM tienda_clientes WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1',
-        [email]
-      );
-
-      if (!cliente) {
-        return res.status(404).json({ exito: false, mensaje: 'El correo no está registrado' });
+      if (!esCorreoValidoTienda(email)) {
+        return res.status(400).json({ exito: false, mensaje: 'El correo no es válido' });
       }
 
       if (!correoConfigurado()) {
         return res.status(503).json({ exito: false, mensaje: 'El servicio de correo no está configurado' });
+      }
+
+      const cliente = await dbGet(
+        bdVentas,
+        'SELECT id, nombre, email, password_hash, COALESCE(debe_cambiar_password, 0) AS debe_cambiar_password FROM tienda_clientes WHERE LOWER(TRIM(email)) = LOWER(TRIM(?)) LIMIT 1',
+        [email]
+      );
+
+      if (!cliente) {
+        return res.json(respuestaRecuperacionTiendaGenerica());
       }
 
       const passwordTemporal = generarPasswordTemporalCliente();
@@ -3818,12 +4134,16 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       });
 
       if (!resultadoCorreo?.ok) {
+        await dbRun(
+          bdVentas,
+          'UPDATE tienda_clientes SET password_hash = ?, debe_cambiar_password = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?',
+          [cliente.password_hash, Number(cliente.debe_cambiar_password || 0), cliente.id]
+        );
         return res.status(500).json({ exito: false, mensaje: 'No se pudo enviar el correo de recuperación' });
       }
 
       return res.json({
-        exito: true,
-        mensaje: 'Te enviamos una contraseña temporal a tu correo. Revisa bandeja y spam.'
+        ...respuestaRecuperacionTiendaGenerica()
       });
     } catch {
       return res.status(500).json({ exito: false, mensaje: 'No se pudo procesar la recuperación' });
@@ -3831,11 +4151,13 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
   });
 
   app.post('/tienda/auth/cambiar-password', authClienteConVersion, async (req, res) => {
+    aplicarNoStoreTiendaPrivado(res);
     try {
       const passwordNueva = String(req.body?.password_nueva || '');
       const cerrarSesiones = Boolean(req.body?.cerrar_sesiones);
-      if (!passwordNueva || passwordNueva.length < 8) {
-        return res.status(400).json({ exito: false, mensaje: 'La nueva contraseña debe tener al menos 8 caracteres' });
+      const validacionPassword = validarPasswordSegura(passwordNueva);
+      if (!passwordNueva || !validacionPassword.ok) {
+        return res.status(400).json({ exito: false, mensaje: validacionPassword.ok ? 'La nueva contraseña es obligatoria' : validacionPassword.mensaje });
       }
 
       const hash = await bcrypt.hash(passwordNueva, 10);
@@ -3882,11 +4204,13 @@ export function registrarRutasTienda(app, bdProduccion, bdRecetas, bdVentas, bdI
       const tokenRefrescado = cerrarSesiones
         ? crearTokenCliente({
             id: clienteActual.id,
-            nombre: clienteActual.nombre,
-            email: clienteActual.email,
             token_version: tokenVersionNuevo
           })
         : '';
+
+      if (tokenRefrescado) {
+        establecerCookieSesionCliente(res, tokenRefrescado);
+      }
 
       return res.json({
         exito: true,

@@ -320,6 +320,31 @@
   cursor: not-allowed;
 }
 
+.botonWarning {
+  background: #d9a441;
+  color: #1f1a10;
+}
+
+.textoAyudaRevocacion {
+  margin-top: -2px;
+  color: #6b5432;
+}
+
+.botonSecundario {
+  border: 1px solid #8b7b5a;
+  background: #f2ead8;
+  color: #3b3528;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.botonSecundario:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .listaAccionesPermiso {
   margin-top: 8px;
   display: grid;

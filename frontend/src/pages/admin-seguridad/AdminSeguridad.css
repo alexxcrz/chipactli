@@ -1,0 +1,502 @@
+.adminSeguridadCard {
+  background: linear-gradient(180deg, rgba(245, 241, 232, 0.97) 0%, rgba(255, 255, 255, 0.97) 100%);
+}
+
+.adminSeguridadHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.adminSeguridadSubtitulo {
+  margin: 8px 0 0;
+  max-width: 760px;
+  color: #5b5347;
+  line-height: 1.45;
+}
+
+.adminSeguridadAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adminSeguridadMetaBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.adminSeguridadEstadoChip,
+.adminSeguridadChipNivel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid #2a2a2a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.adminSeguridadEstadoChip.ok,
+.adminSeguridadChipNivel.info {
+  background: #edf5ef;
+  color: #2f6c44;
+}
+
+.adminSeguridadEstadoChip.pendiente,
+.adminSeguridadChipNivel.warning {
+  background: #fff2df;
+  color: #9a6506;
+}
+
+.adminSeguridadEstadoChip.error,
+.adminSeguridadChipNivel.error {
+  background: #fce4e2;
+  color: #9d2d27;
+}
+
+.adminSeguridadChipNivel.critico {
+  background: #2e0d0d;
+  color: #fff2ef;
+  border-color: #6b1d1d;
+}
+
+.adminSeguridadEstadoChip.neutral {
+  background: #f6f2eb;
+  color: #544938;
+}
+
+.adminSeguridadError {
+  border: 1px solid #b73a35;
+  background: #fde9e8;
+  color: #8f2b27;
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-weight: 700;
+}
+
+.adminSeguridadRiesgosPanel {
+  margin-bottom: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(247, 243, 236, 0.92) 100%);
+}
+
+.adminSeguridadDiagnosticoPanel {
+  margin-bottom: 14px;
+  background: linear-gradient(180deg, rgba(248, 251, 248, 0.95) 0%, rgba(255, 255, 255, 0.92) 100%);
+}
+
+.adminSeguridadSemaforo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #2a2a2a;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.adminSeguridadSemaforo.estable {
+  background: #edf5ef;
+  color: #2f6c44;
+}
+
+.adminSeguridadSemaforo.medio {
+  background: #fff2df;
+  color: #9a6506;
+}
+
+.adminSeguridadSemaforo.alto {
+  background: #fce4e2;
+  color: #9d2d27;
+}
+
+.adminSeguridadSemaforo.critico {
+  background: #2e0d0d;
+  color: #fff2ef;
+  border-color: #6b1d1d;
+}
+
+.adminSeguridadGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.adminSeguridadGridInferior {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+}
+
+.adminSeguridadPanel {
+  border: 1px solid #d4ccc0;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(74, 124, 89, 0.08);
+}
+
+.adminSeguridadPanel h3 {
+  margin: 0 0 12px;
+  color: #355a43;
+  font-size: 16px;
+}
+
+.adminSeguridadPanelDestacado {
+  background: linear-gradient(160deg, #f0f6f1 0%, #ffffff 100%);
+}
+
+.adminSeguridadStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.adminSeguridadStats div {
+  border: 1px solid #dbe7dd;
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255,255,255,0.88);
+}
+
+.adminSeguridadStats span,
+.adminSeguridadFilaArchivo span,
+.adminSeguridadEventoMeta span,
+.adminSeguridadOperacionesPanel p {
+  display: block;
+  color: #6b6258;
+  font-size: 12px;
+}
+
+.adminSeguridadStats strong,
+.adminSeguridadFilaArchivo strong,
+.adminSeguridadTopItem strong,
+.adminSeguridadEventoTop strong {
+  color: #2d4638;
+}
+
+.adminSeguridadListaCompacta,
+.adminSeguridadEventosLista,
+.adminSeguridadLogsLista,
+.adminSeguridadTopLista {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adminSeguridadFilaArchivo,
+.adminSeguridadTopItem,
+.adminSeguridadEventoItem,
+.adminSeguridadLogItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid #ded6ca;
+  background: #fff;
+}
+
+.adminSeguridadFilaArchivo.ok {
+  border-left: 5px solid #4a7c59;
+}
+
+.adminSeguridadFilaArchivo.error {
+  border-left: 5px solid #c75550;
+}
+
+.adminSeguridadVacio {
+  color: #756a5d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.adminSeguridadNotaPanel {
+  margin-bottom: 10px;
+}
+
+.adminSeguridadChipsWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.adminSeguridadTituloSeccion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.adminSeguridadTituloSeccion span {
+  font-size: 12px;
+  color: #6b6258;
+  font-weight: 700;
+}
+
+.adminSeguridadEventoItem,
+.adminSeguridadLogItem {
+  flex-direction: column;
+}
+
+.adminSeguridadEventoTop {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adminSeguridadEventoMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.adminSeguridadEventoMetaStack {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.adminSeguridadLogsPanel,
+.adminSeguridadEventosPanel {
+  min-height: 420px;
+}
+
+.adminSeguridadLogsLista,
+.adminSeguridadEventosLista {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.adminSeguridadInlineControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adminSeguridadInlineControls select {
+  border: 1px solid #cfc5b8;
+  border-radius: 10px;
+  padding: 7px 10px;
+  background: #fff;
+}
+
+.adminSeguridadFiltroAuditoria {
+  border: 1px solid #cfc5b8;
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #fff;
+  color: #5a4f41;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.adminSeguridadFiltroAuditoria.activo {
+  background: #355a43;
+  color: #fff;
+  border-color: #355a43;
+}
+
+.adminSeguridadControlBarra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.adminSeguridadFiltrosBarra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.adminSeguridadFiltrosRapidos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.adminSeguridadFiltrosBarra input,
+.adminSeguridadFiltrosBarra select {
+  border: 1px solid #cfc5b8;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  min-height: 38px;
+}
+
+.adminSeguridadFiltrosBarra input {
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+
+.adminSeguridadSmokeResumen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.adminSeguridadOperacionesGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.adminSeguridadOperacionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+  border-radius: 18px;
+  border: 1px solid #d4ccc0;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 14px;
+}
+
+.adminSeguridadOperacionCard strong {
+  color: #2d4638;
+}
+
+.adminSeguridadOperacionLista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.adminSeguridadOperacionLista span {
+  color: #6b6258;
+  font-size: 13px;
+}
+
+.adminSeguridadOperacionAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.adminSeguridadSecretosBox {
+  margin-top: 6px;
+  border: 1px solid #d9cfbf;
+  border-radius: 16px;
+  background: #fffdf9;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.adminSeguridadSecretosMeta {
+  color: #355a43;
+}
+
+.adminSeguridadSecretosBox .adminSeguridadOperacionLista span {
+  word-break: break-word;
+}
+
+.adminSeguridadPaginacion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e1d8cb;
+}
+
+.adminSeguridadPaginacion span {
+  color: #62584d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.adminSeguridadHistorialWrap {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e1d8cb;
+}
+
+.adminSeguridadHistorialLista {
+  max-height: 320px;
+}
+
+.adminSeguridadListaCompacta .adminSeguridadFilaArchivo span + span {
+  margin-top: 2px;
+}
+
+.adminSeguridadPaginacionAcciones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1280px) {
+  .adminSeguridadGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adminSeguridadGridInferior {
+    grid-template-columns: 1fr;
+  }
+
+  .adminSeguridadOperacionesGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .adminSeguridadHeader,
+  .adminSeguridadTituloSeccion,
+  .adminSeguridadOperacionesGrid,
+  .adminSeguridadStats,
+  .adminSeguridadGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .adminSeguridadAcciones,
+  .adminSeguridadMetaBar,
+  .adminSeguridadSmokeResumen,
+  .adminSeguridadPaginacionAcciones,
+  .adminSeguridadControlBarra {
+    width: 100%;
+  }
+
+  .adminSeguridadAcciones button {
+    flex: 1 1 100%;
+  }
+
+  .adminSeguridadGrid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .adminSeguridadPanel {
+    padding: 14px;
+  }
+
+  .adminSeguridadEventoMeta,
+  .adminSeguridadFilaArchivo,
+  .adminSeguridadTopItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

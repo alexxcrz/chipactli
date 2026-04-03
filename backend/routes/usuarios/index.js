@@ -1,8 +1,40 @@
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { normalizarPermisosUsuario, serializarPermisos } from "../../utils/permisos/index.js";
 import { dbAll, dbGet, dbRun } from "../../utils/db-adapter/index.js";
+import { registrarAuditoriaAdmin, listarAuditoriaAdmin } from "../../utils/admin-audit/index.js";
+import { validarPasswordSegura } from "../../utils/password-policy/index.js";
+
+function usernameSeguro(valor) {
+  return /^[a-z0-9._-]{3,40}$/i.test(String(valor || '').trim());
+}
+
+function textoSeguro(valor, max = 120) {
+  return String(valor || '').trim().slice(0, max);
+}
+
+function correoSeguro(valor) {
+  return String(valor || '').trim().toLowerCase().slice(0, 160);
+}
+
+function passwordTemporalSegura() {
+  return `${crypto.randomBytes(9).toString('base64url')}A7`;
+}
 
 export function registrarRutasUsuarios(app, bdAdmin) {
+  app.get("/api/privado/usuarios/auditoria", async (req, res) => {
+    if (!req.usuario) {
+      return res.status(403).json({ exito: false, mensaje: "No autorizado" });
+    }
+
+    try {
+      const eventos = await listarAuditoriaAdmin(bdAdmin, Number(req.query?.limit) || 80);
+      return res.json({ exito: true, eventos, total: eventos.length });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudo cargar la auditoría" });
+    }
+  });
+
   // Listar usuarios (solo admin/ceo)
   app.get("/api/privado/usuarios", async (req, res) => {
     if (!req.usuario) {
@@ -28,23 +60,34 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     }
     const { username, nombre, correo, rol, permisos } = req.body;
     if (!username || !rol) return res.status(400).json({ exito: false, mensaje: "Faltan datos" });
-    const correoNormalizado = String(correo || '').trim().toLowerCase();
-    const passwordTemporal = Math.random().toString(36).slice(-8) + "!";
+    const usernameNormalizado = textoSeguro(username, 60).toLowerCase();
+    if (!usernameSeguro(usernameNormalizado)) {
+      return res.status(400).json({ exito: false, mensaje: "El username no es válido" });
+    }
+    const correoNormalizado = correoSeguro(correo);
+    const passwordTemporal = passwordTemporalSegura();
     const hash = await bcrypt.hash(passwordTemporal, 10);
     try {
       const resultado = await dbRun(
         bdAdmin,
         "INSERT INTO usuarios (username, password_hash, nombre, correo, rol, permisos, debe_cambiar_password) VALUES (?, ?, ?, ?, ?, ?, 1)",
-        [username, hash, nombre || '', correoNormalizado, rol, serializarPermisos(permisos, rol)]
+        [usernameNormalizado, hash, textoSeguro(nombre, 120), correoNormalizado, rol, serializarPermisos(permisos, rol)]
       );
 
       let idCreado = resultado?.lastID ?? null;
       if (idCreado == null) {
-        const creado = await dbGet(bdAdmin, "SELECT id FROM usuarios WHERE username = ?", [username]);
+        const creado = await dbGet(bdAdmin, "SELECT id FROM usuarios WHERE username = ?", [usernameNormalizado]);
         idCreado = creado?.id ?? null;
       }
 
-      return res.json({ exito: true, id: idCreado, username, correo: correoNormalizado, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_creado', {
+        objetivo: usernameNormalizado,
+        rol,
+        correo: correoNormalizado,
+        id: idCreado
+      }, req.usuario?.username || req.usuario?.id || '');
+
+      return res.json({ exito: true, id: idCreado, username: usernameNormalizado, correo: correoNormalizado, passwordTemporal, permisos: normalizarPermisosUsuario(permisos, rol) });
     } catch {
       return res.status(400).json({ exito: false, mensaje: "Usuario ya existe" });
     }
@@ -74,14 +117,14 @@ export function registrarRutasUsuarios(app, bdAdmin) {
         return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
 
-      const usernameSolicitado = (usernameNuevo || '').trim();
+      const usernameSolicitado = textoSeguro(usernameNuevo, 60).toLowerCase();
       const usernameFinal = user.rol === 'ceo'
         ? usernameActual
         : (usernameSolicitado || usernameActual || '').trim();
       const nombreFinal = user.rol === 'ceo'
         ? (user.nombre || '')
-        : (typeof nombre === 'string' ? nombre : (user.nombre || ''));
-      const correoFinal = typeof correo === 'string' ? correo.trim().toLowerCase() : (user.correo || '');
+        : (typeof nombre === 'string' ? textoSeguro(nombre, 120) : (user.nombre || ''));
+      const correoFinal = typeof correo === 'string' ? correoSeguro(correo) : (user.correo || '');
 
       if (
         user.rol === 'ceo'
@@ -96,16 +139,29 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       if (!usernameFinal) {
         return res.status(400).json({ exito: false, mensaje: "El username no puede estar vacío" });
       }
+      if (!usernameSeguro(usernameFinal)) {
+        return res.status(400).json({ exito: false, mensaje: "El username no es válido" });
+      }
+
+      const forzarRotacion = usernameFinal !== usernameActual;
 
       const resultado = await dbRun(
         bdAdmin,
-        "UPDATE usuarios SET username = ?, nombre = ?, correo = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-        [usernameFinal, nombreFinal, correoFinal, usernameActual]
+        "UPDATE usuarios SET username = ?, nombre = ?, correo = ?, token_version = CASE WHEN ? = 1 THEN COALESCE(token_version, 0) + 1 ELSE COALESCE(token_version, 0) END, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [usernameFinal, nombreFinal, correoFinal, forzarRotacion ? 1 : 0, usernameActual]
       );
 
       if (!Number(resultado?.changes || 0)) {
         return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
       }
+
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_actualizado', {
+        objetivo_anterior: usernameActual,
+        objetivo_nuevo: usernameFinal,
+        cambio_username: forzarRotacion ? 'si' : 'no',
+        cambio_correo: correoFinal !== String(user.correo || '') ? 'si' : 'no',
+        cambio_nombre: nombreFinal !== String(user.nombre || '') ? 'si' : 'no'
+      }, req.usuario?.username || req.usuario?.id || '');
 
       return res.json({
         exito: true,
@@ -150,13 +206,18 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       const permisosSerializados = serializarPermisos(permisos, user.rol);
       const resultado = await dbRun(
         bdAdmin,
-        "UPDATE usuarios SET permisos = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        "UPDATE usuarios SET permisos = ?, token_version = COALESCE(token_version, 0) + 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
         [permisosSerializados, username]
       );
 
       if (!Number(resultado?.changes || 0)) {
         return res.status(500).json({ exito: false, mensaje: "No se pudieron actualizar permisos" });
       }
+
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_permisos_actualizados', {
+        objetivo: username,
+        rol: user.rol
+      }, req.usuario?.username || req.usuario?.id || '');
 
       return res.json({
         exito: true,
@@ -177,23 +238,74 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     if (!username) return res.status(400).json({ exito: false, mensaje: "Falta username" });
     const passwordTemporal = (typeof passwordTemporalEntrada === 'string' && passwordTemporalEntrada.trim())
       ? passwordTemporalEntrada.trim()
-      : (Math.random().toString(36).slice(-8) + "!");
+      : passwordTemporalSegura();
 
-    if (passwordTemporal.length < 6) {
-      return res.status(400).json({ exito: false, mensaje: "La contraseña temporal debe tener al menos 6 caracteres" });
+    const validacionPassword = validarPasswordSegura(passwordTemporal);
+    if (!validacionPassword.ok) {
+      return res.status(400).json({ exito: false, mensaje: validacionPassword.mensaje });
     }
 
     const hash = await bcrypt.hash(passwordTemporal, 10);
     try {
       const resultado = await dbRun(
         bdAdmin,
-        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 1, token_version = COALESCE(token_version, 0) + 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
         [hash, username]
       );
       if (!Number(resultado?.changes || 0)) return res.status(400).json({ exito: false, mensaje: "Usuario no encontrado" });
+
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_password_reseteado', {
+        objetivo: username,
+        requiere_cambio_password: 'si'
+      }, req.usuario?.username || req.usuario?.id || '');
+
       return res.json({ exito: true, username, passwordTemporal });
     } catch {
       return res.status(400).json({ exito: false, mensaje: "Usuario no encontrado" });
+    }
+  });
+
+  app.post("/api/privado/usuarios/revocar-sesiones", async (req, res) => {
+    if (!req.usuario) {
+      return res.status(403).json({ exito: false, mensaje: "No autorizado" });
+    }
+
+    const username = textoSeguro(req.body?.username, 60).toLowerCase();
+    if (!username) {
+      return res.status(400).json({ exito: false, mensaje: "Falta username" });
+    }
+
+    try {
+      const objetivo = await dbGet(
+        bdAdmin,
+        "SELECT username, rol, COALESCE(token_version, 0) AS token_version FROM usuarios WHERE username = ?",
+        [username]
+      );
+
+      if (!objetivo) {
+        return res.status(404).json({ exito: false, mensaje: "Usuario no encontrado" });
+      }
+
+      const resultado = await dbRun(
+        bdAdmin,
+        "UPDATE usuarios SET token_version = COALESCE(token_version, 0) + 1, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [username]
+      );
+
+      if (!Number(resultado?.changes || 0)) {
+        return res.status(500).json({ exito: false, mensaje: "No se pudieron revocar las sesiones" });
+      }
+
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_sesiones_revocadas', {
+        objetivo: username,
+        rol: objetivo.rol,
+        token_version_anterior: Number(objetivo.token_version || 0),
+        token_version_nueva: Number(objetivo.token_version || 0) + 1
+      }, req.usuario?.username || req.usuario?.id || '');
+
+      return res.json({ exito: true, username, sesionesRevocadas: true });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: "No se pudieron revocar las sesiones" });
     }
   });
 
@@ -205,6 +317,12 @@ export function registrarRutasUsuarios(app, bdAdmin) {
     const { username } = req.params;
     if (!username) return res.status(400).json({ exito: false, mensaje: "Falta username" });
     try {
+      const objetivo = await dbGet(
+        bdAdmin,
+        "SELECT username, rol FROM usuarios WHERE username = ?",
+        [username]
+      );
+
       const resultado = await dbRun(
         bdAdmin,
         "DELETE FROM usuarios WHERE username = ? AND rol != 'ceo'",
@@ -214,6 +332,12 @@ export function registrarRutasUsuarios(app, bdAdmin) {
       if (!Number(resultado?.changes || 0)) {
         return res.status(400).json({ exito: false, mensaje: "No se puede eliminar CEO o usuario no encontrado" });
       }
+
+      await registrarAuditoriaAdmin(bdAdmin, 'usuario_eliminado', {
+        objetivo: username,
+        rol: objetivo?.rol || ''
+      }, req.usuario?.username || req.usuario?.id || '');
+
       return res.json({ exito: true, username });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "Error al eliminar usuario" });

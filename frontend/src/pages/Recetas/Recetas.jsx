@@ -1,7 +1,7 @@
 ﻿import React, { useEffect, useRef, useState } from 'react';
 import './Recetas.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
-import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
+import { abrirModal, cerrarModal, mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
@@ -32,6 +32,28 @@ function escaparParaInlineJs(valor) {
     .replace(/'/g, "\\'")
     .replace(/[\u2028\u2029]/g, ' ')
     .replace(/\r?\n/g, ' ');
+}
+
+async function confirmarAccionCriticaCatalogo({ titulo = 'Confirmar', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
 }
 
 export default function Recetas() {
@@ -796,7 +818,11 @@ async function agregarCategoria(event) {
 }
 
 async function eliminarCategoria(id, nombre) {
-  const confirmacion = await mostrarConfirmacion(`¿Estás seguro de eliminar la categoría "${nombre}"?`, 'Esta acción no se puede deshacer.');
+  const confirmacion = await confirmarAccionCriticaCatalogo({
+    titulo: 'Eliminar categoría',
+    mensaje: `Vas a eliminar la categoría "${String(nombre || '').trim() || 'sin nombre'}". Este cambio afecta organización y navegación de recetas.`,
+    frase: 'ELIMINAR CATEGORIA'
+  });
   if (!confirmacion) return;
 
   try {
@@ -1329,6 +1355,13 @@ async function archivarRecetasSeleccionadas() {
     return;
   }
 
+  const confirmar = await confirmarAccionCriticaCatalogo({
+    titulo: 'Archivar recetas seleccionadas',
+    mensaje: `Vas a archivar ${ids.length} receta(s). Dejarán de mostrarse en el listado principal y en la operación diaria.`,
+    frase: 'ARCHIVAR RECETAS'
+  });
+  if (!confirmar) return;
+
   try {
     const respuesta = await fetch(`${API}/recetas/archivar`, {
       method: 'POST',
@@ -1361,6 +1394,13 @@ async function desarchivarRecetasSeleccionadas() {
     return;
   }
 
+  const confirmar = await confirmarAccionCriticaCatalogo({
+    titulo: 'Desarchivar recetas seleccionadas',
+    mensaje: `Vas a desarchivar ${ids.length} receta(s). Volverán al listado principal y podrían entrar de nuevo en la operación diaria.`,
+    frase: 'DESARCHIVAR RECETAS'
+  });
+  if (!confirmar) return;
+
   try {
     const respuesta = await fetch(`${API}/recetas/desarchivar`, {
       method: 'POST',
@@ -1387,7 +1427,11 @@ async function desarchivarRecetasSeleccionadas() {
 }
 
 async function archivarReceta(id, nombreReceta) {
-  const ok = await mostrarConfirmacion(`¿Archivar "${nombreReceta}"?`, 'La receta dejará de mostrarse en el listado principal.');
+  const ok = await confirmarAccionCriticaCatalogo({
+    titulo: 'Archivar receta',
+    mensaje: `Vas a archivar "${String(nombreReceta || '').trim() || 'esta receta'}". Dejará de mostrarse en el listado principal.`,
+    frase: 'ARCHIVAR RECETA'
+  });
   if (!ok) return;
 
   try {
@@ -1565,6 +1609,18 @@ async function cargarListadoRecetas(opciones = {}) {
 
 async function cambiarVisibleRecetaTienda(idReceta, nombreReceta, visible, inputEl = null) {
   try {
+    const confirmar = await confirmarAccionCriticaCatalogo({
+      titulo: visible ? 'Mostrar producto en tienda' : 'Ocultar producto de tienda',
+      mensaje: visible
+        ? 'Vas a publicar esta receta en la vitrina. El cambio puede quedar visible para clientes inmediatamente.'
+        : 'Vas a ocultar esta receta de la vitrina. Clientes podrían dejar de verla de inmediato.',
+      frase: visible ? 'PUBLICAR PRODUCTO' : 'OCULTAR PRODUCTO'
+    });
+    if (!confirmar) {
+      if (inputEl) inputEl.checked = !Boolean(visible);
+      return;
+    }
+
     const respuestaDetalle = await fetch(`${API}/recetas/${idReceta}`);
     if (!respuestaDetalle.ok) throw new Error('No se pudo leer la receta');
 
@@ -1828,6 +1884,15 @@ async function guardarPaqueteReceta() {
     items: itemsPaqueteTemporales.map((it) => ({ receta_nombre: String(it.receta_nombre || '').trim(), cantidad: Math.max(1, Number(it.cantidad) || 1) }))
   };
 
+  const confirmado = await confirmarAccionCriticaCatalogo({
+    titulo: Number.isFinite(id) && id > 0 ? 'Actualizar paquete de tienda' : 'Crear paquete de tienda',
+    mensaje: Number.isFinite(id) && id > 0
+      ? 'Vas a cambiar la composición o visibilidad comercial de un paquete ya existente.'
+      : 'Vas a crear un paquete nuevo visible para operación comercial de tienda.',
+    frase: Number.isFinite(id) && id > 0 ? 'ACTUALIZAR PAQUETE' : 'CREAR PAQUETE'
+  });
+  if (!confirmado) return;
+
   try {
     const ruta = Number.isFinite(id) && id > 0 ? `${API}/tienda/admin/paquetes/${id}` : `${API}/tienda/admin/paquetes`;
     const metodo = Number.isFinite(id) && id > 0 ? 'PATCH' : 'POST';
@@ -1850,7 +1915,11 @@ async function guardarPaqueteReceta() {
 async function eliminarPaqueteReceta(idPaquete) {
   const id = Number(idPaquete);
   if (!Number.isFinite(id) || id <= 0) return;
-  const ok = await mostrarConfirmacion('¿Eliminar este paquete?', 'Esta acción no se puede deshacer.');
+  const ok = await confirmarAccionCriticaCatalogo({
+    titulo: 'Eliminar paquete',
+    mensaje: 'Vas a eliminar un paquete de la vitrina. Esta acción no se puede deshacer y afecta disponibilidad comercial.',
+    frase: 'ELIMINAR PAQUETE'
+  });
   if (!ok) return;
   try {
     const respuesta = await fetch(`${API}/tienda/admin/paquetes/${id}`, {
@@ -1872,6 +1941,18 @@ async function cambiarVisiblePaqueteReceta(idPaquete, visible, inputEl = null) {
   const paquete = paquetesRecetasActual.find((p) => Number(p?.id) === id);
   if (!paquete) return;
   try {
+    const confirmar = await confirmarAccionCriticaCatalogo({
+      titulo: visible ? 'Mostrar paquete en tienda' : 'Ocultar paquete de tienda',
+      mensaje: visible
+        ? 'Vas a publicar este paquete en la vitrina. El cambio puede impactar ventas nuevas de inmediato.'
+        : 'Vas a ocultar este paquete de la vitrina. Clientes podrían dejar de verlo inmediatamente.',
+      frase: visible ? 'PUBLICAR PAQUETE' : 'OCULTAR PAQUETE'
+    });
+    if (!confirmar) {
+      if (inputEl) inputEl.checked = !Boolean(visible);
+      return;
+    }
+
     const respuesta = await fetch(`${API}/tienda/admin/paquetes/${id}`, {
       method: 'PATCH',
       headers: headersConToken({ 'Content-Type': 'application/json' }),
@@ -2345,7 +2426,11 @@ async function guardarEditarReceta(event, mantenerModalAbierto = false) {
 }
 
 async function eliminarReceta(id) {
-  const ok = await mostrarConfirmacion('¿Eliminar esta receta?', 'Eliminar receta');
+  const ok = await confirmarAccionCriticaCatalogo({
+    titulo: 'Eliminar receta',
+    mensaje: 'Vas a eliminar esta receta. La acción afecta catálogo, cálculos y referencias operativas.',
+    frase: 'ELIMINAR RECETA'
+  });
   if (!ok) return;
 
   try {

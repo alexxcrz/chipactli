@@ -72,7 +72,10 @@ async function run() {
   const res = await fetch(`${BASE_URL}/api/importar/todo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      confirmacion_accion: 'IMPORTAR TODO'
+    })
   });
 
   const text = await res.text();

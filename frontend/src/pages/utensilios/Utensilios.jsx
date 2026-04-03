@@ -1,7 +1,7 @@
 ﻿import React, { useEffect } from 'react';
 import './Utensilios.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
-import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
+import { abrirModal, cerrarModal, mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
@@ -10,6 +10,28 @@ function escaparParaInlineJs(valor) {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/\r?\n/g, ' ');
+}
+
+async function confirmarAccionCriticaUtensilios({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
 }
 
 export default function Utensilios({ mostrarTarjetasStats = false }) {
@@ -300,7 +322,11 @@ async function guardarEditarUtensilio(event) {
 }
 
 async function eliminarUtensilio(id) {
-  const ok = await mostrarConfirmacion('¿Eliminar este utensilio?', 'Eliminar utensilio');
+  const ok = await confirmarAccionCriticaUtensilios({
+    titulo: 'Eliminar utensilio',
+    mensaje: 'Vas a eliminar este utensilio del inventario. Esto afecta historial, inversión y recuperaciones asociadas.',
+    frase: 'ELIMINAR UTENSILIO'
+  });
   if (!ok) return;
 
   try {

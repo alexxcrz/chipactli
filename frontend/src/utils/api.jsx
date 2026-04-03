@@ -1,5 +1,9 @@
 import { apiUrl } from './config.jsx';
 
+function tokenPareceJwt(token = '') {
+  return String(token || '').trim().split('.').length === 3;
+}
+
 function notificarSesionInvalida(mensaje) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('chipactli:auth-invalid', {
@@ -11,7 +15,7 @@ function notificarSesionInvalida(mensaje) {
 
 export async function fetchAPI(endpoint, options = {}) {
   const url = apiUrl(endpoint);
-  const defaultOptions = { headers: {} };
+  const defaultOptions = { headers: {}, credentials: 'include' };
   const config = {
     ...defaultOptions,
     ...options,
@@ -21,7 +25,11 @@ export async function fetchAPI(endpoint, options = {}) {
     }
   };
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-  if (token && !config.headers.Authorization) {
+  const authActual = String(config.headers.Authorization || '').trim();
+  if (authActual.startsWith('Bearer ') && !tokenPareceJwt(authActual.slice(7).trim())) {
+    delete config.headers.Authorization;
+  }
+  if (tokenPareceJwt(token) && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;

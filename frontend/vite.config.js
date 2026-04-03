@@ -6,6 +6,15 @@ const BACKEND_TARGET = 'http://127.0.0.1:3001'
 
 export default defineConfig(({ command, mode }) => ({
   plugins: [react()],
+  build: {
+    sourcemap: false,
+    minify: 'esbuild'
+  },
+  esbuild: mode === 'production'
+    ? {
+        drop: ['console', 'debugger']
+      }
+    : undefined,
   server: {
     host: true,
     port: 3000,

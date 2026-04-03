@@ -5,6 +5,9 @@
 import { API } from './config.jsx';
 import { mostrarNotificacion } from './notificaciones.jsx';
 import { fetchAPIJSON } from './api.jsx';
+import { mostrarConfirmacion, solicitarTextoModal } from './modales.jsx';
+
+export const CONFIRMACION_IMPORTAR_TODO = 'IMPORTAR TODO';
 
 /**
  * Obtener la URL base de la API
@@ -37,6 +40,45 @@ function limpiarPayloadImportacionTodo(datos) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
   if (!Object.prototype.hasOwnProperty.call(payload, 'incluye_uploads_tienda')) {
     payload.incluye_uploads_tienda = Array.isArray(payload.archivos_uploads_tienda) && payload.archivos_uploads_tienda.length > 0;
+  }
+  return payload;
+}
+
+async function confirmarImportacionTotal() {
+  const aceptado = await mostrarConfirmacion(
+    'Esta acción sobrescribirá datos operativos, trastienda, configuración tienda y archivos multimedia. Verifica que el respaldo sea correcto antes de continuar.',
+    'Importar respaldo TOTAL'
+  );
+  if (!aceptado) return false;
+
+  const frase = await solicitarTextoModal({
+    titulo: 'Importar respaldo TOTAL',
+    mensaje: 'Esta importación reemplazará información operativa, trastienda y multimedia.',
+    descripcion: `Escribe exactamente ${CONFIRMACION_IMPORTAR_TODO} para continuar con la importación total.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: CONFIRMACION_IMPORTAR_TODO,
+    aceptarLabel: 'Importar'
+  });
+  if (frase === null) return false;
+
+  if (String(frase || '').trim().toUpperCase() !== CONFIRMACION_IMPORTAR_TODO) {
+    mostrarNotificacion('Importación cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
+}
+
+export async function construirPayloadImportacionTodoConfirmado(datos) {
+  const confirmado = await confirmarImportacionTotal();
+  if (!confirmado) return null;
+
+  const payload = limpiarPayloadImportacionTodo(datos);
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      confirmacion_accion: CONFIRMACION_IMPORTAR_TODO
+    };
   }
   return payload;
 }
@@ -93,7 +135,10 @@ export async function importarDatos(tipo, input) {
       throw new Error('Solo está habilitado importar TODO');
     }
 
-    const payload = limpiarPayloadImportacionTodo(datos);
+    const payload = await construirPayloadImportacionTodoConfirmado(datos);
+    if (!payload) {
+      throw new Error('Importación cancelada');
+    }
     await fetchAPIJSON(`${obtenerURLAPI()}/api/importar/todo`, {
       method: 'POST',
       body: payload

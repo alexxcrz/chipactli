@@ -4,8 +4,126 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { normalizarPermisosUsuario } from "../../utils/permisos/index.js";
 import { dbGet, dbRun } from "../../utils/db-adapter/index.js";
+import { resolveJwtSecret } from "../../utils/security-secrets/index.js";
+import { createLoginAttemptManager } from "../../utils/login-protection/index.js";
+import { validarPasswordSegura } from "../../utils/password-policy/index.js";
+
+const AUTH_JWT_SECRET = resolveJwtSecret();
+const AUTH_LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.AUTH_LOGIN_MAX_ATTEMPTS || 5));
+const AUTH_LOGIN_WINDOW_MS = Math.max(60_000, Number(process.env.AUTH_LOGIN_WINDOW_MS || (15 * 60 * 1000)));
+const AUTH_LOGIN_LOCK_MS = Math.max(60_000, Number(process.env.AUTH_LOGIN_LOCK_MS || (15 * 60 * 1000)));
+const ADMIN_AUTH_COOKIE = 'chipactli_admin_session';
+const ADMIN_AUTH_COOKIE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const authLoginProtection = createLoginAttemptManager({
+  scope: 'admin-auth',
+  maxAttempts: AUTH_LOGIN_MAX_ATTEMPTS,
+  windowMs: AUTH_LOGIN_WINDOW_MS,
+  lockMs: AUTH_LOGIN_LOCK_MS
+});
+
+function crearTokenSesionAdmin(user = {}) {
+  return jwt.sign(
+    {
+      tipo: 'admin_auth',
+      id: Number(user?.id) || 0,
+      token_version: Number(user?.token_version || 0)
+    },
+    AUTH_JWT_SECRET,
+    { expiresIn: '12h' }
+  );
+}
+
+function crearTokenConfiguracionInicial(user = {}) {
+  return jwt.sign(
+    {
+      tipo: 'configuracion_inicial',
+      id: Number(user?.id) || 0
+    },
+    AUTH_JWT_SECRET,
+    { expiresIn: '20m' }
+  );
+}
 
 let authMailTransporter = null;
+
+function textoSeguro(valor, max = 160) {
+  return String(valor || '').trim().slice(0, max);
+}
+
+function usernameSeguro(valor) {
+  return /^[a-z0-9._-]{3,40}$/i.test(String(valor || '').trim());
+}
+
+function obtenerIpSolicitud(req) {
+  const forwarded = String(req.get('x-forwarded-for') || '').split(',')[0].trim();
+  return forwarded || String(req.ip || req.socket?.remoteAddress || '').trim();
+}
+
+function responderBloqueoLogin(res, retryAfterSec) {
+  if (retryAfterSec > 0) {
+    res.set('Retry-After', String(retryAfterSec));
+  }
+  return res.status(429).json({
+    exito: false,
+    mensaje: 'Demasiados intentos fallidos. Espera unos minutos e intenta nuevamente.',
+    retry_after_sec: retryAfterSec
+  });
+}
+
+function aplicarNoStorePrivado(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+}
+
+function parsearCookies(req) {
+  const raw = String(req.get('cookie') || '').trim();
+  if (!raw) return {};
+
+  return raw.split(';').reduce((acc, item) => {
+    const [claveRaw, ...resto] = String(item || '').split('=');
+    const clave = String(claveRaw || '').trim();
+    if (!clave) return acc;
+    const valor = resto.join('=').trim();
+    try {
+      acc[clave] = decodeURIComponent(valor);
+    } catch {
+      acc[clave] = valor;
+    }
+    return acc;
+  }, {});
+}
+
+function opcionesCookieAuth() {
+  const secure = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    path: '/'
+  };
+}
+
+function obtenerTokenSesionAdmin(req) {
+  const auth = String(req.get('Authorization') || '').trim();
+  if (auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim();
+  }
+
+  const cookies = parsearCookies(req);
+  return String(cookies?.[ADMIN_AUTH_COOKIE] || '').trim();
+}
+
+function establecerCookieSesionAdmin(res, token) {
+  res.cookie(ADMIN_AUTH_COOKIE, String(token || ''), {
+    ...opcionesCookieAuth(),
+    maxAge: ADMIN_AUTH_COOKIE_MAX_AGE_MS
+  });
+}
+
+function limpiarCookieSesionAdmin(res) {
+  res.clearCookie(ADMIN_AUTH_COOKIE, opcionesCookieAuth());
+}
 
 function obtenerConfigCorreo() {
   const mailEnabled = String(process.env.MAIL_ENABLED || '1').trim() !== '0';
@@ -52,21 +170,102 @@ function generarPasswordTemporal() {
   return `${base}A!`;
 }
 
+function respuestaRecuperacionGenerica() {
+  return {
+    exito: true,
+    mensaje: 'Si la cuenta existe y el correo está habilitado, te enviaremos una contraseña temporal. Revisa tu bandeja y spam.'
+  };
+}
+
 export function registrarRutasAuth(app, bdAdmin) {
+  app.get('/api/auth/validar', async (req, res) => {
+    aplicarNoStorePrivado(res);
+    const token = obtenerTokenSesionAdmin(req);
+    if (!token) {
+      return res.status(401).json({ exito: false, mensaje: 'No autenticado' });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, AUTH_JWT_SECRET);
+    } catch {
+      limpiarCookieSesionAdmin(res);
+      return res.status(401).json({ exito: false, mensaje: 'Token inválido' });
+    }
+
+    if (decoded?.tipo !== 'admin_auth' || !decoded?.id) {
+      limpiarCookieSesionAdmin(res);
+      return res.status(401).json({ exito: false, mensaje: 'Token inválido' });
+    }
+
+    try {
+      const user = await dbGet(bdAdmin, 'SELECT id, username, nombre, rol, permisos, debe_cambiar_password, COALESCE(token_version, 0) AS token_version FROM usuarios WHERE id = ?', [decoded?.id]);
+      if (!user) {
+        limpiarCookieSesionAdmin(res);
+        return res.status(401).json({ exito: false, mensaje: 'Usuario no encontrado' });
+      }
+
+      if (Number(decoded?.token_version || 0) !== Number(user?.token_version || 0)) {
+        limpiarCookieSesionAdmin(res);
+        return res.status(401).json({ exito: false, mensaje: 'Sesión expirada. Inicia sesión nuevamente.' });
+      }
+
+      const permisos = normalizarPermisosUsuario(user.permisos, user.rol);
+      return res.json({
+        exito: true,
+        usuario: {
+          id: user.id,
+          username: user.username,
+          nombre: user.nombre,
+          rol: user.rol,
+          permisos,
+          debe_cambiar_password: !!user.debe_cambiar_password
+        }
+      });
+    } catch {
+      return res.status(500).json({ exito: false, mensaje: 'No se pudo validar la sesión' });
+    }
+  });
+
   // Login
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body || {};
+    aplicarNoStorePrivado(res);
+    const username = textoSeguro(req.body?.username, 60).toLowerCase();
+    const password = String(req.body?.password || '').slice(0, 160);
+    const clientIp = obtenerIpSolicitud(req);
+
+    if (!username || !password) {
+      return res.status(400).json({ exito: false, mensaje: "Usuario y contraseña son obligatorios" });
+    }
+    if (!usernameSeguro(username)) {
+      return res.status(400).json({ exito: false, mensaje: "El formato de usuario no es válido" });
+    }
+
+    const bloqueoActual = authLoginProtection.getStatus({ identifier: username, ip: clientIp });
+    if (bloqueoActual.blocked) {
+      return responderBloqueoLogin(res, bloqueoActual.retryAfterSec);
+    }
 
     try {
       const user = await dbGet(bdAdmin, "SELECT * FROM usuarios WHERE username = ?", [username]);
       if (!user) {
+        const bloqueo = authLoginProtection.registerFailure({ identifier: username, ip: clientIp });
+        if (bloqueo.blocked) {
+          return responderBloqueoLogin(res, bloqueo.retryAfterSec);
+        }
         return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
       }
 
       const match = await bcrypt.compare(String(password || ""), String(user.password_hash || ""));
       if (!match) {
+        const bloqueo = authLoginProtection.registerFailure({ identifier: username, ip: clientIp });
+        if (bloqueo.blocked) {
+          return responderBloqueoLogin(res, bloqueo.retryAfterSec);
+        }
         return res.status(401).json({ exito: false, mensaje: "Usuario o contraseña incorrectos" });
       }
+
+      authLoginProtection.reset({ identifier: username, ip: clientIp });
 
       if (user.rol === "maestro") {
         const rowCount = await dbGet(bdAdmin, "SELECT COUNT(*) AS total FROM usuarios WHERE rol IN ('ceo','admin')");
@@ -74,11 +273,7 @@ export function registrarRutasAuth(app, bdAdmin) {
           return res.status(401).json({ exito: false, mensaje: "El usuario maestro ya no esta disponible" });
         }
 
-        const tokenConfiguracion = jwt.sign(
-          { id: user.id, username: user.username, tipo: "configuracion_inicial" },
-          process.env.JWT_SECRET || "chipactli_jwt_secret",
-          { expiresIn: "20m" }
-        );
+        const tokenConfiguracion = crearTokenConfiguracionInicial(user);
 
         return res.json({
           exito: true,
@@ -90,11 +285,8 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
 
       const permisos = normalizarPermisosUsuario(user.permisos, user.rol);
-      const token = jwt.sign(
-        { id: user.id, username: user.username, rol: user.rol, permisos },
-        process.env.JWT_SECRET || "chipactli_jwt_secret",
-        { expiresIn: "12h" }
-      );
+      const token = crearTokenSesionAdmin(user);
+      establecerCookieSesionAdmin(res, token);
 
       return res.json({
         exito: true,
@@ -109,7 +301,14 @@ export function registrarRutasAuth(app, bdAdmin) {
     }
   });
 
+  app.post('/api/auth/logout', (_req, res) => {
+    aplicarNoStorePrivado(res);
+    limpiarCookieSesionAdmin(res);
+    return res.json({ exito: true });
+  });
+
   app.post("/api/auth/configuracion-inicial", async (req, res) => {
+    aplicarNoStorePrivado(res);
     const {
       token_configuracion,
       ceo_username,
@@ -126,17 +325,17 @@ export function registrarRutasAuth(app, bdAdmin) {
 
     let decoded;
     try {
-      decoded = jwt.verify(token_configuracion, process.env.JWT_SECRET || "chipactli_jwt_secret");
+      decoded = jwt.verify(token_configuracion, AUTH_JWT_SECRET);
     } catch {
       return res.status(401).json({ exito: false, mensaje: "Token de configuracion invalido o expirado" });
     }
 
-    if (decoded?.tipo !== "configuracion_inicial" || !decoded?.username) {
+    if (decoded?.tipo !== "configuracion_inicial" || !decoded?.id) {
       return res.status(401).json({ exito: false, mensaje: "Token de configuracion invalido" });
     }
 
-    const ceoUsername = String(ceo_username || "").trim().toLowerCase();
-    const adminUsername = String(admin_username || "").trim().toLowerCase();
+    const ceoUsername = textoSeguro(ceo_username, 60).toLowerCase();
+    const adminUsername = textoSeguro(admin_username, 60).toLowerCase();
     const ceoNombre = String(ceo_nombre || "").trim() || "CEO";
     const adminNombre = String(admin_nombre || "").trim() || "Administrador";
     const ceoPassword = String(ceo_password || "");
@@ -146,21 +345,29 @@ export function registrarRutasAuth(app, bdAdmin) {
     if (!ceoUsername || !ceoPassword) {
       return res.status(400).json({ exito: false, mensaje: "Completa usuario y contrasena del CEO" });
     }
+    if (!usernameSeguro(ceoUsername) || (crearAdmin && !usernameSeguro(adminUsername))) {
+      return res.status(400).json({ exito: false, mensaje: "Usa solo letras, números, punto, guion o guion bajo en los usuarios" });
+    }
     if (crearAdmin && (!adminUsername || !adminPassword)) {
       return res.status(400).json({ exito: false, mensaje: "Si capturas administrador, completa usuario y contrasena" });
     }
     if (crearAdmin && ceoUsername === adminUsername) {
       return res.status(400).json({ exito: false, mensaje: "CEO y administrador deben tener usuarios distintos" });
     }
-    if (ceoPassword.length < 8 || (crearAdmin && adminPassword.length < 8)) {
-      return res.status(400).json({ exito: false, mensaje: "Las contrasenas deben tener al menos 8 caracteres" });
+    const validacionCeo = validarPasswordSegura(ceoPassword);
+    const validacionAdmin = crearAdmin ? validarPasswordSegura(adminPassword) : { ok: true, mensaje: '' };
+    if (!validacionCeo.ok) {
+      return res.status(400).json({ exito: false, mensaje: validacionCeo.mensaje });
+    }
+    if (!validacionAdmin.ok) {
+      return res.status(400).json({ exito: false, mensaje: validacionAdmin.mensaje });
     }
 
     try {
       const maestros = await dbGet(
         bdAdmin,
-        "SELECT id, username FROM usuarios WHERE username = ? AND rol = 'maestro'",
-        [decoded.username]
+        "SELECT id, username FROM usuarios WHERE id = ? AND rol = 'maestro'",
+        [decoded.id]
       );
       if (!maestros) {
         return res.status(401).json({ exito: false, mensaje: "El usuario maestro ya no esta disponible" });
@@ -194,8 +401,8 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
       await dbRun(
         bdAdmin,
-        "DELETE FROM usuarios WHERE username = ? AND rol = 'maestro'",
-        [decoded.username]
+        "DELETE FROM usuarios WHERE id = ? AND rol = 'maestro'",
+        [decoded.id]
       );
       await dbRun(bdAdmin, "COMMIT");
 
@@ -221,9 +428,14 @@ export function registrarRutasAuth(app, bdAdmin) {
   });
 
   app.post("/api/auth/olvide-password", async (req, res) => {
-    const email = String(req.body?.email || '').trim().toLowerCase();
+    aplicarNoStorePrivado(res);
+    const email = textoSeguro(req.body?.email, 160).toLowerCase();
     if (!email) {
       return res.status(400).json({ exito: false, mensaje: "Debes capturar tu correo" });
+    }
+
+    if (!correoConfigurado()) {
+      return res.status(503).json({ exito: false, mensaje: "El servicio de correo no está configurado" });
     }
 
     try {
@@ -237,11 +449,7 @@ export function registrarRutasAuth(app, bdAdmin) {
       );
 
       if (!user) {
-        return res.status(404).json({ exito: false, mensaje: "El correo no está registrado" });
-      }
-
-      if (!correoConfigurado()) {
-        return res.status(503).json({ exito: false, mensaje: "El servicio de correo no está configurado" });
+        return res.json(respuestaRecuperacionGenerica());
       }
 
       const passwordTemporal = generarPasswordTemporal();
@@ -283,8 +491,7 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
 
       return res.json({
-        exito: true,
-        mensaje: "Te enviamos una contraseña temporal a tu correo. Revisa tu bandeja y spam."
+        ...respuestaRecuperacionGenerica()
       });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "No se pudo procesar la recuperación" });
@@ -293,7 +500,18 @@ export function registrarRutasAuth(app, bdAdmin) {
 
   // Cambiar contraseña (requiere login)
   app.post("/api/auth/cambiar-password", async (req, res) => {
-    const { username, password_actual, password_nueva } = req.body || {};
+    aplicarNoStorePrivado(res);
+    const username = textoSeguro(req.body?.username, 60).toLowerCase();
+    const password_actual = String(req.body?.password_actual || '').slice(0, 160);
+    const password_nueva = String(req.body?.password_nueva || '').slice(0, 160);
+
+    if (!usernameSeguro(username)) {
+      return res.status(400).json({ exito: false, mensaje: "El formato de usuario no es válido" });
+    }
+    const validacionPassword = validarPasswordSegura(password_nueva);
+    if (!password_actual || !password_nueva || !validacionPassword.ok) {
+      return res.status(400).json({ exito: false, mensaje: validacionPassword.ok ? "La nueva contraseña es obligatoria" : validacionPassword.mensaje });
+    }
 
     try {
       const user = await dbGet(bdAdmin, "SELECT * FROM usuarios WHERE username = ?", [username]);
@@ -307,13 +525,20 @@ export function registrarRutasAuth(app, bdAdmin) {
       }
 
       const hash = await bcrypt.hash(String(password_nueva || ""), 10);
+      const tokenVersionNuevo = Number(user?.token_version || 0) + 1;
       await dbRun(
         bdAdmin,
-        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
-        [hash, username]
+        "UPDATE usuarios SET password_hash = ?, debe_cambiar_password = 0, token_version = ?, actualizado_en = CURRENT_TIMESTAMP WHERE username = ?",
+        [hash, tokenVersionNuevo, username]
       );
 
-      return res.json({ exito: true });
+      const tokenRefrescado = crearTokenSesionAdmin({
+        id: user.id,
+        token_version: tokenVersionNuevo
+      });
+      establecerCookieSesionAdmin(res, tokenRefrescado);
+
+      return res.json({ exito: true, token: tokenRefrescado });
     } catch {
       return res.status(500).json({ exito: false, mensaje: "Error al actualizar contraseña" });
     }
@@ -321,16 +546,21 @@ export function registrarRutasAuth(app, bdAdmin) {
 
   // Middleware para proteger rutas
   app.use("/api/privado", (req, res, next) => {
-    const auth = req.get("Authorization");
-    if (!auth || !auth.startsWith("Bearer ")) {
+    aplicarNoStorePrivado(res);
+    const token = obtenerTokenSesionAdmin(req);
+    if (!token) {
       return res.status(401).json({ exito: false, mensaje: "No autenticado" });
     }
-    const token = auth.replace("Bearer ", "");
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "chipactli_jwt_secret");
+      const decoded = jwt.verify(token, AUTH_JWT_SECRET);
+      if (decoded?.tipo !== 'admin_auth' || !decoded?.id) {
+        limpiarCookieSesionAdmin(res);
+        return res.status(401).json({ exito: false, mensaje: "Token inválido" });
+      }
       req.usuario = decoded;
       next();
     } catch (err) {
+      limpiarCookieSesionAdmin(res);
       return res.status(401).json({ exito: false, mensaje: "Token inválido" });
     }
   });

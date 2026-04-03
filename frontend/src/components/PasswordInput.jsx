@@ -18,7 +18,7 @@ function EyeOffIcon() {
   );
 }
 
-export default function PasswordInput({ className = '', inputClassName = '', ...props }) {
+const PasswordInput = React.forwardRef(function PasswordInput({ className = '', inputClassName = '', ...props }, ref) {
   const [visible, setVisible] = useState(false);
 
   const combinedClassName = useMemo(() => {
@@ -30,8 +30,12 @@ export default function PasswordInput({ className = '', inputClassName = '', ...
     <div className="passwordInputWrap">
       <input
         {...props}
+        ref={ref}
         type={visible ? 'text' : 'password'}
         className={combinedClassName}
+        autoCapitalize={props.autoCapitalize || 'none'}
+        autoCorrect={typeof props.autoCorrect === 'undefined' ? 'off' : props.autoCorrect}
+        spellCheck={typeof props.spellCheck === 'undefined' ? false : props.spellCheck}
       />
       <button
         type="button"
@@ -45,4 +49,6 @@ export default function PasswordInput({ className = '', inputClassName = '', ...
       </button>
     </div>
   );
-}
+});
+
+export default PasswordInput;

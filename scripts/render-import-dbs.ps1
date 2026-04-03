@@ -59,6 +59,7 @@ try {
 }
 
 $uri = "$($ServiceUrl.TrimEnd('/'))/api/backup/importar"
+$confirmPhrase = "IMPORTAR DBS"
 
 Write-Host "Subiendo DBs a Render..." -ForegroundColor Cyan
 
@@ -74,7 +75,7 @@ try {
     $form[$k] = Get-Item $tempFile
   }
 
-  $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ "x-admin-token" = $AdminToken } -Form $form
+  $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ "x-admin-token" = $AdminToken; "x-confirm-action" = $confirmPhrase } -Form $form
 
   Write-Host "Respuesta API:" -ForegroundColor Green
   $response | ConvertTo-Json -Depth 8

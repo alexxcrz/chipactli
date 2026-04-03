@@ -1,13 +1,35 @@
 import React, { useEffect } from 'react';
 import './Ventas.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
-import { abrirModal, cerrarModal } from '../../utils/modales.jsx';
+import { abrirModal, cerrarModal, mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 import { fetchAPI, fetchAPIJSON } from '../../utils/api.jsx';
 import flatpickr from 'flatpickr';
 import { Spanish } from 'flatpickr/dist/l10n/es.js';
 import 'flatpickr/dist/flatpickr.min.css';
+
+async function confirmarAccionCriticaVenta({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
+}
 
 export default function Ventas() {
   const CLAVE_TAB_PRINCIPAL = 'chipactli:ventas:tab-principal';
@@ -1143,6 +1165,15 @@ async function confirmarAccionEliminarVenta() {
     mostrarNotificacion('Escribe el motivo de la operación', 'error');
     return;
   }
+
+  const confirmado = await confirmarAccionCriticaVenta({
+    titulo: accion === 'regresar_produccion' ? 'Regresar venta a producción' : 'Registrar devolución',
+    mensaje: accion === 'regresar_produccion'
+      ? `Vas a regresar la venta #${Number(ventaPendienteAccion?.id || 0)} a producción.`
+      : `Vas a registrar la venta #${Number(ventaPendienteAccion?.id || 0)} como devolución.`,
+    frase: accion === 'regresar_produccion' ? 'REGRESAR PRODUCCION' : 'REGISTRAR DEVOLUCION'
+  });
+  if (!confirmado) return;
 
   try {
     if (accion === 'regresar_produccion') {

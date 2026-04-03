@@ -13,12 +13,15 @@ import {
   reproducirSonidoAlerta,
   solicitarPermisoNotificacionesNativas
 } from '../../utils/notificaciones.jsx';
-import { mostrarConfirmacion } from '../../utils/modales.jsx';
+import { mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
+import TurnstileWidget, { turnstileFrontendActivo } from '../../components/TurnstileWidget.jsx';
 
-const API_TIENDA = import.meta.env.DEV
-  ? (import.meta.env.VITE_BACKEND_URL || '')
-  : API;
+const API_TIENDA = API || '';
+const FETCH_TIMEOUT_MS = 15000;
+const ADMIN_COOKIE_SESSION_SENTINEL = '__cookie_admin__';
+const CLIENTE_COOKIE_SESSION_SENTINEL = '__cookie_cliente__';
+const TURNSTILE_PUBLIC_AUTH_ENABLED = turnstileFrontendActivo();
 
 const CLAVE_TOKEN_CLIENTE = 'tienda_cliente_token';
 const CLAVE_CARRITO_TIENDA = 'tienda_carrito_v2';
@@ -569,6 +572,28 @@ function fechaLocalIsoHoy() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function fechaIsoDesdeDate(fecha) {
+  if (!(fecha instanceof Date) || Number.isNaN(fecha.getTime())) return '';
+  const yyyy = fecha.getFullYear();
+  const mm = String(fecha.getMonth() + 1).padStart(2, '0');
+  const dd = String(fecha.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function obtenerInicioSemanaDomingo(fechaIso = '') {
+  const fecha = new Date(`${String(fechaIso || '').trim()}T12:00:00`);
+  if (Number.isNaN(fecha.getTime())) return '';
+  fecha.setDate(fecha.getDate() - fecha.getDay());
+  return fechaIsoDesdeDate(fecha);
+}
+
+function sumarDiasFechaIso(fechaIso = '', dias = 0) {
+  const fecha = new Date(`${String(fechaIso || '').trim()}T12:00:00`);
+  if (Number.isNaN(fecha.getTime())) return '';
+  fecha.setDate(fecha.getDate() + (Number(dias) || 0));
+  return fechaIsoDesdeDate(fecha);
+}
+
 function obtenerMetodosPagoConfig(valor, config = {}) {
   try {
     const parseado = JSON.parse(String(valor || '[]'));
@@ -740,8 +765,36 @@ function normalizarClaveCategoriaTienda(valor) {
     .toLowerCase();
 }
 
+function tokenPareceJwt(token = '') {
+  return String(token || '').trim().split('.').length === 3;
+}
+
 async function fetchJson(path, options = {}) {
-  const respuesta = await fetch(apiUrl(path), options);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const headers = new Headers(options?.headers || {});
+  const authActual = String(headers.get('Authorization') || '').trim();
+  if (authActual.startsWith('Bearer ') && !tokenPareceJwt(authActual.slice(7).trim())) {
+    headers.delete('Authorization');
+  }
+
+  let respuesta;
+  try {
+    respuesta = await fetch(apiUrl(path), {
+      ...options,
+      headers,
+      credentials: typeof options?.credentials === 'undefined' ? 'include' : options.credentials,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('La conexion tardo demasiado. Revisa la red del dispositivo y vuelve a intentar.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+
   const data = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     const base = data?.mensaje || data?.error || `Error HTTP ${respuesta.status}`;
@@ -749,6 +802,18 @@ async function fetchJson(path, options = {}) {
     throw new Error(detalle ? `${base}: ${detalle}` : base);
   }
   return data;
+}
+
+function esCorreoValido(valor) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(valor || '').trim());
+}
+
+function headersClienteSesion(base = {}, token = '') {
+  if (!tokenPareceJwt(token)) return { ...base };
+  return {
+    ...base,
+    Authorization: `Bearer ${token}`
+  };
 }
 
 function precio(num) {
@@ -980,13 +1045,21 @@ function Tienda({
   const [procesandoPagoMp, setProcesandoPagoMp] = useState(false);
   const [modoAuth, setModoAuth] = useState('login');
   const [mostrarModalAuthCliente, setMostrarModalAuthCliente] = useState(false);
+  const [enviandoAuthCliente, setEnviandoAuthCliente] = useState(false);
+  const [errorAuthCliente, setErrorAuthCliente] = useState('');
+  const [sacudirAuthCliente, setSacudirAuthCliente] = useState(false);
+  const [clienteTurnstileToken, setClienteTurnstileToken] = useState('');
+  const [clienteTurnstileResetKey, setClienteTurnstileResetKey] = useState(0);
   const [mostrarPanelRecuperarCliente, setMostrarPanelRecuperarCliente] = useState(false);
   const [recuperarClienteEmail, setRecuperarClienteEmail] = useState('');
   const [enviandoRecuperacionCliente, setEnviandoRecuperacionCliente] = useState(false);
   const [recuperacionClienteMensaje, setRecuperacionClienteMensaje] = useState('');
+  const [recuperacionTurnstileToken, setRecuperacionTurnstileToken] = useState('');
+  const [recuperacionTurnstileResetKey, setRecuperacionTurnstileResetKey] = useState(0);
   const [modalCambioPasswordCliente, setModalCambioPasswordCliente] = useState({ visible: false, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
   const [mostrarModalPerfilCliente, setMostrarModalPerfilCliente] = useState(false);
   const [pasoRegistro, setPasoRegistro] = useState(1);
+  const passwordLoginRef = useRef(null);
   const [credenciales, setCredenciales] = useState({
     nombre: '',
     apellido_paterno: '',
@@ -998,7 +1071,9 @@ function Tienda({
     recibe_promociones: false
   });
   const [clienteToken, setClienteToken] = useState(() => localStorage.getItem(CLAVE_TOKEN_CLIENTE) || '');
-  const [tokenInterno] = useState(() => localStorage.getItem('token') || '');
+  const [tokenInterno, setTokenInterno] = useState(() => localStorage.getItem('token') || '');
+  const [sesionInternaValidada, setSesionInternaValidada] = useState(() => !localStorage.getItem('token'));
+  const sesionInternaActiva = Boolean(tokenInterno) && sesionInternaValidada;
   const excluirMetricasVisitas = Boolean(tokenInterno) || esVistaTrastienda || vistaActiva === 'trastienda';
   const [cliente, setCliente] = useState(null);
   const idClienteFavoritos = Number(cliente?.id) || extraerIdClienteToken(clienteToken) || 0;
@@ -1143,6 +1218,7 @@ function Tienda({
   });
   const [fechaVisitaSeleccionada, setFechaVisitaSeleccionada] = useState(() => fechaLocalIsoHoy());
   const [paginaHorasResumen, setPaginaHorasResumen] = useState(0);
+  const [paginaHistorialSemana, setPaginaHistorialSemana] = useState(0);
   const [metricasSubVista, setMetricasSubVista] = useState('visitas');
   const [comportamientoVisitasAdmin, setComportamientoVisitasAdmin] = useState({
     cargando: false,
@@ -1190,6 +1266,74 @@ function Tienda({
     } catch {
       return null;
     }
+  }, [tokenInterno]);
+
+  useEffect(() => {
+    const sincronizarTokenInterno = (tokenForzado = null) => {
+      const tokenActual = tokenForzado === null
+        ? String(localStorage.getItem('token') || '')
+        : String(tokenForzado || '');
+      setTokenInterno(tokenActual);
+      if (!tokenActual) setSesionInternaValidada(false);
+    };
+
+    const onStorage = (event) => {
+      if (!event || event.key === null || event.key === 'token') {
+        sincronizarTokenInterno(event?.newValue ?? null);
+      }
+    };
+
+    const onSesionInterna = (event) => {
+      sincronizarTokenInterno(event?.detail?.token ?? '');
+    };
+
+    const onAuthInvalid = () => {
+      sincronizarTokenInterno('');
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('chipactli:session-token', onSesionInterna);
+    window.addEventListener('chipactli:auth-invalid', onAuthInvalid);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('chipactli:session-token', onSesionInterna);
+      window.removeEventListener('chipactli:auth-invalid', onAuthInvalid);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    if (!tokenInterno) {
+      setSesionInternaValidada(false);
+      return undefined;
+    }
+
+    setSesionInternaValidada(false);
+    fetchJson('/api/auth/validar', {
+      headers: { Authorization: `Bearer ${tokenInterno}` }
+    }).then(() => {
+      if (cancelado) return;
+      setSesionInternaValidada(true);
+    }).catch(() => {
+      if (cancelado) return;
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('usuario');
+      } catch {
+        // Ignorar errores de localStorage.
+      }
+      setTokenInterno('');
+      setSesionInternaValidada(false);
+      window.dispatchEvent(new CustomEvent('chipactli:auth-invalid', {
+        detail: { mensaje: 'Tu sesión interna expiró. Inicia sesión nuevamente.' }
+      }));
+    });
+
+    return () => {
+      cancelado = true;
+    };
   }, [tokenInterno]);
 
   const esRolInternoTotal = useMemo(() => {
@@ -1407,9 +1551,52 @@ function Tienda({
     [visitasActivas]
   );
 
-  const maximoVisitasHistorial = useMemo(
-    () => (historialVisitasAdmin.porDia || []).reduce((max, item) => Math.max(max, Number(item?.visitas) || 0), 0),
-    [historialVisitasAdmin.porDia]
+  const historialSemanas = useMemo(() => {
+    const mapa = new Map();
+    (historialVisitasAdmin.porDia || []).forEach((item) => {
+      const fecha = String(item?.fecha || '').trim();
+      if (!fecha) return;
+      const inicio = obtenerInicioSemanaDomingo(fecha);
+      if (!inicio) return;
+      if (!mapa.has(inicio)) {
+        mapa.set(inicio, {
+          inicio,
+          fin: sumarDiasFechaIso(inicio, 6),
+          dias: [],
+          visitas: 0,
+          eventos: 0
+        });
+      }
+      const semana = mapa.get(inicio);
+      semana.dias.push(item);
+      semana.visitas += Number(item?.visitas) || 0;
+      semana.eventos += Number(item?.eventos) || 0;
+    });
+    return Array.from(mapa.values()).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+  }, [historialVisitasAdmin.porDia]);
+
+  const totalPaginasHistorialSemana = useMemo(
+    () => Math.max(1, historialSemanas.length || 1),
+    [historialSemanas.length]
+  );
+
+  const paginaHistorialSemanaSegura = Math.max(0, Math.min(paginaHistorialSemana, totalPaginasHistorialSemana - 1));
+
+  const historialSemanaActual = useMemo(
+    () => historialSemanas[paginaHistorialSemanaSegura] || { inicio: '', fin: '', dias: [] },
+    [historialSemanas, paginaHistorialSemanaSegura]
+  );
+
+  const etiquetaHistorialSemana = useMemo(() => {
+    if (!historialSemanaActual?.dias?.length) return 'Semana sin datos';
+    const primerDia = historialSemanaActual.dias[0];
+    const ultimoDia = historialSemanaActual.dias[historialSemanaActual.dias.length - 1];
+    return `${primerDia?.fecha || historialSemanaActual.inicio} - ${ultimoDia?.fecha || historialSemanaActual.fin}`;
+  }, [historialSemanaActual]);
+
+  const maximoVisitasHistorialSemana = useMemo(
+    () => (historialSemanaActual?.dias || []).reduce((max, item) => Math.max(max, Number(item?.visitas) || 0), 0),
+    [historialSemanaActual]
   );
 
   const esFechaResumenHoy = useMemo(() => {
@@ -1461,6 +1648,10 @@ function Tienda({
     const ultimo = horasResumenPaginadas[horasResumenPaginadas.length - 1];
     return `${primero.horaInicio} - ${ultimo.horaFin}`;
   }, [horasResumenPaginadas]);
+
+  useEffect(() => {
+    setPaginaHistorialSemana(Math.max(0, historialSemanas.length - 1));
+  }, [historialSemanas.length]);
 
   const removerFondoPngFooter = configActivo(configTienda?.footer_pagos_remover_fondo_png, true);
   const [metodosPagoRenderFooter, setMetodosPagoRenderFooter] = useState([]);
@@ -1741,10 +1932,18 @@ function Tienda({
     });
   }
 
-  function eliminarPestanaBase(baseId, configKey, label) {
+  async function eliminarPestanaBase(baseId, configKey, label) {
     const id = String(baseId || '').trim();
     const clave = String(configKey || '').trim();
     if (!id) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar pestaña base',
+      mensaje: `Vas a ocultar la pestaña ${String(label || 'de navegación').trim()} de la vitrina. Guarda configuración después para aplicar el cambio.`,
+      frase: 'ELIMINAR PESTANA'
+    });
+    if (!confirmado) return;
+
     actualizarTabsBaseEliminadasAdmin((prev) => (prev.includes(id) ? prev : [...prev, id]));
     if (clave) {
       setConfigTiendaAdmin((prev) => ({ ...prev, [clave]: '0' }));
@@ -3286,11 +3485,21 @@ function Tienda({
         await navigator.clipboard.writeText(link);
         mostrarNotificacion('Enlace copiado al portapapeles', 'exito');
       } else {
-        window.prompt('Copia este enlace del producto:', link);
+        mostrarNotificacion('No se pudo copiar automáticamente, pero puedes copiar el enlace desde este modal.', 'advertencia', {
+          titulo: 'Copiar enlace del producto',
+          detalle: nombre ? `Producto: ${nombre}` : '',
+          copyText: link,
+          copyLabel: 'Copiar enlace'
+        });
       }
       registrarEventoComportamiento('compartir_producto', nombre);
     } catch {
-      window.prompt('Copia este enlace del producto:', link);
+      mostrarNotificacion('No se pudo copiar automáticamente, pero puedes copiar el enlace desde este modal.', 'advertencia', {
+        titulo: 'Copiar enlace del producto',
+        detalle: nombre ? `Producto: ${nombre}` : '',
+        copyText: link,
+        copyLabel: 'Copiar enlace'
+      });
     }
   }
 
@@ -3597,13 +3806,21 @@ function Tienda({
     const yaActivo = configActivo(configTiendaAdmin?.servicio_domicilio_habilitado, false);
     if (yaActivo) return;
 
-    const confirmar = await mostrarConfirmacion(
-      'Esta acción notificará a todos los clientes registrados y ocultará este check. ¿Continuar?',
-      'Activar servicio a domicilio'
-    );
+    const confirmar = await confirmarAccionCriticaTrastienda({
+      titulo: 'Activar servicio a domicilio',
+      mensaje: 'Esta acción notificará a todos los clientes registrados y habilitará un canal operativo visible en la tienda.',
+      frase: 'ACTIVAR DOMICILIO'
+    });
     if (!confirmar) return;
 
-    const passwordCeo = window.prompt('Ingresa la contraseña del CEO para confirmar:') || '';
+    const passwordCeo = await solicitarTextoModal({
+      titulo: 'Contraseña del CEO',
+      mensaje: 'Ingresa la contraseña del CEO para confirmar la activación del servicio a domicilio.',
+      etiqueta: 'Contraseña del CEO',
+      tipo: 'password',
+      aceptarLabel: 'Confirmar',
+      autocomplete: 'current-password'
+    }) || '';
     if (!String(passwordCeo || '').trim()) {
       mostrarNotificacion('Se requiere la contraseña del CEO', 'error');
       return;
@@ -3631,7 +3848,7 @@ function Tienda({
 
     if (!silencioso) setCargando(true);
     try {
-      const usarRutaAdmin = Boolean(tokenInterno) && (esVistaTrastienda || vistaActiva === 'trastienda');
+      const usarRutaAdmin = Boolean(sesionInternaActiva) && (esVistaTrastienda || vistaActiva === 'trastienda');
       let data = [];
       if (usarRutaAdmin) {
         try {
@@ -3726,6 +3943,13 @@ function Tienda({
 
   async function guardarEditorProducto() {
     if (!editorProducto?.receta_nombre) return;
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar ficha de producto',
+      mensaje: 'Vas a actualizar la ficha pública de un producto en tienda, incluyendo descripción, imagen o variantes.',
+      frase: 'GUARDAR PRODUCTO'
+    });
+    if (!confirmado) return;
+
     try {
       await fetchAdmin('/tienda/catalogo/upsert', {
         method: 'POST',
@@ -3750,8 +3974,12 @@ function Tienda({
   async function cargarPerfil(token) {
     try {
       const data = await fetchJson('/tienda/auth/perfil', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headersClienteSesion({}, token)
       });
+      if (token && !tokenPareceJwt(token)) {
+        localStorage.setItem(CLAVE_TOKEN_CLIENTE, CLIENTE_COOKIE_SESSION_SENTINEL);
+        setClienteToken(CLIENTE_COOKIE_SESSION_SENTINEL);
+      }
       setCliente(data?.cliente || null);
       setPerfil({
         nombre: data?.cliente?.nombre || '',
@@ -3997,7 +4225,11 @@ function Tienda({
 
   async function eliminarDireccionPerfil(idDireccion) {
     if (!clienteToken) return;
-    const ok = await mostrarConfirmacion('¿Eliminar esta dirección?', 'Eliminar dirección');
+    const ok = await confirmarAccionCriticaCliente({
+      titulo: 'Eliminar dirección',
+      mensaje: 'Vas a eliminar una dirección guardada de tu cuenta.',
+      frase: 'ELIMINAR DIRECCION'
+    });
     if (!ok) return;
 
     try {
@@ -4048,7 +4280,7 @@ function Tienda({
   }
 
   useEffect(() => {
-    if (!tokenInterno) return;
+    if (!sesionInternaActiva) return;
     cargarAdminPuntos();
     cargarAdminClientes();
     cargarAdminOrdenes();
@@ -4057,7 +4289,7 @@ function Tienda({
     cargarCuponesAdmin();
     cargarHistorialCuponesAdmin();
   }, [
-    tokenInterno,
+    sesionInternaActiva,
     clienteToken,
     cliente?.id,
     permisoNotificacionesPedidos,
@@ -4210,53 +4442,83 @@ function Tienda({
     const contenedor = contenedorScrollRef.current;
     if (!contenedor) return undefined;
 
-    const tieneScrollPropio = (objetivo) => {
-      let nodo = objetivo instanceof Element ? objetivo : null;
-      while (nodo && nodo !== contenedor) {
-        const estilo = window.getComputedStyle(nodo);
-        const overflowY = String(estilo?.overflowY || '').toLowerCase();
-        const desplazable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
-          && nodo.scrollHeight > nodo.clientHeight;
-        if (desplazable) return true;
-        nodo = nodo.parentElement;
-      }
-      return false;
+    let ultimoX = 0;
+    let ultimoY = 0;
+    let gestoActivo = false;
+    let bloquearScrollVertical = false;
+
+    const perteneceAZonaHorizontal = (objetivo) => {
+      return objetivo instanceof Element
+        ? Boolean(objetivo.closest('.tiendaAdminTabs, .tiendaMetricasSubTabs, .tiendaCuponWizardPasos'))
+        : false;
     };
 
-    let startX = 0;
-    let startY = 0;
+    const dentroDeTrastienda = (objetivo) => (
+      contenedor && objetivo instanceof Node ? contenedor.contains(objetivo) : false
+    );
 
     const onTouchStart = (event) => {
+      if (!dentroDeTrastienda(event.target)) return;
       const touch = event.touches?.[0];
       if (!touch) return;
-      startX = Number(touch.clientX) || 0;
-      startY = Number(touch.clientY) || 0;
+      ultimoX = Number(touch.clientX) || 0;
+      ultimoY = Number(touch.clientY) || 0;
+      gestoActivo = true;
+      bloquearScrollVertical = perteneceAZonaHorizontal(event.target);
     };
 
     const onTouchMove = (event) => {
+      if (!gestoActivo) return;
+      if (!dentroDeTrastienda(event.target)) return;
+
       const touch = event.touches?.[0];
       if (!touch) return;
-      if (tieneScrollPropio(event.target)) return;
 
-      const deltaX = (Number(touch.clientX) || 0) - startX;
-      const deltaY = (Number(touch.clientY) || 0) - startY;
-      if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
+      const xActual = Number(touch.clientX) || 0;
+      const yActual = Number(touch.clientY) || 0;
+      const deltaX = xActual - ultimoX;
+      const deltaY = yActual - ultimoY;
+
+      if (bloquearScrollVertical && Math.abs(deltaX) > Math.abs(deltaY)) {
+        ultimoX = xActual;
+        ultimoY = yActual;
+        return;
+      }
+
+      if (Math.abs(deltaY) <= Math.abs(deltaX) || Math.abs(deltaY) < 2) {
+        ultimoX = xActual;
+        ultimoY = yActual;
+        return;
+      }
 
       const maxScroll = Math.max(0, contenedor.scrollHeight - contenedor.clientHeight);
-      const estaArriba = contenedor.scrollTop <= 0;
-      const estaAbajo = contenedor.scrollTop >= maxScroll - 1;
+      if (maxScroll <= 0) return;
 
-      if ((estaArriba && deltaY > 0) || (estaAbajo && deltaY < 0)) {
+      const siguiente = Math.min(maxScroll, Math.max(0, contenedor.scrollTop - deltaY));
+      if (siguiente !== contenedor.scrollTop) {
+        contenedor.scrollTop = siguiente;
         event.preventDefault();
       }
+
+      ultimoX = xActual;
+      ultimoY = yActual;
     };
 
-    contenedor.addEventListener('touchstart', onTouchStart, { passive: true });
-    contenedor.addEventListener('touchmove', onTouchMove, { passive: false });
+    const onTouchEnd = () => {
+      gestoActivo = false;
+      bloquearScrollVertical = false;
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: false, capture: true });
+    document.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+    document.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
 
     return () => {
-      contenedor.removeEventListener('touchstart', onTouchStart);
-      contenedor.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchstart', onTouchStart, true);
+      document.removeEventListener('touchmove', onTouchMove, true);
+      document.removeEventListener('touchend', onTouchEnd, true);
+      document.removeEventListener('touchcancel', onTouchEnd, true);
     };
   }, [esVistaTrastienda, vistaActiva]);
 
@@ -4475,7 +4737,89 @@ function Tienda({
     }
   }
 
+  async function confirmarAccionCriticaTrastienda({ titulo = 'Confirmar acción crítica', mensaje = '', frase = '' } = {}) {
+    const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+    if (!confirmado) return false;
+    if (!frase) return true;
+
+    const entrada = await solicitarTextoModal({
+      titulo,
+      mensaje,
+      descripcion: `Escribe exactamente ${frase} para continuar.`,
+      etiqueta: 'Frase de confirmación',
+      placeholder: frase,
+      aceptarLabel: 'Continuar'
+    });
+    if (entrada === null) return false;
+    if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+      mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+      return false;
+    }
+
+    return true;
+  }
+
+  async function confirmarAccionCriticaCliente({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+    const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+    if (!confirmado) return false;
+    if (!frase) return true;
+
+    const entrada = await solicitarTextoModal({
+      titulo,
+      mensaje,
+      descripcion: `Escribe exactamente ${frase} para continuar.`,
+      etiqueta: 'Frase de confirmación',
+      placeholder: frase,
+      aceptarLabel: 'Continuar'
+    });
+    if (entrada === null) return false;
+    if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+      mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+      return false;
+    }
+
+    return true;
+  }
+
+  async function eliminarPestanaPersonalizadaAdmin(index, label = '') {
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar pestaña personalizada',
+      mensaje: `Vas a eliminar la pestaña personalizada ${String(label || 'de navegación').trim() || 'de navegación'} de la vitrina. Guarda configuración después para aplicar el cambio.`,
+      frase: 'ELIMINAR PESTANA'
+    });
+    if (!confirmado) return;
+
+    actualizarTabsNavegacionAdmin((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  async function cancelarOrdenPerfil(idOrden) {
+    const id = Number(idOrden || 0);
+    if (!clienteToken || !Number.isFinite(id) || id <= 0) return;
+
+    const confirmado = await confirmarAccionCriticaCliente({
+      titulo: 'Cancelar orden',
+      mensaje: 'Vas a cancelar esta orden pendiente. La acción puede afectar seguimiento y pago asociado.',
+      frase: 'CANCELAR ORDEN'
+    });
+    if (!confirmado) return;
+
+    try {
+      await fetchJson(`/tienda/ordenes/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clienteToken}` } });
+      await cargarMisOrdenes();
+      mostrarNotificacion('Orden cancelada', 'exito');
+    } catch (error) {
+      mostrarNotificacion(error?.message || 'No se pudo cancelar la orden', 'error');
+    }
+  }
+
   async function guardarConfigTiendaAdmin() {
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar configuración de Trastienda',
+      mensaje: 'Vas a modificar la configuración pública de la vitrina y navegación de la tienda. Este cambio impacta a clientes y operación.',
+      frase: 'GUARDAR CONFIG'
+    });
+    if (!confirmado) return;
+
     try {
       const data = await fetchAdmin('/tienda/admin/config', {
         method: 'POST',
@@ -4531,7 +4875,11 @@ function Tienda({
       return;
     }
 
-    const confirmar = window.confirm('Se enviará correo masivo solo a clientes suscritos a promociones. ¿Continuar?');
+    const confirmar = await confirmarAccionCriticaTrastienda({
+      titulo: 'Enviar campaña masiva',
+      mensaje: 'Vas a enviar correo masivo a clientes suscritos. Esta acción es de alto impacto comercial y reputacional.',
+      frase: 'ENVIAR CAMPANA'
+    });
     if (!confirmar) return;
 
     setEnviandoCorreoMasivo(true);
@@ -4655,6 +5003,14 @@ function Tienda({
 
   async function guardarDescuento(scope, clave, activo, porcentaje) {
     const key = claveDraftDescuento(scope, scope === 'global' ? '__all__' : clave);
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar descuento de Trastienda',
+      mensaje: 'Este cambio modifica precios promocionales visibles para clientes y puede afectar pedidos nuevos inmediatamente.',
+      frase: 'GUARDAR DESCUENTO'
+    });
+    if (!confirmado) return;
+
     setGuardandoDescuentoClave(key);
     try {
       await fetchAdmin('/tienda/admin/descuentos/upsert', {
@@ -4898,6 +5254,15 @@ function Tienda({
       return;
     }
 
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: esNuevoCupon ? 'Crear cupón en Trastienda' : 'Actualizar cupón en Trastienda',
+      mensaje: esNuevoCupon
+        ? 'Vas a crear un cupón nuevo que puede afectar descuentos y campañas activas.'
+        : 'Vas a modificar un cupón existente. Esto puede cambiar reglas de descuento y redención para clientes.',
+      frase: esNuevoCupon ? 'CREAR CUPON' : 'ACTUALIZAR CUPON'
+    });
+    if (!confirmado) return;
+
     setGuardandoCuponAdmin(true);
     try {
       await fetchAdmin('/tienda/admin/cupones/upsert', {
@@ -4907,10 +5272,11 @@ function Tienda({
       });
 
       if (esNuevoCupon) {
-        const confirmarEnvio = await mostrarConfirmacion(
-          '¿Deseas enviar este cupón por correo a todos los suscriptores de la página?',
-          'Enviar cupón a suscriptores'
-        );
+        const confirmarEnvio = await confirmarAccionCriticaTrastienda({
+          titulo: 'Enviar cupón a suscriptores',
+          mensaje: 'Vas a enviar este cupón por correo a todos los suscriptores de la página. Esta acción impacta comunicación masiva y reputación comercial.',
+          frase: 'ENVIAR CUPON'
+        });
         if (confirmarEnvio) {
           try {
             const dataEnvio = await enviarCampanaCuponSuscriptores(payload);
@@ -4939,6 +5305,14 @@ function Tienda({
   async function cambiarActivoCuponAdmin(cupon, activo) {
     const idCupon = Number(cupon?.id) || 0;
     if (!idCupon || !tokenInterno) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: activo ? 'Activar cupón' : 'Desactivar cupón',
+      mensaje: `Vas a ${activo ? 'activar' : 'desactivar'} el cupón ${String(cupon?.codigo || '').trim().toUpperCase() || `#${idCupon}`}. Esto impacta compras nuevas inmediatamente.`,
+      frase: activo ? 'ACTIVAR CUPON' : 'DESACTIVAR CUPON'
+    });
+    if (!confirmado) return;
+
     setActualizandoActivoCuponId(idCupon);
     try {
       await fetchAdmin(`/tienda/admin/cupones/${idCupon}/activo`, {
@@ -4980,6 +5354,9 @@ function Tienda({
   async function fetchAdmin(path, options = {}) {
     const method = String(options?.method || 'GET').trim().toUpperCase() || 'GET';
     const esLectura = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+    if (!sesionInternaActiva) {
+      throw new Error('Sesión interna no disponible');
+    }
     if (!esLectura && !puedeEditarTrastienda) {
       mostrarNotificacion('No tienes permiso para editar en Trastienda.', 'error');
       throw new Error('Permiso insuficiente para editar Trastienda');
@@ -5059,12 +5436,24 @@ function Tienda({
     }
   }
 
+  function abrirVentanaAnalisisMetricas() {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const params = new URLSearchParams();
+    params.set('tab', metricasSubVista === 'comportamiento' ? 'acciones' : 'visitas');
+    params.set('mes', String(fechaVisitaSeleccionada || fechaLocalIsoHoy()).slice(0, 7) || fechaLocalIsoHoy().slice(0, 7));
+    url.search = '';
+    url.hash = `#/metricas-analisis?${params.toString()}`;
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  }
+
   async function reiniciarMetricasAdmin() {
     if (!tokenInterno || reiniciandoMetricasAdmin) return;
-    const confirmar = await mostrarConfirmacion(
-      '¿Reiniciar métricas de visitas y comportamiento? Esta acción no se puede deshacer.',
-      'Reiniciar métricas'
-    );
+    const confirmar = await confirmarAccionCriticaTrastienda({
+      titulo: 'Reiniciar métricas',
+      mensaje: 'Vas a borrar métricas de visitas y comportamiento. La información histórica dejará de estar disponible en el panel.',
+      frase: 'REINICIAR METRICAS'
+    });
     if (!confirmar) return;
 
     setReiniciandoMetricasAdmin(true);
@@ -5157,6 +5546,14 @@ function Tienda({
     const id = Number(idCliente || 0);
     if (!Number.isFinite(id) || id <= 0) return;
 
+    const cliente = adminClientes.find((item) => Number(item?.id || 0) === id);
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: accionesActivas ? 'Activar acciones del cliente' : 'Desactivar acciones del cliente',
+      mensaje: `Vas a ${accionesActivas ? 'activar' : 'desactivar'} acciones de app para ${String(cliente?.nombre || cliente?.email || `cliente #${id}`).trim()}. Esto altera su operativa en tienda.`,
+      frase: accionesActivas ? 'ACTIVAR CLIENTE' : 'DESACTIVAR CLIENTE'
+    });
+    if (!confirmado) return;
+
     setActualizandoClienteAccionesId(id);
     try {
       await fetchAdmin(`/tienda/admin/clientes/${id}/acciones-app`, {
@@ -5183,7 +5580,12 @@ function Tienda({
   async function eliminarClienteAdmin(idCliente) {
     const id = Number(idCliente || 0);
     if (!Number.isFinite(id) || id <= 0) return;
-    const ok = window.confirm('¿Seguro que deseas eliminar este cliente? Esta acción no se puede deshacer.');
+    const cliente = adminClientes.find((item) => Number(item?.id || 0) === id);
+    const ok = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar cliente',
+      mensaje: `Vas a eliminar a ${String(cliente?.nombre || cliente?.email || `cliente #${id}`).trim()} junto con datos asociados. Esta acción no se puede deshacer.`,
+      frase: 'ELIMINAR CLIENTE'
+    });
     if (!ok) return;
     try {
       await fetchAdmin(`/tienda/admin/clientes/${id}`, { method: 'DELETE' });
@@ -5205,6 +5607,14 @@ function Tienda({
 
   async function crearPuntoEntregaAdmin(event) {
     event.preventDefault();
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Crear punto de entrega',
+      mensaje: 'Vas a crear un nuevo punto de entrega visible para clientes en checkout y operación interna.',
+      frase: 'CREAR PUNTO'
+    });
+    if (!confirmado) return;
+
     try {
       await fetchAdmin('/tienda/admin/puntos-entrega', {
         method: 'POST',
@@ -5224,6 +5634,14 @@ function Tienda({
   async function cambiarEstadoPunto(id, activo) {
     const punto = adminPuntos.find((item) => item.id === id);
     if (!punto) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: activo ? 'Activar punto de entrega' : 'Desactivar punto de entrega',
+      mensaje: `Vas a ${activo ? 'activar' : 'desactivar'} el punto ${String(punto?.nombre || '').trim() || `#${id}`}. Esto afecta disponibilidad para clientes.`,
+      frase: activo ? 'ACTIVAR PUNTO' : 'DESACTIVAR PUNTO'
+    });
+    if (!confirmado) return;
+
     try {
       await fetchAdmin(`/tienda/admin/puntos-entrega/${id}`, {
         method: 'PATCH',
@@ -5277,6 +5695,14 @@ function Tienda({
   async function guardarPuntoAdmin(puntoParam = null) {
     const punto = puntoParam || modalPunto.data;
     if (!punto) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar punto de entrega',
+      mensaje: `Vas a actualizar el punto ${String(punto?.nombre || '').trim() || `#${punto?.id || ''}`}. Este cambio altera la información operativa mostrada a clientes.`,
+      frase: 'GUARDAR PUNTO'
+    });
+    if (!confirmado) return;
+
     try {
       await fetchAdmin(`/tienda/admin/puntos-entrega/${punto.id}`, {
         method: 'PATCH',
@@ -5298,8 +5724,13 @@ function Tienda({
   }
 
   async function eliminarPuntoAdmin(id) {
-    const ok = await mostrarConfirmacion('¿Eliminar este punto de entrega?', 'Eliminar punto');
+    const ok = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar punto',
+      mensaje: 'Vas a eliminar este punto de entrega. Clientes y operación dejarán de verlo inmediatamente.',
+      frase: 'ELIMINAR PUNTO'
+    });
     if (!ok) return;
+
     try {
       await fetchAdmin(`/tienda/admin/puntos-entrega/${id}`, { method: 'DELETE' });
       await cargarAdminPuntos();
@@ -5370,7 +5801,11 @@ function Tienda({
     const id = Number(idOrden || 0);
     if (!Number.isFinite(id) || id <= 0) return;
 
-    const confirmar = await mostrarConfirmacion('¿Eliminar este pedido? Esta acción no se puede deshacer.', 'Eliminar pedido');
+    const confirmar = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar pedido',
+      mensaje: 'Vas a eliminar este pedido. La acción afecta historial operativo y no se puede deshacer.',
+      frase: 'ELIMINAR PEDIDO'
+    });
     if (!confirmar) return;
 
     setProcesandoPedidosAdmin(true);
@@ -5401,6 +5836,13 @@ function Tienda({
     );
     if (!confirmar) return;
 
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Eliminar pedidos filtrados',
+      mensaje: `Vas a eliminar ${ids.length} pedido(s) visibles en el filtro actual. Esto impacta historial y folios operativos.`,
+      frase: 'ELIMINAR PEDIDOS'
+    });
+    if (!confirmado) return;
+
     setProcesandoPedidosAdmin(true);
     try {
       await fetchAdmin('/tienda/admin/ordenes/bulk-delete', {
@@ -5423,6 +5865,13 @@ function Tienda({
       mostrarNotificacion('Se requiere la contraseña del admin', 'error');
       return;
     }
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Reiniciar contadores de pedidos',
+      mensaje: 'Vas a eliminar pedidos y reiniciar folios. Esta acción es destructiva y altera trazabilidad operativa.',
+      frase: 'REINICIAR PEDIDOS'
+    });
+    if (!confirmado) return;
 
     setProcesandoPedidosAdmin(true);
     try {
@@ -5462,6 +5911,14 @@ function Tienda({
   async function guardarClasificacionProducto(producto) {
     const recetaNombre = String(producto?.nombre_receta || '').trim();
     if (!recetaNombre) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar clasificación de producto',
+      mensaje: `Vas a cambiar banderas comerciales de ${recetaNombre} en la vitrina.`,
+      frase: 'CLASIFICAR PRODUCTO'
+    });
+    if (!confirmado) return;
+
     setGuardandoClasificacion(recetaNombre);
     try {
       await fetchAdmin('/tienda/catalogo/upsert', {
@@ -5487,6 +5944,14 @@ function Tienda({
 
   async function guardarClasificacionTodos() {
     if (!productos.length) return;
+
+    const confirmado = await confirmarAccionCriticaTrastienda({
+      titulo: 'Guardar clasificación masiva',
+      mensaje: 'Vas a aplicar clasificación comercial masiva sobre todos los productos cargados. Esto puede alterar la vitrina completa.',
+      frase: 'CLASIFICAR TODO'
+    });
+    if (!confirmado) return;
+
     setGuardandoClasificacionMasiva(true);
     try {
       await Promise.all(
@@ -5894,11 +6359,55 @@ function Tienda({
     setCarrito((prev) => prev.filter((item) => item.clave !== clave));
   }
 
+  function limpiarErrorAuthCliente() {
+    setErrorAuthCliente('');
+    setSacudirAuthCliente(false);
+  }
+
+  function reiniciarTurnstileAuthCliente() {
+    setClienteTurnstileToken('');
+    setClienteTurnstileResetKey((prev) => prev + 1);
+  }
+
+  function reiniciarTurnstileRecuperacionCliente() {
+    setRecuperacionTurnstileToken('');
+    setRecuperacionTurnstileResetKey((prev) => prev + 1);
+  }
+
+  function cerrarModalAuthCliente() {
+    setMostrarModalAuthCliente(false);
+    limpiarErrorAuthCliente();
+    reiniciarTurnstileAuthCliente();
+    reiniciarTurnstileRecuperacionCliente();
+  }
+
   async function enviarAuth(event) {
     event.preventDefault();
+    if (enviandoAuthCliente) return;
+
     const endpoint = modoAuth === 'login' ? '/tienda/auth/login' : '/tienda/auth/register';
+    const emailNormalizado = String(credenciales.email || '').trim().toLowerCase();
+    const passwordActual = String(credenciales.password || '');
 
     try {
+      limpiarErrorAuthCliente();
+
+      if (!emailNormalizado) {
+        throw new Error('Escribe tu correo para continuar');
+      }
+
+      if (!esCorreoValido(emailNormalizado)) {
+        throw new Error('Escribe un correo valido para continuar');
+      }
+
+      if (!passwordActual) {
+        throw new Error(modoAuth === 'login' ? 'Escribe tu contraseña para entrar' : 'Escribe una contraseña para continuar');
+      }
+
+      if (TURNSTILE_PUBLIC_AUTH_ENABLED && !clienteTurnstileToken) {
+        throw new Error('Completa la verificación de seguridad para continuar');
+      }
+
       if (modoAuth === 'register' && String(credenciales.password || '') !== String(credenciales.confirmarPassword || '')) {
         throw new Error('La confirmación de contraseña no coincide');
       }
@@ -5912,16 +6421,19 @@ function Tienda({
         }
       }
 
+      setEnviandoAuthCliente(true);
+
       const body = modoAuth === 'login'
-        ? { email: credenciales.email, password: credenciales.password }
+        ? { email: emailNormalizado, password: passwordActual, turnstile_token: clienteTurnstileToken }
         : {
             nombre: credenciales.nombre,
             apellido_paterno: credenciales.apellido_paterno,
             apellido_materno: credenciales.apellido_materno,
-            email: credenciales.email,
-            password: credenciales.password,
+            email: emailNormalizado,
+            password: passwordActual,
             telefono: credenciales.telefono,
-            recibe_promociones: Boolean(credenciales.recibe_promociones)
+            recibe_promociones: Boolean(credenciales.recibe_promociones),
+            turnstile_token: clienteTurnstileToken
           };
 
       const data = await fetchJson(endpoint, {
@@ -5930,11 +6442,8 @@ function Tienda({
         body: JSON.stringify(body)
       });
 
-      const token = String(data?.token || '');
-      if (!token) throw new Error('No se recibió token de cliente');
-
-      localStorage.setItem(CLAVE_TOKEN_CLIENTE, token);
-      setClienteToken(token);
+      localStorage.setItem(CLAVE_TOKEN_CLIENTE, CLIENTE_COOKIE_SESSION_SENTINEL);
+      setClienteToken(CLIENTE_COOKIE_SESSION_SENTINEL);
       setMostrarModalPerfilCliente(false);
       setPerfilModalTab('datos');
       setVistaActiva('tienda');
@@ -5949,7 +6458,7 @@ function Tienda({
         recibe_promociones: false
       });
       setPasoRegistro(1);
-      setMostrarModalAuthCliente(false);
+      cerrarModalAuthCliente();
       mostrarNotificacion(modoAuth === 'login' ? 'Sesión iniciada' : 'Cuenta creada', 'exito');
 
       if (modoAuth === 'login' && Boolean(data?.debe_cambiar_password)) {
@@ -5957,7 +6466,21 @@ function Tienda({
         mostrarNotificacion('Por seguridad, cambia tu contraseña temporal para continuar.', 'advertencia');
       }
     } catch (error) {
+      const mensaje = error?.message || 'No se pudo autenticar';
+      if (modoAuth === 'login' && /credenciales inv[aá]lidas/i.test(mensaje)) {
+        setErrorAuthCliente('Correo o contraseña incorrectos. Verifica tus datos e intenta de nuevo.');
+        setSacudirAuthCliente(true);
+        window.setTimeout(() => {
+          passwordLoginRef.current?.focus();
+          passwordLoginRef.current?.select?.();
+        }, 0);
+      } else {
+        setErrorAuthCliente(mensaje);
+      }
       mostrarNotificacion(error?.message || 'No se pudo autenticar', 'error');
+    } finally {
+      setEnviandoAuthCliente(false);
+      if (TURNSTILE_PUBLIC_AUTH_ENABLED) reiniciarTurnstileAuthCliente();
     }
   }
 
@@ -5980,12 +6503,16 @@ function Tienda({
     try {
       const email = String(recuperarClienteEmail || '').trim().toLowerCase();
       if (!email) throw new Error('Escribe tu correo para recuperar tu contraseña');
+      if (!esCorreoValido(email)) throw new Error('Escribe un correo valido para recuperar tu contraseña');
+      if (TURNSTILE_PUBLIC_AUTH_ENABLED && !recuperacionTurnstileToken) {
+        throw new Error('Completa la verificación de seguridad para continuar');
+      }
 
       setEnviandoRecuperacionCliente(true);
       const data = await fetchJson('/tienda/auth/olvide-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email, turnstile_token: recuperacionTurnstileToken })
       });
 
       setCredenciales((prev) => ({ ...prev, email, password: '' }));
@@ -5997,6 +6524,7 @@ function Tienda({
       setRecuperacionClienteMensaje(error?.message || 'No se pudo enviar el correo de recuperación');
     } finally {
       setEnviandoRecuperacionCliente(false);
+      if (TURNSTILE_PUBLIC_AUTH_ENABLED) reiniciarTurnstileRecuperacionCliente();
     }
   }
 
@@ -6025,9 +6553,9 @@ function Tienda({
 
       const cerrarSesiones = Boolean(modalCambioPasswordCliente.cerrarSesiones);
       const tokenRefrescado = String(data?.token || '').trim();
-      if (tokenRefrescado) {
-        localStorage.setItem(CLAVE_TOKEN_CLIENTE, tokenRefrescado);
-        setClienteToken(tokenRefrescado);
+      if (cerrarSesiones || tokenRefrescado) {
+        localStorage.setItem(CLAVE_TOKEN_CLIENTE, CLIENTE_COOKIE_SESSION_SENTINEL);
+        setClienteToken(CLIENTE_COOKIE_SESSION_SENTINEL);
       }
       setModalCambioPasswordCliente({ visible: false, nueva: '', confirmar: '', guardando: false, cerrarSesiones: true });
       if (cerrarSesiones) {
@@ -6074,7 +6602,12 @@ function Tienda({
     }
   }
 
-  function cerrarSesionCliente() {
+  async function cerrarSesionCliente() {
+    try {
+      await fetchJson('/tienda/auth/logout', { method: 'POST' });
+    } catch {
+      // No bloquear cierre local si la cookie ya no existe o el backend no responde.
+    }
     localStorage.removeItem(CLAVE_TOKEN_CLIENTE);
     setClienteToken('');
     setCliente(null);
@@ -7033,6 +7566,9 @@ function Tienda({
                       : `Comportamiento del rango (${historialVisitasAdmin.rangoDias} días)`}
                   </strong>
                   <div className="tiendaMetricasAcciones">
+                    <button type="button" className="boton botonSecundario" onClick={abrirVentanaAnalisisMetricas}>
+                      Analizar
+                    </button>
                     <select
                       value={historialVisitasAdmin.rangoDias}
                       onChange={(event) => {
@@ -7118,79 +7654,106 @@ function Tienda({
                       </article>
                     </div>
 
-                    <div className="tiendaMetricasBloques">
-                      <div className="tiendaMetricasBloque">
-                        <h4>Ubicaciones con más visitas hoy</h4>
-                        <ul className="tiendaMetricasLista">
-                          {(resumenVisitasAdmin.ubicacionesTop || []).map((item, idx) => (
-                            <li key={`ubi-top-${idx}-${item?.pais || 'sin-pais'}`}>
-                              <span>{item?.ubicacion || item?.pais || 'Desconocido'}</span>
-                              <strong>{Number(item?.total) || 0}</strong>
-                            </li>
-                          ))}
-                          {!(resumenVisitasAdmin.ubicacionesTop || []).length && <li><span>Sin datos todavía</span></li>}
-                        </ul>
+                    <div className="tiendaMetricasResumenLayout">
+                      <div className="tiendaMetricasResumenColumna tiendaMetricasResumenColumnaIzquierda">
+                        <div className="tiendaMetricasBloque">
+                          <h4>Ubicaciones con más visitas hoy</h4>
+                          <ul className="tiendaMetricasLista">
+                            {(resumenVisitasAdmin.ubicacionesTop || []).map((item, idx) => (
+                              <li key={`ubi-top-${idx}-${item?.pais || 'sin-pais'}`}>
+                                <span>{item?.ubicacion || item?.pais || 'Desconocido'}</span>
+                                <strong>{Number(item?.total) || 0}</strong>
+                              </li>
+                            ))}
+                            {!(resumenVisitasAdmin.ubicacionesTop || []).length && <li><span>Sin datos todavía</span></li>}
+                          </ul>
+                        </div>
+
+                        <div className="tiendaMetricasBloque">
+                          <div className="tiendaMetricasHorasHeader">
+                            <h4>Visitas por horario (24 horas)</h4>
+                            <div className="tiendaMetricasHorasNavegacion">
+                              <button
+                                type="button"
+                                className="tiendaMetricasHorasFlecha"
+                                onClick={() => setPaginaHorasResumen((prev) => Math.max(0, prev - 1))}
+                                disabled={paginaHorasResumenSegura <= 0}
+                                aria-label="Ver bloque horario anterior"
+                              >
+                                ◀
+                              </button>
+                              <span className="tiendaMetricasHorasRango">
+                                {etiquetaRangoHorasPagina}
+                                {' · '}
+                                Pág. {paginaHorasResumenSegura + 1}/{totalPaginasHorasResumen}
+                              </span>
+                              <button
+                                type="button"
+                                className="tiendaMetricasHorasFlecha"
+                                onClick={() => setPaginaHorasResumen((prev) => Math.min(totalPaginasHorasResumen - 1, prev + 1))}
+                                disabled={paginaHorasResumenSegura >= totalPaginasHorasResumen - 1}
+                                aria-label="Ver bloque horario siguiente"
+                              >
+                                ▶
+                              </button>
+                            </div>
+                          </div>
+                          <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
+                            {horasResumenPaginadas
+                              .map((item, idx) => (
+                                <li
+                                  key={`hora-pag-${idx}-${item?.horaInicio || '00:00'}`}
+                                  className={[
+                                    item?.esHoraActual ? 'tiendaHoraActual' : '',
+                                    item?.esFutura ? 'tiendaHoraFutura' : ''
+                                  ].filter(Boolean).join(' ')}
+                                >
+                                  <span>
+                                    {item?.horaInicio || '00:00'} - {item?.horaFin || '00:59'}
+                                    {item?.esHoraActual ? ' (hora actual)' : ''}
+                                  </span>
+                                  <strong>{Number(item?.total) || 0}</strong>
+                                </li>
+                              ))}
+                            {!horasResumenPaginadas.length && <li><span>Sin datos todavía</span></li>}
+                          </ul>
+                        </div>
                       </div>
 
-                      <div className="tiendaMetricasBloque">
+                      <div className="tiendaMetricasBloque tiendaMetricasBloqueHistorialCompacto">
                         <div className="tiendaMetricasHorasHeader">
-                          <h4>Visitas por horario (24 horas)</h4>
+                          <h4>Historial de visitas por semana</h4>
                           <div className="tiendaMetricasHorasNavegacion">
                             <button
                               type="button"
                               className="tiendaMetricasHorasFlecha"
-                              onClick={() => setPaginaHorasResumen((prev) => Math.max(0, prev - 1))}
-                              disabled={paginaHorasResumenSegura <= 0}
-                              aria-label="Ver bloque horario anterior"
+                              onClick={() => setPaginaHistorialSemana((prev) => Math.max(0, prev - 1))}
+                              disabled={paginaHistorialSemanaSegura <= 0}
+                              aria-label="Ver semana anterior"
                             >
                               ◀
                             </button>
                             <span className="tiendaMetricasHorasRango">
-                              {etiquetaRangoHorasPagina}
+                              {etiquetaHistorialSemana}
                               {' · '}
-                              Pág. {paginaHorasResumenSegura + 1}/{totalPaginasHorasResumen}
+                              Sem. {paginaHistorialSemanaSegura + 1}/{totalPaginasHistorialSemana}
                             </span>
                             <button
                               type="button"
                               className="tiendaMetricasHorasFlecha"
-                              onClick={() => setPaginaHorasResumen((prev) => Math.min(totalPaginasHorasResumen - 1, prev + 1))}
-                              disabled={paginaHorasResumenSegura >= totalPaginasHorasResumen - 1}
-                              aria-label="Ver bloque horario siguiente"
+                              onClick={() => setPaginaHistorialSemana((prev) => Math.min(totalPaginasHistorialSemana - 1, prev + 1))}
+                              disabled={paginaHistorialSemanaSegura >= totalPaginasHistorialSemana - 1}
+                              aria-label="Ver semana siguiente"
                             >
                               ▶
                             </button>
                           </div>
                         </div>
-                        <ul className="tiendaMetricasLista tiendaMetricasListaHoras">
-                          {horasResumenPaginadas
-                            .map((item, idx) => (
-                              <li
-                                key={`hora-pag-${idx}-${item?.horaInicio || '00:00'}`}
-                                className={[
-                                  item?.esHoraActual ? 'tiendaHoraActual' : '',
-                                  item?.esFutura ? 'tiendaHoraFutura' : ''
-                                ].filter(Boolean).join(' ')}
-                              >
-                                <span>
-                                  {item?.horaInicio || '00:00'} - {item?.horaFin || '00:59'}
-                                  {item?.esHoraActual ? ' (hora actual)' : ''}
-                                </span>
-                                <strong>{Number(item?.total) || 0}</strong>
-                              </li>
-                            ))}
-                          {!horasResumenPaginadas.length && <li><span>Sin datos todavía</span></li>}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <div className="tiendaMetricasBloques">
-                      <div className="tiendaMetricasBloque tiendaMetricasBloqueAncho">
-                        <h4>Historial de visitas por día</h4>
                         <div className="tiendaHistorialVisitasChart">
-                          {(historialVisitasAdmin.porDia || []).map((item) => {
+                          {(historialSemanaActual?.dias || []).map((item) => {
                             const visitas = Number(item?.visitas) || 0;
-                            const ancho = maximoVisitasHistorial > 0
-                              ? Math.max(4, Math.round((visitas / maximoVisitasHistorial) * 100))
+                            const ancho = maximoVisitasHistorialSemana > 0
+                              ? Math.max(4, Math.round((visitas / maximoVisitasHistorialSemana) * 100))
                               : 0;
                             return (
                               <div className="tiendaHistorialVisitasFila" key={`hist-dia-${item?.fecha || 'sin-fecha'}`}>
@@ -7202,10 +7765,12 @@ function Tienda({
                               </div>
                             );
                           })}
-                          {!(historialVisitasAdmin.porDia || []).length && <div className="tiendaVacio">Sin historial todavía</div>}
+                          {!(historialSemanaActual?.dias || []).length && <div className="tiendaVacio">Sin historial todavía</div>}
                         </div>
                       </div>
+                    </div>
 
+                    <div className="tiendaMetricasBloques">
                       <div className="tiendaMetricasBloque">
                         <h4>Resumen del rango</h4>
                         <ul className="tiendaMetricasLista">
@@ -7856,11 +8421,7 @@ function Tienda({
                           <button
                             type="button"
                             className="botonPequeno botonDanger"
-                            onClick={async () => {
-                              const ok = await mostrarConfirmacion('¿Eliminar esta pestaña personalizada?', 'Eliminar pestaña');
-                              if (!ok) return;
-                              actualizarTabsNavegacionAdmin((prev) => prev.filter((_, i) => i !== idx));
-                            }}
+                            onClick={() => eliminarPestanaPersonalizadaAdmin(idx, tab.label || tab.labelCorta || '')}
                           >
                             Eliminar
                           </button>
@@ -9608,17 +10169,7 @@ function Tienda({
                           <button
                             className="botonPequeno botonDanger"
                             type="button"
-                            onClick={async () => {
-                              const ok = await mostrarConfirmacion('¿Cancelar esta orden?', 'Cancelar orden');
-                              if (!ok) return;
-                              try {
-                                await fetchJson(`/tienda/ordenes/${orden.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${clienteToken}` } });
-                                await cargarMisOrdenes();
-                                mostrarNotificacion('Orden cancelada', 'exito');
-                              } catch (error) {
-                                mostrarNotificacion(error?.message || 'No se pudo cancelar la orden', 'error');
-                              }
-                            }}
+                            onClick={() => cancelarOrdenPerfil(orden.id)}
                           >
                             Cancelar
                           </button>
@@ -9944,29 +10495,57 @@ function Tienda({
       )}
 
       {mostrarModalAuthCliente && (
-        <div className="modal" style={{ display: 'flex' }} onClick={() => setMostrarModalAuthCliente(false)}>
-          <div className="contenidoModal tiendaAuthModal tiendaAuthModalLogin" onClick={(e) => e.stopPropagation()}>
+        <div className="modal" style={{ display: 'flex' }} onClick={cerrarModalAuthCliente}>
+          <div className={`contenidoModal tiendaAuthModal tiendaAuthModalLogin ${sacudirAuthCliente ? 'tiendaAuthModalShake' : ''}`.trim()} onClick={(e) => e.stopPropagation()}>
             <div className="tiendaAuthHeader">
-              <button className="cerrarModal tiendaAuthCerrar" onClick={() => setMostrarModalAuthCliente(false)}>&times;</button>
+              <button className="cerrarModal tiendaAuthCerrar" onClick={cerrarModalAuthCliente}>&times;</button>
               <img className="tiendaAuthLogo" src="/images/logo.png" alt="CHIPACTLI" />
               <h3 className="tiendaAuthTitulo">CHIPACTLI</h3>
             </div>
-            <form className="tiendaAuth" onSubmit={enviarAuth}>
+            <form className="tiendaAuth" onSubmit={enviarAuth} noValidate>
               {modoAuth === 'login' ? (
                 <>
                   <input
                     type="email"
                     placeholder="Correo"
                     value={credenciales.email}
-                    onChange={(e) => setCredenciales((p) => ({ ...p, email: e.target.value }))}
+                    onChange={(e) => {
+                      limpiarErrorAuthCliente();
+                      setCredenciales((p) => ({ ...p, email: e.target.value }));
+                    }}
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="email"
+                    aria-invalid="false"
                     required
                   />
                   <PasswordInput
+                    ref={passwordLoginRef}
                     placeholder="Contraseña"
                     value={credenciales.password}
-                    onChange={(e) => setCredenciales((p) => ({ ...p, password: e.target.value }))}
+                    onChange={(e) => {
+                      limpiarErrorAuthCliente();
+                      setCredenciales((p) => ({ ...p, password: e.target.value }));
+                    }}
+                    inputClassName={errorAuthCliente ? 'tiendaAuthInputError' : ''}
+                    autoComplete="current-password"
+                    aria-invalid={errorAuthCliente ? 'true' : 'false'}
                     required
                   />
+                  {TURNSTILE_PUBLIC_AUTH_ENABLED && (
+                    <div className="tiendaTurnstileWrap">
+                      <TurnstileWidget
+                        key={`auth-${modoAuth}-${clienteTurnstileResetKey}`}
+                        action={modoAuth === 'login' ? 'tienda_login' : 'tienda_register'}
+                        onVerify={(token) => setClienteTurnstileToken(token)}
+                        onExpire={() => setClienteTurnstileToken('')}
+                        onError={() => setClienteTurnstileToken('')}
+                      />
+                    </div>
+                  )}
+                  {!!errorAuthCliente && <div className="tiendaAuthErrorMsg">{errorAuthCliente}</div>}
                   <button
                     type="button"
                     className="tiendaAuthRecuperarBtn"
@@ -9989,6 +10568,11 @@ function Tienda({
                           placeholder="Correo registrado"
                           value={recuperarClienteEmail}
                           onChange={(e) => setRecuperarClienteEmail(e.target.value)}
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          inputMode="email"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -10006,6 +10590,17 @@ function Tienda({
                           {enviandoRecuperacionCliente ? 'Enviando...' : 'Enviar temporal'}
                         </button>
                       </div>
+                      {TURNSTILE_PUBLIC_AUTH_ENABLED && (
+                        <div className="tiendaTurnstileWrap tiendaTurnstileWrapRecuperacion">
+                          <TurnstileWidget
+                            key={`recover-${recuperacionTurnstileResetKey}`}
+                            action="tienda_recovery"
+                            onVerify={(token) => setRecuperacionTurnstileToken(token)}
+                            onExpire={() => setRecuperacionTurnstileToken('')}
+                            onError={() => setRecuperacionTurnstileToken('')}
+                          />
+                        </div>
+                      )}
                       {!!recuperacionClienteMensaje && <div className="tiendaAuthRecuperarMsg">{recuperacionClienteMensaje}</div>}
                     </div>
                   )}
@@ -10019,24 +10614,31 @@ function Tienda({
                         placeholder="Nombre(s)"
                         value={credenciales.nombre}
                         onChange={(e) => setCredenciales((p) => ({ ...p, nombre: e.target.value }))}
+                        autoComplete="given-name"
                         required
                       />
                       <input
                         placeholder="Apellido paterno"
                         value={credenciales.apellido_paterno}
                         onChange={(e) => setCredenciales((p) => ({ ...p, apellido_paterno: e.target.value }))}
+                        autoComplete="family-name"
                         required
                       />
                       <input
                         placeholder="Apellido materno"
                         value={credenciales.apellido_materno}
                         onChange={(e) => setCredenciales((p) => ({ ...p, apellido_materno: e.target.value }))}
+                        autoComplete="additional-name"
                         required
                       />
                       <input
                         placeholder="Teléfono"
                         value={credenciales.telefono}
                         onChange={(e) => setCredenciales((p) => ({ ...p, telefono: e.target.value }))}
+                        autoComplete="tel"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        inputMode="tel"
                       />
                     </div>
                   )}
@@ -10047,6 +10649,11 @@ function Tienda({
                         placeholder="Correo"
                         value={credenciales.email}
                         onChange={(e) => setCredenciales((p) => ({ ...p, email: e.target.value }))}
+                        autoComplete="email"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        inputMode="email"
                         required
                       />
                       <SwitchConTexto
@@ -10063,12 +10670,14 @@ function Tienda({
                         placeholder="Contraseña"
                         value={credenciales.password}
                         onChange={(e) => setCredenciales((p) => ({ ...p, password: e.target.value }))}
+                        autoComplete="new-password"
                         required
                       />
                       <PasswordInput
                         placeholder="Confirmar contraseña"
                         value={credenciales.confirmarPassword}
                         onChange={(e) => setCredenciales((p) => ({ ...p, confirmarPassword: e.target.value }))}
+                        autoComplete="new-password"
                         required
                       />
                     </>
@@ -10078,13 +10687,16 @@ function Tienda({
 
               {modoAuth === 'login' ? (
                 <div className="tiendaAuthAcciones tiendaAuthAccionesLogin">
-                  <button className="boton botonExito" type="submit">Entrar</button>
+                  <button className={`boton botonExito ${errorAuthCliente ? 'tiendaAuthBotonError' : ''}`.trim()} type="submit" disabled={enviandoAuthCliente}>{enviandoAuthCliente ? 'Entrando...' : 'Entrar'}</button>
                   <button
                     className="boton"
                     type="button"
+                    disabled={enviandoAuthCliente}
                     onClick={() => {
+                      limpiarErrorAuthCliente();
                       setModoAuth('register');
                       setPasoRegistro(1);
+                      reiniciarTurnstileAuthCliente();
                     }}
                   >
                     Crear cuenta nueva
@@ -10093,19 +10705,22 @@ function Tienda({
               ) : (
                 <div className="tiendaAuthAcciones tiendaAuthAccionesRegistro">
                   {pasoRegistro > 1 && (
-                    <button type="button" className="boton" onClick={() => setPasoRegistro((p) => Math.max(1, p - 1))}>Atrás</button>
+                    <button type="button" className="boton" disabled={enviandoAuthCliente} onClick={() => setPasoRegistro((p) => Math.max(1, p - 1))}>Atrás</button>
                   )}
                   {pasoRegistro < 3 ? (
-                    <button type="button" className="boton botonExito" onClick={avanzarPasoRegistro}>Siguiente</button>
+                    <button type="button" className="boton botonExito" disabled={enviandoAuthCliente} onClick={avanzarPasoRegistro}>Siguiente</button>
                   ) : (
-                    <button className="boton botonExito" type="submit">Completar registro</button>
+                    <button className="boton botonExito" type="submit" disabled={enviandoAuthCliente}>{enviandoAuthCliente ? 'Guardando...' : 'Completar registro'}</button>
                   )}
                   <button
                     className="boton"
                     type="button"
+                    disabled={enviandoAuthCliente}
                     onClick={() => {
+                      limpiarErrorAuthCliente();
                       setModoAuth('login');
                       setPasoRegistro(1);
+                      reiniciarTurnstileAuthCliente();
                     }}
                   >
                     Ya tengo cuenta

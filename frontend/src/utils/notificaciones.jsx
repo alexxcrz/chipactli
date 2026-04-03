@@ -10,9 +10,46 @@ let audioAlertaPreparado = false;
 
 let conteoAlertas = 0;
 let onEnterCerrarNotificacion = null;
-let timerCerrarNotificacion = null;
 const CLAVE_SONIDO_NOTIFICACION = 'chipactli_notif_sound';
 let sonidoSeleccionado = 'clasico';
+
+function obtenerTituloNotificacionPorTipo(tipo) {
+  if (tipo === 'error') return 'Error';
+  if (tipo === 'advertencia') return 'Advertencia';
+  return 'Aviso';
+}
+
+async function copiarTextoNotificacion(texto) {
+  const contenido = String(texto || '');
+  if (!contenido.trim()) return false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(contenido);
+      return true;
+    }
+  } catch {
+    // Intentar fallback debajo.
+  }
+
+  const area = document.createElement('textarea');
+  area.value = contenido;
+  area.setAttribute('readonly', 'readonly');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  area.style.pointerEvents = 'none';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(area);
+  }
+}
 
 export const OPCIONES_SONIDO_NOTIFICACION = [
   { value: 'clasico', label: 'Clásico' },
@@ -383,28 +420,62 @@ export async function mostrarNotificacionNativa({
   }
 }
 
-export function mostrarNotificacion(mensaje, tipo = 'exito') {
+export function mostrarNotificacion(mensaje, tipo = 'exito', opciones = {}) {
   const modal = document.getElementById('modalNotificacion');
   const fondo = document.getElementById('fondoNotificacion');
   const titulo = document.getElementById('tituloNotificacion');
   const textoMensaje = document.getElementById('mensajeNotificacion');
+  const detalle = document.getElementById('detalleNotificacion');
+  const valorCopiable = document.getElementById('valorCopiableNotificacion');
+  const btnCopiar = document.getElementById('btnCopiarNotificacion');
+  const btnCerrar = document.getElementById('btnCerrarNotificacion');
+
+  const config = opciones && typeof opciones === 'object' ? opciones : {};
+  const tituloPersonalizado = String(config.titulo || '').trim();
+  const detalleTexto = String(config.detalle || '').trim();
+  const textoCopiable = typeof config.copyText === 'string' ? config.copyText : '';
+  const etiquetaCopiar = String(config.copyLabel || 'Copiar').trim() || 'Copiar';
+  const etiquetaCerrar = String(config.closeLabel || 'Cerrar').trim() || 'Cerrar';
   
   if (!modal || !fondo || !titulo || !textoMensaje) return;
   
   modal.className = `modalNotificacion ${tipo}`;
-  
-  if (tipo === 'exito') {
-    titulo.textContent = '✅ Éxito';
-  } else if (tipo === 'error') {
-    titulo.textContent = '❌ Error';
-  } else if (tipo === 'advertencia') {
-    titulo.textContent = '⚠️ Advertencia';
-  }
+  titulo.textContent = tituloPersonalizado || obtenerTituloNotificacionPorTipo(tipo);
   
   textoMensaje.textContent = mensaje;
+  if (detalle) {
+    detalle.textContent = detalleTexto;
+    detalle.style.display = detalleTexto ? 'block' : 'none';
+  }
+
+  if (valorCopiable) {
+    valorCopiable.value = textoCopiable;
+    valorCopiable.style.display = textoCopiable ? 'block' : 'none';
+  }
+
+  if (btnCerrar) {
+    btnCerrar.textContent = etiquetaCerrar;
+  }
+
+  if (btnCopiar) {
+    btnCopiar.textContent = etiquetaCopiar;
+    btnCopiar.dataset.originalLabel = etiquetaCopiar;
+    btnCopiar.style.display = textoCopiable ? 'inline-flex' : 'none';
+    btnCopiar.disabled = false;
+    btnCopiar.onclick = async () => {
+      btnCopiar.disabled = true;
+      const copiado = await copiarTextoNotificacion(textoCopiable);
+      btnCopiar.textContent = copiado ? 'Copiado' : 'No se pudo copiar';
+      window.setTimeout(() => {
+        btnCopiar.disabled = false;
+        btnCopiar.textContent = btnCopiar.dataset.originalLabel || 'Copiar';
+      }, copiado ? 1500 : 2200);
+    };
+  }
+
   modal.classList.remove('toast-hiding');
   modal.style.display = 'flex';
-  if (fondo) fondo.style.display = 'none';
+  if (fondo) fondo.style.display = 'block';
 
   if (onEnterCerrarNotificacion) {
     document.removeEventListener('keydown', onEnterCerrarNotificacion);
@@ -418,26 +489,15 @@ export function mostrarNotificacion(mensaje, tipo = 'exito') {
   };
 
   document.addEventListener('keydown', onEnterCerrarNotificacion);
-
-  if (timerCerrarNotificacion) {
-    clearTimeout(timerCerrarNotificacion);
-    timerCerrarNotificacion = null;
-  }
-
-  timerCerrarNotificacion = setTimeout(() => {
-    cerrarNotificacion({ animada: true });
-  }, 1450);
 }
 
 export function cerrarNotificacion(opciones = {}) {
   const modal = document.getElementById('modalNotificacion');
   const fondo = document.getElementById('fondoNotificacion');
   const animada = Boolean(opciones?.animada);
-
-  if (timerCerrarNotificacion) {
-    clearTimeout(timerCerrarNotificacion);
-    timerCerrarNotificacion = null;
-  }
+  const detalle = document.getElementById('detalleNotificacion');
+  const valorCopiable = document.getElementById('valorCopiableNotificacion');
+  const btnCopiar = document.getElementById('btnCopiarNotificacion');
 
   if (modal) {
     if (animada && modal.style.display !== 'none') {
@@ -453,6 +513,23 @@ export function cerrarNotificacion(opciones = {}) {
     }
   }
   if (fondo) fondo.style.display = 'none';
+
+  if (detalle) {
+    detalle.textContent = '';
+    detalle.style.display = 'none';
+  }
+
+  if (valorCopiable) {
+    valorCopiable.value = '';
+    valorCopiable.style.display = 'none';
+  }
+
+  if (btnCopiar) {
+    btnCopiar.onclick = null;
+    btnCopiar.disabled = false;
+    btnCopiar.textContent = btnCopiar.dataset.originalLabel || 'Copiar';
+    btnCopiar.style.display = 'none';
+  }
 
   if (onEnterCerrarNotificacion) {
     document.removeEventListener('keydown', onEnterCerrarNotificacion);

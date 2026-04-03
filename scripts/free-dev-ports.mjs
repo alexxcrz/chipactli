@@ -1,6 +1,11 @@
 import { execSync } from 'node:child_process';
 
-const ports = [3000, 3001];
+const portsDesdeCli = process.argv
+  .slice(2)
+  .map((value) => Number(value))
+  .filter((value) => Number.isInteger(value) && value > 0);
+
+const ports = portsDesdeCli.length ? portsDesdeCli : [3000, 3001];
 
 function killPidWindows(pid) {
   if (!pid || Number.isNaN(Number(pid))) return false;

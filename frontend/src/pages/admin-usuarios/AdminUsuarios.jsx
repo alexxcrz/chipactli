@@ -4,6 +4,7 @@ import { fetchAPIJSON } from "../../utils/api.jsx";
 import { mostrarNotificacion } from "../../utils/notificaciones.jsx";
 import { normalizarTextoBusqueda } from "../../utils/texto.jsx";
 import { importarDatos, exportarDatos } from '../../utils/importar-exportar.jsx';
+import { mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
 
 const DEFINICION_PERMISOS = {
@@ -102,7 +103,8 @@ const DEFINICION_PERMISOS = {
       { key: 'editar_usuario', label: 'Editar nombre/usuario' },
       { key: 'editar_permisos', label: 'Editar permisos' },
       { key: 'eliminar', label: 'Eliminar usuarios' },
-      { key: 'reset_password', label: 'Restablecer contraseña' }
+      { key: 'reset_password', label: 'Restablecer contraseña' },
+      { key: 'seguridad', label: 'Operar tablero de seguridad' }
     ]
   }
 };
@@ -189,6 +191,28 @@ function renderTextoResaltado(texto, filtro) {
   }
 
   return partes;
+}
+
+async function confirmarAccionCriticaAdminUsuarios({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
 }
 
 export default function AdminUsuarios() {
@@ -330,6 +354,14 @@ export default function AdminUsuarios() {
 
   async function restablecerPasswordUsuario() {
     if (!modalEditar) return;
+    const esOtroAdmin = String(modalEditar?.rol || '').toLowerCase() === 'admin';
+    const confirmado = await confirmarAccionCriticaAdminUsuarios({
+      titulo: 'Restablecer contraseña',
+      mensaje: `Vas a establecer una contraseña temporal para ${String(modalEditar?.originalUsername || '').trim()}. Todas sus sesiones activas quedarán invalidadas.`,
+      frase: esOtroAdmin ? 'RESETEAR ADMIN' : 'RESETEAR PASSWORD'
+    });
+    if (!confirmado) return;
+
     try {
       const res = await fetchAPIJSON('/api/privado/usuarios/reset-password', {
         method: 'POST',
@@ -341,11 +373,57 @@ export default function AdminUsuarios() {
       });
 
       if (res.exito) {
-        mostrarNotificacion('Contraseña temporal aplicada. Al iniciar sesión deberá cambiarla.', 'exito');
+        const passwordTemporalAplicada = String(res.passwordTemporal || modalEditar.passwordTemporal || '').trim() || 'N/D';
+        mostrarNotificacion('Contraseña temporal aplicada. Al iniciar sesión deberá cambiarla.', 'exito', {
+          titulo: 'Contraseña restablecida',
+          detalle: `Usuario: ${modalEditar.originalUsername}`,
+          copyText: passwordTemporalAplicada,
+          copyLabel: 'Copiar contraseña'
+        });
         setModalEditar((prev) => ({ ...prev, passwordTemporal: '' }));
       }
     } catch (err) {
       mostrarNotificacion(err.message || 'No se pudo restablecer contraseña', 'error');
+    }
+  }
+
+  async function revocarSesionesUsuario(usuarioObjetivo = modalEditar ? { username: modalEditar.originalUsername, rol: modalEditar.rol } : null) {
+    const objetivo = typeof usuarioObjetivo === 'string'
+      ? { username: usuarioObjetivo, rol: usuarios.find((item) => item.username === usuarioObjetivo)?.rol || '' }
+      : (usuarioObjetivo || {});
+    const usernameObjetivo = String(objetivo?.username || '').trim();
+    if (!usernameObjetivo) return;
+
+    const esSesionActual = usernameObjetivo.toLowerCase() === String(adminActual?.username || '').toLowerCase();
+    const esOtroAdmin = !esSesionActual && String(objetivo?.rol || '').toLowerCase() === 'admin';
+
+    if (esOtroAdmin) {
+      const confirmado = await confirmarAccionCriticaAdminUsuarios({
+        titulo: 'Revocar sesiones de otro admin',
+        mensaje: `Vas a revocar todas las sesiones activas del administrador ${usernameObjetivo}. Tendrá que iniciar sesión nuevamente en todos sus dispositivos.`,
+        frase: 'REVOCAR ADMIN'
+      });
+      if (!confirmado) return;
+    }
+
+    try {
+      const res = await fetchAPIJSON('/api/privado/usuarios/revocar-sesiones', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: { username: usernameObjetivo }
+      });
+
+      if (res.exito) {
+        mostrarNotificacion('Sesiones revocadas. Los tokens emitidos antes de este momento dejaron de ser válidos.', 'exito');
+        await cargarUsuarios();
+        if (esSesionActual) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('usuario');
+          window.location.reload();
+        }
+      }
+    } catch (err) {
+      mostrarNotificacion(err.message || 'No se pudieron revocar las sesiones', 'error');
     }
   }
 
@@ -364,7 +442,12 @@ export default function AdminUsuarios() {
         }
       });
       if (res.exito) {
-        mostrarNotificacion(`Usuario creado. Password temporal: ${res.passwordTemporal || 'N/D'}`, 'exito');
+        mostrarNotificacion('Usuario creado correctamente.', 'exito', {
+          titulo: 'Usuario creado',
+          detalle: `Usuario: ${res.username || form.username}`,
+          copyText: String(res.passwordTemporal || 'N/D'),
+          copyLabel: 'Copiar contraseña'
+        });
         setForm({ username: '', nombre: '', correo: '', rol: 'usuario' });
         cargarUsuarios();
       }
@@ -375,6 +458,15 @@ export default function AdminUsuarios() {
   }
 
   async function resetearUsuario(username) {
+    const objetivo = usuarios.find((item) => item.username === username);
+    const esOtroAdmin = String(objetivo?.rol || '').toLowerCase() === 'admin';
+    const confirmado = await confirmarAccionCriticaAdminUsuarios({
+      titulo: 'Restablecer contraseña',
+      mensaje: `Vas a generar una contraseña temporal para ${String(username || '').trim()}. La sesión actual de ese usuario dejará de ser válida.`,
+      frase: esOtroAdmin ? 'RESETEAR ADMIN' : 'RESETEAR PASSWORD'
+    });
+    if (!confirmado) return;
+
     try {
       const res = await fetchAPIJSON('/api/privado/usuarios/reset-password', {
         method: 'POST',
@@ -382,7 +474,12 @@ export default function AdminUsuarios() {
         body: { username }
       });
       if (res.exito) {
-        mostrarNotificacion(`Contraseña temporal: ${res.passwordTemporal || 'N/D'}`, 'exito');
+        mostrarNotificacion('Se generó una contraseña temporal para el usuario.', 'exito', {
+          titulo: 'Contraseña temporal generada',
+          detalle: `Usuario: ${username}`,
+          copyText: String(res.passwordTemporal || 'N/D'),
+          copyLabel: 'Copiar contraseña'
+        });
       } else {
         mostrarNotificacion(res.mensaje || 'No se pudo resetear', 'error');
       }
@@ -393,6 +490,15 @@ export default function AdminUsuarios() {
   }
 
   async function eliminarUsuario(username) {
+    const objetivo = usuarios.find((item) => item.username === username);
+    const esOtroAdmin = String(objetivo?.rol || '').toLowerCase() === 'admin';
+    const confirmado = await confirmarAccionCriticaAdminUsuarios({
+      titulo: 'Eliminar usuario',
+      mensaje: `Vas a eliminar al usuario ${String(username || '').trim()}. Esta acción borra su acceso administrativo y no se puede deshacer.`,
+      frase: esOtroAdmin ? 'ELIMINAR ADMIN' : 'ELIMINAR USUARIO'
+    });
+    if (!confirmado) return;
+
     try {
       const res = await fetchAPIJSON(`/api/privado/usuarios/${username}`, {
         method: 'DELETE',
@@ -475,6 +581,7 @@ export default function AdminUsuarios() {
                   <button className="botonPequeno" onClick={() => abrirModalModificar(u)}>Modificar</button>
                   {u.rol !== 'ceo' && (
                     <>
+                      <button className="botonPequeno botonWarning" onClick={() => revocarSesionesUsuario(u)}>Revocar sesiones</button>
                       <button className="botonPequeno" onClick={() => resetearUsuario(u.username)}>Reset</button>
                       <button className="botonPequeno botonDanger" onClick={() => eliminarUsuario(u.username)}>Eliminar</button>
                     </>
@@ -624,6 +731,12 @@ export default function AdminUsuarios() {
                 <div className="textoAyudaReset">
                   Al iniciar sesión con esta contraseña temporal, el usuario verá el modal para cambiar contraseña.
                 </div>
+                <div className="textoAyudaReset textoAyudaRevocacion">
+                  Si solo quieres sacar todas sus sesiones activas sin tocar la contraseña, usa la revocación manual.
+                </div>
+                <button className="botonSecundario" onClick={() => revocarSesionesUsuario({ username: modalEditar.originalUsername, rol: modalEditar.rol })} disabled={modalEditar.rol === 'ceo'}>
+                  Revocar sesiones activas
+                </button>
                 <button className="boton" onClick={restablecerPasswordUsuario} disabled={modalEditar.rol === 'ceo'}>
                   Restablecer contraseña
                 </button>

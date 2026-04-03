@@ -50,25 +50,63 @@ export function obtenerModal(id) {
   return document.getElementById(id);
 }
 
+function obtenerElementosConfirmacion() {
+  return {
+    modal: document.getElementById('modalConfirmacion'),
+    texto: document.getElementById('textoConfirmacion'),
+    tituloEl: document.getElementById('tituloConfirmacion'),
+    btnAceptar: document.getElementById('btnConfirmacionAceptar'),
+    btnCancelar: document.getElementById('btnConfirmacionCancelar'),
+    contenedorEntrada: document.getElementById('contenedorEntradaConfirmacion'),
+    descripcionEntrada: document.getElementById('descripcionEntradaConfirmacion'),
+    labelEntrada: document.getElementById('labelEntradaConfirmacion'),
+    inputEntrada: document.getElementById('inputConfirmacion')
+  };
+}
+
+function limpiarConfiguracionEntradaConfirmacion() {
+  const {
+    contenedorEntrada,
+    descripcionEntrada,
+    labelEntrada,
+    inputEntrada,
+    btnAceptar,
+    btnCancelar
+  } = obtenerElementosConfirmacion();
+
+  if (contenedorEntrada) contenedorEntrada.style.display = 'none';
+  if (descripcionEntrada) {
+    descripcionEntrada.textContent = '';
+    descripcionEntrada.style.display = 'none';
+  }
+  if (labelEntrada) labelEntrada.textContent = 'Escribe para continuar';
+  if (inputEntrada) {
+    inputEntrada.value = '';
+    inputEntrada.placeholder = '';
+    inputEntrada.type = 'text';
+    inputEntrada.autocomplete = 'off';
+  }
+  if (btnAceptar) btnAceptar.textContent = 'Aceptar';
+  if (btnCancelar) btnCancelar.textContent = 'Cancelar';
+}
+
 export function mostrarConfirmacion(mensaje, titulo = 'Confirmar') {
   return new Promise((resolve) => {
-    const modal = document.getElementById('modalConfirmacion');
-    const texto = document.getElementById('textoConfirmacion');
-    const tituloEl = document.getElementById('tituloConfirmacion');
-    const btnAceptar = document.getElementById('btnConfirmacionAceptar');
-    const btnCancelar = document.getElementById('btnConfirmacionCancelar');
+    const { modal, texto, tituloEl, btnAceptar, btnCancelar } = obtenerElementosConfirmacion();
 
     if (!modal || !texto || !tituloEl || !btnAceptar || !btnCancelar) {
       resolve(false);
       return;
     }
 
+    limpiarConfiguracionEntradaConfirmacion();
     tituloEl.textContent = titulo;
     texto.textContent = mensaje;
 
     const limpiar = () => {
       btnAceptar.onclick = null;
       btnCancelar.onclick = null;
+      limpiarConfiguracionEntradaConfirmacion();
     };
 
     btnAceptar.onclick = () => {
@@ -84,6 +122,80 @@ export function mostrarConfirmacion(mensaje, titulo = 'Confirmar') {
     };
 
     abrirModal('modalConfirmacion');
+  });
+}
+
+export function solicitarTextoModal({
+  titulo = 'Confirmar',
+  mensaje = '',
+  descripcion = '',
+  etiqueta = 'Escribe para continuar',
+  placeholder = '',
+  valorInicial = '',
+  tipo = 'text',
+  aceptarLabel = 'Aceptar',
+  cancelarLabel = 'Cancelar',
+  autocomplete = 'off'
+} = {}) {
+  return new Promise((resolve) => {
+    const {
+      modal,
+      texto,
+      tituloEl,
+      btnAceptar,
+      btnCancelar,
+      contenedorEntrada,
+      descripcionEntrada,
+      labelEntrada,
+      inputEntrada
+    } = obtenerElementosConfirmacion();
+
+    if (!modal || !texto || !tituloEl || !btnAceptar || !btnCancelar || !contenedorEntrada || !labelEntrada || !inputEntrada) {
+      resolve(null);
+      return;
+    }
+
+    limpiarConfiguracionEntradaConfirmacion();
+    tituloEl.textContent = titulo;
+    texto.textContent = mensaje;
+    contenedorEntrada.style.display = 'block';
+    labelEntrada.textContent = etiqueta;
+    inputEntrada.type = tipo === 'password' ? 'password' : 'text';
+    inputEntrada.placeholder = placeholder;
+    inputEntrada.value = String(valorInicial || '');
+    inputEntrada.autocomplete = autocomplete;
+    btnAceptar.textContent = aceptarLabel;
+    btnCancelar.textContent = cancelarLabel;
+
+    if (descripcionEntrada) {
+      descripcionEntrada.textContent = descripcion;
+      descripcionEntrada.style.display = descripcion ? 'block' : 'none';
+    }
+
+    const limpiar = () => {
+      btnAceptar.onclick = null;
+      btnCancelar.onclick = null;
+      limpiarConfiguracionEntradaConfirmacion();
+    };
+
+    btnAceptar.onclick = () => {
+      const valor = String(inputEntrada.value || '');
+      limpiar();
+      cerrarModal('modalConfirmacion');
+      resolve(valor);
+    };
+
+    btnCancelar.onclick = () => {
+      limpiar();
+      cerrarModal('modalConfirmacion');
+      resolve(null);
+    };
+
+    abrirModal('modalConfirmacion');
+    window.requestAnimationFrame(() => {
+      inputEntrada.focus();
+      inputEntrada.select();
+    });
   });
 }
 

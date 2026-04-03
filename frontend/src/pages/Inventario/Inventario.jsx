@@ -2,7 +2,7 @@
 import './inventario.css';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
-import { abrirModal, cerrarModal, mostrarConfirmacion } from '../../utils/modales.jsx';
+import { abrirModal, cerrarModal, mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import { API } from '../../utils/config.jsx';
 import { fetchAPI, fetchAPIJSON } from '../../utils/api.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
@@ -47,6 +47,28 @@ function guardarTabPersistida(clave, valor) {
     window.localStorage.setItem(clave, valor);
   } catch {
   }
+}
+
+async function confirmarAccionCriticaInventario({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
 }
 
 tabActiva = leerTabPersistida(CLAVE_TAB_INVENTARIO_PRINCIPAL, ['inventario', 'utensilios', 'ordenes'], tabActiva);
@@ -337,7 +359,11 @@ async function subirArchivoListaPrecios() {
 async function eliminarArchivoListaPrecios(idArchivo) {
   const id = Number(idArchivo || 0);
   if (!Number.isFinite(id) || id <= 0) return;
-  const ok = await mostrarConfirmacion('¿Eliminar este archivo de Lista de precios?', 'Eliminar archivo');
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Eliminar archivo',
+    mensaje: 'Vas a eliminar un archivo de lista de precios cargado en Inventario.',
+    frase: 'ELIMINAR ARCHIVO'
+  });
   if (!ok) return;
   try {
     await fetchAPIJSON(`${API}/inventario/lista-precios/archivos/${id}`, { method: 'DELETE' });
@@ -789,10 +815,11 @@ async function eliminarOrdenCompra(idOrden, numeroOrden = '') {
   const id = Number(idOrden);
   if (!Number.isFinite(id) || id <= 0) return;
 
-  const ok = await mostrarConfirmacion(
-    `Se eliminará la orden ${texto(numeroOrden || '').trim() || `#${id}`}. Esta acción no se puede deshacer.`,
-    'Eliminar orden de compra'
-  );
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Eliminar orden de compra',
+    mensaje: `Se eliminará la orden ${texto(numeroOrden || '').trim() || `#${id}`}. Esta acción no se puede deshacer y afecta trazabilidad de compras.`,
+    frase: 'ELIMINAR ORDEN'
+  });
   if (!ok) return;
 
   try {
@@ -1044,10 +1071,11 @@ async function confirmarSurtirItemOrden(event) {
     return;
   }
 
-  const ok = await mostrarConfirmacion(
-    'Se actualizará inventario y se guardará historial de surtido.',
-    'Confirmar surtido'
-  );
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Confirmar surtido',
+    mensaje: 'Se actualizará inventario y se guardará historial de surtido para esta orden de compra.',
+    frase: 'SURTIR ITEM'
+  });
   if (!ok) return;
 
   try {
@@ -1091,10 +1119,11 @@ async function surtirOrdenCompleta(idOrden) {
     return;
   }
 
-  const ok = await mostrarConfirmacion(
-    `Se abrirá un modal por producto para confirmar cantidad y costo (${pendientes.length} pendiente(s)).`,
-    `Surtir todo ${texto(orden?.numero_orden || '')}`
-  );
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: `Surtir todo ${texto(orden?.numero_orden || '')}`,
+    mensaje: `Se abrirá un modal por producto para confirmar cantidad y costo (${pendientes.length} pendiente(s)). Este flujo impacta inventario e historial de compras.`,
+    frase: 'SURTIR ORDEN'
+  });
   if (!ok) return;
 
   colaSurtidoOrden = [...pendientes];
@@ -1237,7 +1266,11 @@ async function eliminarPrecioListaInsumo(idRegistro) {
     mostrarNotificacion('Este registro aún no tiene ID válido. Recarga la pestaña.', 'error');
     return;
   }
-  const ok = await mostrarConfirmacion('¿Eliminar este insumo de la lista de precios?', 'Eliminar registro');
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Eliminar registro',
+    mensaje: 'Vas a eliminar un insumo de la lista de precios para órdenes de compra.',
+    frase: 'ELIMINAR REGISTRO'
+  });
   if (!ok) return;
 
   try {
@@ -1488,7 +1521,11 @@ async function solicitarEliminarProveedor(id) {
     const detalle = await fetchAPIJSON(`${API}/inventario/proveedores/${Number(id)}/uso`);
     const uso = detalle?.uso || { inventario: 0, utensilios: 0, total: 0 };
     if (Number(uso.total || 0) <= 0) {
-      const ok = await mostrarConfirmacion(`¿Eliminar proveedor "${proveedor.nombre}"?`, 'Eliminar proveedor');
+      const ok = await confirmarAccionCriticaInventario({
+        titulo: 'Eliminar proveedor',
+        mensaje: `Vas a eliminar el proveedor "${String(proveedor?.nombre || '').trim()}" del catálogo maestro.`,
+        frase: 'ELIMINAR PROVEEDOR'
+      });
       if (!ok) return;
       await fetchAPIJSON(`${API}/inventario/proveedores/${Number(id)}`, { method: 'DELETE', body: {} });
       mostrarNotificacion('Proveedor eliminado', 'exito');
@@ -1535,6 +1572,13 @@ async function confirmarEliminarProveedorConReasignacion() {
     mostrarNotificacion('Selecciona el proveedor destino', 'error');
     return;
   }
+
+  const confirmado = await confirmarAccionCriticaInventario({
+    titulo: 'Reasignar y eliminar proveedor',
+    mensaje: `Vas a reasignar insumos y utensilios de "${String(proveedorPendienteEliminar?.nombre || '').trim()}" a "${reemplazo}" antes de eliminar el proveedor original.`,
+    frase: 'REASIGNAR PROVEEDOR'
+  });
+  if (!confirmado) return;
 
   try {
     await fetchAPIJSON(`${API}/inventario/proveedores/${Number(proveedorPendienteEliminar.id)}`, {
@@ -1706,7 +1750,11 @@ async function guardarEditarInsumo(event) {
 }
 
 async function eliminarInsumo(id) {
-  const ok = await mostrarConfirmacion('¿Eliminar este insumo?', 'Eliminar insumo');
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Eliminar insumo',
+    mensaje: 'Vas a eliminar un insumo de Inventario. Esto puede afectar recetas, compras y reportes.',
+    frase: 'ELIMINAR INSUMO'
+  });
   if (!ok) return;
   try {
     const respuesta = await fetchAPI(`${API}/inventario/${id}`, { method: 'DELETE' });
@@ -1869,10 +1917,11 @@ async function mostrarHistorialInversion() {
 }
 
 async function eliminarHistorialFecha(fecha) {
-  const ok = await mostrarConfirmacion(
-    `Se eliminará todo el historial de inversión del ${new Date(fecha).toLocaleDateString('es-ES')}. Esta acción ajustará inventario.`,
-    '¿Eliminar historial de este día?'
-  );
+  const ok = await confirmarAccionCriticaInventario({
+    titulo: 'Eliminar historial de inversión',
+    mensaje: `Se eliminará todo el historial de inversión del ${new Date(fecha).toLocaleDateString('es-ES')}. Esta acción ajustará inventario.`,
+    frase: 'ELIMINAR HISTORIAL'
+  });
   if (!ok) return;
   try {
     const respuesta = await fetchAPI(`${API}/inventario/historial/fecha/${fecha}`, { method: 'DELETE' });

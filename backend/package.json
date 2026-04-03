@@ -5,8 +5,13 @@
   "main": "server.js",
   "scripts": {
     "guard:local": "node ../scripts/ensure-local-path.mjs",
+    "dev": "npm run guard:local && node ../scripts/free-dev-ports.mjs 3001 && node server.js",
     "test": "npm run guard:local && echo \"Error: no test specified\" && exit 1",
     "start": "npm run guard:local && node server.js",
+    "security:logs": "node scripts/analyze-security-log.mjs",
+    "security:bearer-smoke": "node scripts/security-bearer-smoke.mjs",
+    "security:smoke": "node scripts/security-smoke.mjs",
+    "security:rotate-secrets": "node scripts/rotate-secrets.mjs",
     "migrate:sqlite-to-pg": "node scripts/migrate-sqlite-to-postgres.mjs",
     "smoke:pg": "node scripts/smoke-postgres-routes.mjs"
   },
@@ -20,6 +25,8 @@
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.15",

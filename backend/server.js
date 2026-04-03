@@ -2,6 +2,9 @@ import express from "express";
 import pkg from "sqlite3";
 const { Database } = pkg;
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import crypto from "crypto";
 import { WebSocketServer } from "ws";
 import http from "http";
 import path from "path";
@@ -13,6 +16,8 @@ import multer from "multer";
 import jwt from "jsonwebtoken";
 import { Client } from "pg";
 import { crearPgSqliteCompat } from "./utils/pg-sqlite-compat/index.js";
+import { describeSecretSource, resolveAdminToken, resolveJwtSecret, resolveTiendaJwtSecret } from "./utils/security-secrets/index.js";
+import { listLoginProtectionEntries } from "./utils/login-protection/index.js";
 
 function cargarDotEnvLocal() {
   try {
@@ -43,7 +48,7 @@ function cargarDotEnvLocal() {
 cargarDotEnvLocal();
 
 // Importar utilidades centralizadas
-import { inicializarWss, inicializarBds, inicializarBdAdmin, programarBackupsAutomaticos, crearBackup, listarBackups, restaurarBackup, configurarBackup, tienePermisoAccion } from "./utils/index.js";
+import { inicializarWss, inicializarBds, inicializarBdAdmin, programarBackupsAutomaticos, crearBackup, listarBackups, restaurarBackup, configurarBackup, tienePermisoAccion, normalizarPermisosUsuario, listarAuditoriaAdmin, registrarAuditoriaAdmin } from "./utils/index.js";
 
 // Importar rutas centralizadas
 import {
@@ -77,19 +82,206 @@ try {
 }
 const forzarBuildReact = process.env.SERVE_REACT_BUILD === '1';
 const enRender = Boolean(process.env.RENDER) || Boolean(process.env.RENDER_EXTERNAL_URL);
-const esProduccion = process.env.NODE_ENV === 'production';
+const NODE_ENV_EFECTIVO = String(process.env.NODE_ENV || (enRender ? 'production' : 'development')).trim().toLowerCase();
+const esProduccion = NODE_ENV_EFECTIVO === 'production';
 const usarBuildReact = hasReactBuild && (forzarBuildReact || enRender || esProduccion);
 
 const app = express();
 const servidor = http.createServer(app);
 const wss = new WebSocketServer({ server: servidor });
-const BODY_JSON_LIMIT = String(process.env.BODY_JSON_LIMIT || '300mb').trim();
+const BODY_JSON_LIMIT = String(process.env.BODY_JSON_LIMIT || '5mb').trim();
+const JWT_SECRET_SERVIDOR = resolveJwtSecret();
+const TIENDA_JWT_SECRET_SERVIDOR = resolveTiendaJwtSecret();
+const ADMIN_TOKEN = resolveAdminToken();
+const SECRET_SOURCE = describeSecretSource();
+const MEDIA_UPLOAD_MAX_BYTES = Math.max(1_000_000, Number(process.env.MEDIA_UPLOAD_MAX_BYTES || (25 * 1024 * 1024)));
+const DOCUMENT_UPLOAD_MAX_BYTES = Math.max(250_000, Number(process.env.DOCUMENT_UPLOAD_MAX_BYTES || (10 * 1024 * 1024)));
+const BACKUP_IMPORT_MAX_BYTES = Math.max(1_000_000, Number(process.env.BACKUP_IMPORT_MAX_BYTES || (60 * 1024 * 1024)));
+
+const MIME_MEDIA_PERMITIDOS = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']);
+const EXT_MEDIA_PERMITIDAS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm', '.ogv', '.mov']);
+const MIME_DOCUMENTOS_PERMITIDOS = new Set(['application/pdf', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv']);
+const EXT_DOCUMENTOS_PERMITIDAS = new Set(['.pdf', '.xls', '.xlsx', '.csv']);
+const SECURITY_LOG_MAX_LINES = Math.max(200, Number(process.env.SECURITY_LOG_MAX_LINES || 2000));
+
+function esSecretoFuerte(valor, min = 32) {
+  return String(valor || '').trim().length >= min;
+}
+
+function esUrlLocal(valor = '') {
+  const txt = String(valor || '').trim().toLowerCase();
+  return txt.includes('localhost') || txt.includes('127.0.0.1');
+}
+
+function nombreAleatorioSeguro(prefijo = 'archivo', ext = '') {
+  return `${prefijo}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+}
+
+function compararSecretoSeguro(actual = '', esperado = '') {
+  const a = Buffer.from(String(actual || ''), 'utf8');
+  const b = Buffer.from(String(esperado || ''), 'utf8');
+  if (!a.length || !b.length || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function parsearCookiesServidor(req) {
+  const raw = String(req.get('cookie') || '').trim();
+  if (!raw) return {};
+
+  return raw.split(';').reduce((acc, item) => {
+    const [claveRaw, ...resto] = String(item || '').split('=');
+    const clave = String(claveRaw || '').trim();
+    if (!clave) return acc;
+    const valor = resto.join('=').trim();
+    try {
+      acc[clave] = decodeURIComponent(valor);
+    } catch {
+      acc[clave] = valor;
+    }
+    return acc;
+  }, {});
+}
+
+function obtenerTokenAdminSolicitud(req) {
+  const auth = String(req.get('Authorization') || '').trim();
+  if (auth.startsWith('Bearer ')) {
+    return auth.slice(7).trim();
+  }
+
+  const cookies = parsearCookiesServidor(req);
+  return String(cookies?.chipactli_admin_session || '').trim();
+}
+
+function normalizarOrigenSeguro(valor) {
+  const txt = String(valor || '').trim();
+  if (!txt) return '';
+  try {
+    return new URL(txt).origin;
+  } catch {
+    return '';
+  }
+}
+
+function construirOrigensPermitidos() {
+  const permitidos = new Set();
+  const candidatos = [
+    process.env.FRONTEND_URL,
+    process.env.PUBLIC_APP_URL,
+    process.env.RENDER_EXTERNAL_URL,
+    ...(String(process.env.CORS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean))
+  ];
+
+  for (const candidato of candidatos) {
+    const origen = normalizarOrigenSeguro(candidato);
+    if (origen) permitidos.add(origen);
+  }
+
+  if (!esProduccion) {
+    [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173'
+    ].forEach((origen) => permitidos.add(origen));
+  }
+
+  return permitidos;
+}
+
+const origenesPermitidos = construirOrigensPermitidos();
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const origenNormalizado = normalizarOrigenSeguro(origin);
+    if (origenNormalizado && origenesPermitidos.has(origenNormalizado)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error('Origen no permitido por CORS'));
+  },
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false,
+  maxAge: 86400
+};
+
+const globalRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: esProduccion ? 1200 : 4000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes. Intenta nuevamente en unos minutos.' }
+});
+
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: esProduccion ? 12 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Demasiados intentos de autenticación. Espera unos minutos e intenta otra vez.' }
+});
+
+const adminSurfaceRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: esProduccion ? 120 : 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes administrativas. Intenta nuevamente en unos minutos.' }
+});
 
 // Inicializar WebSocket
 inicializarWss(wss);
 
 // Middleware
-app.use(cors());
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(helmet({
+  contentSecurityPolicy: esProduccion
+    ? {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
+          imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+          connectSrc: ["'self'", 'https:', 'wss:'],
+          fontSrc: ["'self'", 'data:', 'https:'],
+          frameSrc: ["'self'", 'https://www.mercadopago.com', 'https://www.mercadopago.com.mx', 'https://*.mercadopago.com', 'https://*.mercadopago.com.mx'],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: []
+        }
+      }
+    : false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  hsts: esProduccion ? undefined : false,
+  referrerPolicy: { policy: 'no-referrer' }
+}));
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+app.use(globalRateLimit);
+app.use(['/api/auth', '/tienda/auth', '/api/privado/security'], (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+app.use('/tienda/auth/register', authRateLimit);
+app.use('/tienda/auth/login', authRateLimit);
+app.use('/tienda/auth/olvide-password', authRateLimit);
+app.use('/api/auth/login', authRateLimit);
+app.use('/api/auth/olvide-password', authRateLimit);
+app.use(['/api/backup', '/api/exportar', '/api/importar'], adminSurfaceRateLimit);
 app.use(express.json({ limit: BODY_JSON_LIMIT }));
 
 // Alias para liberar /tienda como ruta limpia del frontend sin duplicar endpoints existentes.
@@ -101,7 +293,12 @@ app.use('/api/tienda', (req, _res, next) => {
 // Configurar multer para uploads
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB por archivo
+  limits: {
+    fileSize: Math.max(MEDIA_UPLOAD_MAX_BYTES, DOCUMENT_UPLOAD_MAX_BYTES, BACKUP_IMPORT_MAX_BYTES),
+    files: 6,
+    fields: 100,
+    parts: 120
+  }
 });
 
 // Configuración de directorios para las bases de datos.
@@ -124,7 +321,544 @@ const uploadsTiendaDir = path.join(uploadsDir, 'tienda');
 const uploadsDirLegacy = path.join(__dirname, 'uploads');
 const uploadsTiendaDirLegacy = path.join(uploadsDirLegacy, 'tienda');
 const backupDir = path.join(dbDir, 'backups');
+const securityLogPath = path.join(dbDir, 'logs', 'security.log');
+const securityHistoryPath = path.join(dbDir, 'logs', 'security-history.log');
+const SECURITY_ALERT_WEBHOOK_URL = String(process.env.SECURITY_ALERT_WEBHOOK_URL || '').trim();
+const SECURITY_ALERT_MIN_LEVEL = String(process.env.SECURITY_ALERT_MIN_LEVEL || 'error').trim().toLowerCase();
+const SECURITY_ALERT_COOLDOWN_MS = Math.max(30_000, Number(process.env.SECURITY_ALERT_COOLDOWN_SEC || 300) * 1000);
+const SECURITY_EVENT_GROUP_WINDOW_MS = Math.max(15_000, Number(process.env.SECURITY_EVENT_GROUP_WINDOW_SEC || 60) * 1000);
+const SECURITY_EVENT_GROUP_TYPES = new Set(
+  String(process.env.SECURITY_EVENT_GROUP_TYPES || 'auth_invalid_token,auth_missing_bearer')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+);
+const SECURITY_ACTIVE_LOG_HIDDEN_TYPES = new Set(
+  String(process.env.SECURITY_ACTIVE_LOG_HIDDEN_TYPES || 'manual_security_logs_archived,manual_security_recent_cleared,manual_secret_rotation_preview')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+);
+const SECURITY_AUTO_ARCHIVE_DAYS = Math.max(1, Number(process.env.SECURITY_AUTO_ARCHIVE_DAYS || 7));
+const SECURITY_AUTO_ARCHIVE_RUN_MS = Math.max(60_000, Number(process.env.SECURITY_AUTO_ARCHIVE_RUN_SEC || 900) * 1000);
+const SECURITY_AUTO_ARCHIVE_TYPES = new Set(
+  String(process.env.SECURITY_AUTO_ARCHIVE_TYPES || 'auth_invalid_token,auth_missing_bearer,manual_security_alert_test,manual_secret_rotation_preview,manual_security_logs_archived,manual_security_recent_cleared')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+);
+  const SECURITY_RESOLVED_EVENT_GRACE_MS = Math.max(60_000, Number(process.env.SECURITY_RESOLVED_EVENT_GRACE_SEC || 300) * 1000);
+const SECURITY_ROUTE_FAIL_THRESHOLD = Math.max(3, Number(process.env.SECURITY_ROUTE_FAIL_THRESHOLD || 6));
+const SECURITY_ROUTE_FAIL_WINDOW_MS = Math.max(30_000, Number(process.env.SECURITY_ROUTE_FAIL_WINDOW_SEC || 60) * 1000);
+const SECURITY_ROUTE_FAIL_ALERT_COOLDOWN_MS = Math.max(60_000, Number(process.env.SECURITY_ROUTE_FAIL_ALERT_COOLDOWN_SEC || 900) * 1000);
 const DB_FILES = ['inventario.db', 'recetas.db', 'produccion.db', 'ventas.db', 'admin.db'];
+const securityAlertState = new Map();
+const recentSecurityEvents = [];
+const securityGroupedEvents = new Map();
+const securityRouteFailures = new Map();
+let securityRetentionEstado = {
+  ejecutado_en: '',
+  archivados: 0,
+  dias: SECURITY_AUTO_ARCHIVE_DAYS,
+  tipos: Array.from(SECURITY_AUTO_ARCHIVE_TYPES)
+};
+let lastSecurityRetentionRunAt = 0;
+
+function nivelSeguridadValor(nivel = 'info') {
+  const mapa = { info: 10, warning: 20, error: 30, critical: 40 };
+  return mapa[String(nivel || 'info').toLowerCase()] || 10;
+}
+
+function normalizarRutaEventoSeguridad(ruta = '') {
+  return String(ruta || '').trim().split('?')[0] || '';
+}
+
+function esTipoAgrupableSeguridad(tipo = '') {
+  return SECURITY_EVENT_GROUP_TYPES.has(String(tipo || '').trim().toLowerCase());
+}
+
+function esTipoAutoArchivableSeguridad(evento = {}) {
+  const tipo = String(evento?.tipo || '').trim().toLowerCase();
+  const tipoOriginal = String(evento?.detalle?.original_tipo || '').trim().toLowerCase();
+  return SECURITY_AUTO_ARCHIVE_TYPES.has(tipo) || SECURITY_AUTO_ARCHIVE_TYPES.has(tipoOriginal) || Boolean(evento?.detalle?.resuelto);
+}
+
+function esEventoRuidoResueltoSeguridad(evento = {}, ahora = Date.now()) {
+  const tipo = String(evento?.tipo || '').trim().toLowerCase();
+  const tipoOriginal = String(evento?.detalle?.original_tipo || '').trim().toLowerCase();
+  const ruta = normalizarRutaEventoSeguridad(evento?.ruta);
+  const ip = String(evento?.ip || '').trim();
+  const usuario = String(evento?.detalle?.usuario || '').trim();
+  const ts = Date.parse(String(evento?.ts || ''));
+  const antiguedadSuficiente = Number.isFinite(ts) && (ahora - ts) >= SECURITY_RESOLVED_EVENT_GRACE_MS;
+  const esLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.16.');
+  const esAuthRuido = tipo === 'auth_invalid_token'
+    || tipo === 'auth_missing_bearer'
+    || tipoOriginal === 'auth_invalid_token'
+    || tipoOriginal === 'auth_missing_bearer';
+  const esRutaInterna = ruta.startsWith('/tienda/admin/')
+    || ruta.startsWith('/inventario/')
+    || ruta.startsWith('/api/privado/security/');
+
+  return antiguedadSuficiente && esLocal && esAuthRuido && esRutaInterna && !usuario;
+}
+
+function esFalloRutaSeguridad(tipo = '') {
+  const normalizado = String(tipo || '').trim().toLowerCase();
+  return normalizado === 'auth_invalid_token' || normalizado === 'auth_missing_bearer' || normalizado === 'auth_forbidden_action';
+}
+
+function construirEntradaSeguridad(tipo, detalle = {}, req = null, nivel = 'warning') {
+  return {
+    ts: new Date().toISOString(),
+    tipo: String(tipo || 'security_event').slice(0, 80),
+    nivel: String(nivel || 'warning').slice(0, 20),
+    metodo: String(req?.method || '').slice(0, 10),
+    ruta: String(req?.originalUrl || req?.path || '').slice(0, 240),
+    ip: obtenerIpCliente(req),
+    detalle
+  };
+}
+
+function claveGrupoSeguridad(entrada = {}) {
+  return [
+    String(entrada?.tipo || '').trim().toLowerCase(),
+    String(entrada?.metodo || '').trim().toUpperCase(),
+    normalizarRutaEventoSeguridad(entrada?.ruta),
+    String(entrada?.ip || '').trim(),
+    serializarEventoSeguridad(entrada?.detalle || {})
+  ].join('|');
+}
+
+async function persistirEntradaSeguridad(entrada, opciones = {}) {
+  const emitirAlertaExterna = opciones?.emitirAlertaExterna !== false;
+  const linea = `${JSON.stringify(entrada)}\n`;
+
+  recentSecurityEvents.push(entrada);
+  if (recentSecurityEvents.length > 200) recentSecurityEvents.splice(0, recentSecurityEvents.length - 200);
+  console.warn(`[SECURITY][${String(entrada?.nivel || 'warning').toUpperCase()}] ${entrada?.tipo} ${entrada?.metodo || ''} ${entrada?.ruta || ''} ${entrada?.ip || ''}`.trim());
+
+  try {
+    await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
+    await fs.appendFile(securityLogPath, linea, 'utf8');
+
+    const contenido = await fs.readFile(securityLogPath, 'utf8').catch(() => '');
+    const lineas = String(contenido || '').split(/\r?\n/).filter(Boolean);
+    if (lineas.length > SECURITY_LOG_MAX_LINES) {
+      await fs.writeFile(securityLogPath, `${lineas.slice(-SECURITY_LOG_MAX_LINES).join('\n')}\n`, 'utf8');
+    }
+  } catch {
+    // No bloquear la app por un fallo al registrar eventos de seguridad.
+  }
+
+  if (emitirAlertaExterna) {
+    void enviarAlertaSeguridad(entrada);
+  }
+}
+
+async function persistirEntradaSeguridadHistorial(entrada) {
+  try {
+    await fs.mkdir(path.dirname(securityHistoryPath), { recursive: true });
+    await fs.appendFile(securityHistoryPath, `${JSON.stringify(entrada)}\n`, 'utf8');
+  } catch {
+    // No bloquear por fallos al registrar auditoría histórica.
+  }
+}
+
+function esEventoVisibleEnLogActivo(evento = {}) {
+  const tipo = String(evento?.tipo || '').trim().toLowerCase();
+  return !SECURITY_ACTIVE_LOG_HIDDEN_TYPES.has(tipo);
+}
+
+function obtenerGruposSeguridadActivos() {
+  const ahora = Date.now();
+  const out = [];
+  for (const grupo of securityGroupedEvents.values()) {
+    if ((ahora - Number(grupo?.lastTs || 0)) > SECURITY_EVENT_GROUP_WINDOW_MS) continue;
+    if (Number(grupo?.count || 0) <= 1) continue;
+    out.push({
+      ts: new Date(Number(grupo.lastTs) || ahora).toISOString(),
+      tipo: `${grupo.base.tipo}_grouped`,
+      nivel: grupo.base.nivel,
+      metodo: grupo.base.metodo,
+      ruta: grupo.base.ruta,
+      ip: grupo.base.ip,
+      detalle: {
+        ...grupo.base.detalle,
+        original_tipo: grupo.base.tipo,
+        repeticiones: grupo.count,
+        suprimidos: Math.max(0, grupo.count - 1),
+        primera_vez: new Date(Number(grupo.firstTs) || ahora).toISOString(),
+        ultima_vez: new Date(Number(grupo.lastTs) || ahora).toISOString(),
+        agrupado_activo: true
+      }
+    });
+  }
+  return out;
+}
+
+async function depurarAgrupacionesSeguridad(force = false) {
+  const ahora = Date.now();
+  for (const [clave, grupo] of securityGroupedEvents.entries()) {
+    if (!force && (ahora - Number(grupo?.lastTs || 0)) < SECURITY_EVENT_GROUP_WINDOW_MS) continue;
+    if (Number(grupo?.count || 0) > 1) {
+      await persistirEntradaSeguridad({
+        ts: new Date(Number(grupo.lastTs) || ahora).toISOString(),
+        tipo: `${grupo.base.tipo}_grouped`,
+        nivel: grupo.base.nivel,
+        metodo: grupo.base.metodo,
+        ruta: grupo.base.ruta,
+        ip: grupo.base.ip,
+        detalle: {
+          ...grupo.base.detalle,
+          original_tipo: grupo.base.tipo,
+          repeticiones: grupo.count,
+          suprimidos: Math.max(0, grupo.count - 1),
+          primera_vez: new Date(Number(grupo.firstTs) || ahora).toISOString(),
+          ultima_vez: new Date(Number(grupo.lastTs) || ahora).toISOString()
+        }
+      }, { emitirAlertaExterna: false });
+    }
+    securityGroupedEvents.delete(clave);
+  }
+}
+
+async function ejecutarRetencionAutomaticaSeguridad(force = false) {
+  const ahora = Date.now();
+  if (!force && (ahora - lastSecurityRetentionRunAt) < SECURITY_AUTO_ARCHIVE_RUN_MS) {
+    return securityRetentionEstado;
+  }
+  lastSecurityRetentionRunAt = ahora;
+
+  const limiteMs = ahora - (SECURITY_AUTO_ARCHIVE_DAYS * 86400000);
+  const eventos = await leerEventosSeguridadDesdeArchivo(securityLogPath, SECURITY_LOG_MAX_LINES);
+  const archivados = [];
+  const restantes = [];
+
+  for (const evento of eventos) {
+    const ts = Date.parse(String(evento?.ts || ''));
+    const antiguo = Number.isFinite(ts) && ts <= limiteMs;
+    const resuelto = esEventoRuidoResueltoSeguridad(evento, ahora);
+    if ((antiguo && esTipoAutoArchivableSeguridad(evento)) || resuelto) {
+      archivados.push({
+        ...evento,
+        archivado_en: new Date().toISOString(),
+        archivado_por: resuelto ? 'resuelto_automaticamente' : 'retencion_automatica'
+      });
+    } else {
+      restantes.push(evento);
+    }
+  }
+
+  if (archivados.length) {
+    await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
+    await fs.appendFile(securityHistoryPath, `${archivados.map(serializarEventoSeguridad).join('\n')}\n`, 'utf8');
+    await fs.writeFile(securityLogPath, restantes.length ? `${restantes.map(serializarEventoSeguridad).join('\n')}\n` : '', 'utf8');
+  }
+
+  securityRetentionEstado = {
+    ejecutado_en: new Date().toISOString(),
+    archivados: archivados.length,
+    dias: SECURITY_AUTO_ARCHIVE_DAYS,
+    tipos: Array.from(SECURITY_AUTO_ARCHIVE_TYPES),
+    gracia_resueltos_ms: SECURITY_RESOLVED_EVENT_GRACE_MS
+  };
+
+  return securityRetentionEstado;
+}
+
+async function detectarAnomaliaRutaSeguridad(entrada, req = null) {
+  if (!esFalloRutaSeguridad(entrada?.tipo)) return;
+
+  const ahora = Date.now();
+  const clave = `${String(entrada?.tipo || '').trim().toLowerCase()}|${String(entrada?.metodo || '').trim().toUpperCase()}|${normalizarRutaEventoSeguridad(entrada?.ruta)}`;
+  const estado = securityRouteFailures.get(clave) || { timestamps: [], alertedAt: 0 };
+  estado.timestamps = estado.timestamps.filter((ts) => (ahora - ts) <= SECURITY_ROUTE_FAIL_WINDOW_MS);
+  estado.timestamps.push(ahora);
+
+  if (estado.timestamps.length >= SECURITY_ROUTE_FAIL_THRESHOLD && (ahora - Number(estado.alertedAt || 0)) >= SECURITY_ROUTE_FAIL_ALERT_COOLDOWN_MS) {
+    estado.alertedAt = ahora;
+    await persistirEntradaSeguridad(construirEntradaSeguridad('security_route_anomaly', {
+      tipo_original: entrada.tipo,
+      metodo: entrada.metodo,
+      ruta: normalizarRutaEventoSeguridad(entrada.ruta),
+      conteo_ventana: estado.timestamps.length,
+      umbral: SECURITY_ROUTE_FAIL_THRESHOLD,
+      ventana_segundos: Math.round(SECURITY_ROUTE_FAIL_WINDOW_MS / 1000),
+      ip: entrada.ip
+    }, req, estado.timestamps.length >= (SECURITY_ROUTE_FAIL_THRESHOLD * 2) ? 'critical' : 'error'));
+  }
+
+  securityRouteFailures.set(clave, estado);
+}
+
+function claveCooldownAlertaSeguridad(entrada = {}) {
+  const tipo = String(entrada?.tipo || '').trim();
+  if (tipo === 'security_route_anomaly') {
+    return `${tipo}|${normalizarRutaEventoSeguridad(entrada?.ruta)}`;
+  }
+  return tipo;
+}
+
+function debeEnviarAlertaSeguridad(entrada = {}) {
+  const tipo = String(entrada?.tipo || '').trim();
+  const nivel = String(entrada?.nivel || 'warning').trim();
+  if (!SECURITY_ALERT_WEBHOOK_URL) return false;
+  if (nivelSeguridadValor(nivel) < nivelSeguridadValor(SECURITY_ALERT_MIN_LEVEL)) return false;
+  const ahora = Date.now();
+  const clave = claveCooldownAlertaSeguridad(entrada);
+  const ultima = Number(securityAlertState.get(clave) || 0);
+  if (ahora - ultima < SECURITY_ALERT_COOLDOWN_MS) return false;
+  securityAlertState.set(clave, ahora);
+  return true;
+}
+
+async function enviarAlertaSeguridad(entrada) {
+  if (!debeEnviarAlertaSeguridad(entrada)) return;
+  try {
+    await fetch(SECURITY_ALERT_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: `[CHIPACTLI][${String(entrada?.nivel || 'warning').toUpperCase()}] ${entrada?.tipo} ${entrada?.metodo || ''} ${entrada?.ruta || ''} ${entrada?.ip || ''}`.trim(),
+        event: entrada
+      })
+    });
+  } catch {
+    // No bloquear el flujo por fallos de alertas externas.
+  }
+}
+
+async function leerEventosSeguridad(limit = 100) {
+  return leerEventosSeguridadDesdeArchivo(securityLogPath, limit);
+}
+
+async function leerEventosSeguridadDesdeArchivo(filePath, limit = 100) {
+  const max = Math.max(1, Math.min(500, Number(limit) || 100));
+  const contenido = await fs.readFile(filePath, 'utf8').catch(() => '');
+  return String(contenido || '')
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-max)
+    .map((linea) => {
+      try {
+        return JSON.parse(linea);
+      } catch {
+        return { ts: '', tipo: 'parse_error', detalle: { linea } };
+      }
+    });
+}
+
+function coincideTextoSeguridad(valor, filtro) {
+  const base = String(valor || '').trim().toLowerCase();
+  const criterio = String(filtro || '').trim().toLowerCase();
+  if (!criterio) return true;
+  return base.includes(criterio);
+}
+
+function eventoSeguridadTextoLibre(evento = {}) {
+  return [
+    evento?.ruta,
+    evento?.tipo,
+    evento?.ip,
+    evento?.metodo,
+    evento?.detalle?.usuario,
+    JSON.stringify(evento?.detalle || {})
+  ].join(' ').toLowerCase();
+}
+
+function crearFiltroEventosSeguridad(filtros = {}) {
+  const nivel = String(filtros?.nivel || filtros?.filtroNivel || '').trim().toLowerCase();
+  const tipo = String(filtros?.tipo || filtros?.filtroTipo || '').trim().toLowerCase();
+  const ip = String(filtros?.ip || filtros?.filtroIp || '').trim().toLowerCase();
+  const libre = String(filtros?.libre || filtros?.busquedaLibre || '').trim().toLowerCase();
+  const hasta = String(filtros?.hasta || filtros?.hastaTs || '').trim();
+  const hastaMs = hasta ? Date.parse(hasta) : NaN;
+
+  return (evento = {}) => {
+    const coincideNivel = !nivel || nivel === 'todos' || String(evento?.nivel || '').trim().toLowerCase() === nivel;
+    const coincideTipo = coincideTextoSeguridad(evento?.tipo, tipo);
+    const coincideIp = coincideTextoSeguridad(evento?.ip, ip);
+    const coincideLibre = !libre || eventoSeguridadTextoLibre(evento).includes(libre);
+    const coincideHasta = Number.isNaN(hastaMs) || (Date.parse(String(evento?.ts || '')) <= hastaMs);
+    return coincideNivel && coincideTipo && coincideIp && coincideLibre && coincideHasta;
+  };
+}
+
+function serializarEventoSeguridad(evento = {}) {
+  return JSON.stringify(evento);
+}
+
+function claveEventoSeguridad(evento = {}) {
+  return [
+    String(evento?.ts || '').trim(),
+    String(evento?.tipo || '').trim(),
+    String(evento?.nivel || '').trim(),
+    String(evento?.metodo || '').trim(),
+    String(evento?.ruta || '').trim(),
+    String(evento?.ip || '').trim(),
+    serializarEventoSeguridad(evento?.detalle || {})
+  ].join('|');
+}
+
+async function archivarEventosSeguridad(filtros = {}) {
+  const eventos = await leerEventosSeguridadDesdeArchivo(securityLogPath, SECURITY_LOG_MAX_LINES);
+  const coincide = crearFiltroEventosSeguridad(filtros);
+  const archivados = [];
+  const restantes = [];
+
+  for (const evento of eventos) {
+    if (coincide(evento)) {
+      archivados.push({
+        ...evento,
+        archivado_en: new Date().toISOString()
+      });
+    } else {
+      restantes.push(evento);
+    }
+  }
+
+  if (!archivados.length) {
+    return { archivados: 0, restantes: eventos.length };
+  }
+
+  await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
+  await fs.appendFile(securityHistoryPath, `${archivados.map(serializarEventoSeguridad).join('\n')}\n`, 'utf8');
+  const contenidoRestante = restantes.length ? `${restantes.map(serializarEventoSeguridad).join('\n')}\n` : '';
+  await fs.writeFile(securityLogPath, contenidoRestante, 'utf8');
+
+  const clavesArchivadas = new Set(archivados.map(claveEventoSeguridad));
+  for (let index = recentSecurityEvents.length - 1; index >= 0; index -= 1) {
+    if (clavesArchivadas.has(claveEventoSeguridad(recentSecurityEvents[index]))) {
+      recentSecurityEvents.splice(index, 1);
+    }
+  }
+
+  return { archivados: archivados.length, restantes: restantes.length };
+}
+
+function limpiarEventosRecientesSeguridad(filtros = {}) {
+  const coincide = crearFiltroEventosSeguridad(filtros);
+  let eliminados = 0;
+  for (let index = recentSecurityEvents.length - 1; index >= 0; index -= 1) {
+    if (coincide(recentSecurityEvents[index])) {
+      recentSecurityEvents.splice(index, 1);
+      eliminados += 1;
+    }
+  }
+  return { eliminados, restantes: recentSecurityEvents.length };
+}
+
+async function registrarEventoSeguridad(tipo, detalle = {}, req = null, nivel = 'warning') {
+  const entrada = {
+    ts: new Date().toISOString(),
+    tipo: String(tipo || 'security_event').slice(0, 80),
+    nivel: String(nivel || 'warning').slice(0, 20),
+    metodo: String(req?.method || '').slice(0, 10),
+    ruta: String(req?.originalUrl || req?.path || '').slice(0, 240),
+    ip: obtenerIpCliente(req),
+    detalle
+  };
+
+  const linea = `${JSON.stringify(entrada)}\n`;
+  recentSecurityEvents.push(entrada);
+  if (recentSecurityEvents.length > 200) recentSecurityEvents.splice(0, recentSecurityEvents.length - 200);
+  console.warn(`[SECURITY][${String(entrada.nivel || 'warning').toUpperCase()}] ${entrada.tipo} ${entrada.metodo || ''} ${entrada.ruta || ''} ${entrada.ip || ''}`.trim());
+
+  try {
+    await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
+    await fs.appendFile(securityLogPath, linea, 'utf8');
+
+    const contenido = await fs.readFile(securityLogPath, 'utf8').catch(() => '');
+    const lineas = String(contenido || '').split(/\r?\n/).filter(Boolean);
+    if (lineas.length > SECURITY_LOG_MAX_LINES) {
+      await fs.writeFile(securityLogPath, `${lineas.slice(-SECURITY_LOG_MAX_LINES).join('\n')}\n`, 'utf8');
+    }
+  } catch {
+    // No bloquear la app por un fallo al registrar eventos de seguridad.
+  }
+
+  void enviarAlertaSeguridad(entrada);
+}
+
+function validarConfiguracionSeguridad() {
+  const entornoSeguroEstricto = Boolean(
+    process.env.STRICT_SECURITY_BOOT === '1'
+    || ((enRender || ejecutandoEnRender) && esProduccion)
+  );
+  const avisos = [];
+  const erroresFatales = [];
+
+  if (!esSecretoFuerte(JWT_SECRET_SERVIDOR)) {
+    erroresFatales.push('JWT_SECRET no está configurado con una longitud segura de al menos 32 caracteres.');
+  }
+  if (!esSecretoFuerte(TIENDA_JWT_SECRET_SERVIDOR)) {
+    erroresFatales.push('TIENDA_JWT_SECRET no está configurado con una longitud segura de al menos 32 caracteres.');
+  }
+  if (!esSecretoFuerte(ADMIN_TOKEN, 24)) {
+    erroresFatales.push('ADMIN_TOKEN no está configurado con una longitud segura de al menos 24 caracteres.');
+  }
+
+  for (const clave of ['MP_SUCCESS_URL', 'MP_PENDING_URL', 'MP_FAILURE_URL', 'MAIL_LOGO_URL', 'FRONTEND_URL', 'PUBLIC_APP_URL', 'APP_BASE_URL']) {
+    const valor = String(process.env[clave] || '').trim();
+    if (entornoSeguroEstricto && valor && esUrlLocal(valor)) {
+      avisos.push(`${clave} apunta a localhost/127.0.0.1 y debe usar una URL pública en Render.`);
+    }
+  }
+
+  if (erroresFatales.length) {
+    const mensajeFatal = `[SECURITY] Configuración crítica inválida:\n- ${erroresFatales.join('\n- ')}`;
+    if (entornoSeguroEstricto) {
+      throw new Error(mensajeFatal);
+    }
+    console.warn(mensajeFatal);
+  }
+
+  if (avisos.length) {
+    const mensaje = `[SECURITY] Configuración insegura detectada:\n- ${avisos.join('\n- ')}`;
+    if (entornoSeguroEstricto) {
+      console.error(mensaje);
+    } else {
+      console.warn(mensaje);
+    }
+  }
+}
+
+function validarArchivoMultimedia(file) {
+  if (!file || !file.buffer) return 'Debes seleccionar un archivo multimedia';
+  if (Number(file.size || file.buffer?.length || 0) > MEDIA_UPLOAD_MAX_BYTES) {
+    return 'El archivo multimedia es demasiado grande';
+  }
+  const mime = String(file.mimetype || '').toLowerCase();
+  const ext = path.extname(String(file.originalname || '')).toLowerCase();
+  if (!MIME_MEDIA_PERMITIDOS.has(mime)) return 'El archivo debe ser imagen o video permitido';
+  if (ext && !EXT_MEDIA_PERMITIDAS.has(ext)) return 'La extensión del archivo no está permitida';
+  return '';
+}
+
+function validarArchivoDocumento(file) {
+  if (!file || !file.buffer) return 'Debes seleccionar un archivo';
+  if (Number(file.size || file.buffer?.length || 0) > DOCUMENT_UPLOAD_MAX_BYTES) {
+    return 'El archivo es demasiado grande';
+  }
+  const mime = String(file.mimetype || '').toLowerCase();
+  const ext = path.extname(String(file.originalname || '')).toLowerCase();
+  if (!MIME_DOCUMENTOS_PERMITIDOS.has(mime)) return 'Solo se permite PDF o Excel (XLS/XLSX/CSV)';
+  if (ext && !EXT_DOCUMENTOS_PERMITIDAS.has(ext)) return 'La extensión del archivo no está permitida';
+  return '';
+}
+
+function validarArchivoBackup(file) {
+  if (!file || !file.buffer) return 'Archivo de respaldo inválido';
+  if (Number(file.size || file.buffer?.length || 0) > BACKUP_IMPORT_MAX_BYTES) {
+    return 'El archivo de respaldo es demasiado grande';
+  }
+  const ext = path.extname(String(file.originalname || '')).toLowerCase();
+  if (ext && ext !== '.db') return 'Los respaldos deben tener extensión .db';
+  return '';
+}
+
+validarConfiguracionSeguridad();
 
 async function migrarDbLegacyDesdeRaizLocal() {
   if (path.resolve(dbDir) === path.resolve(__dirname)) return;
@@ -201,40 +935,31 @@ async function buscarBackupMasReciente(nombreDb) {
 
 async function restaurarDbSiFalta(nombreDb) {
   const destino = path.join(dbDir, nombreDb);
-  try {
-    const stat = await fs.stat(destino);
-    if (stat.size > 0) return false;
-  } catch {
-    // No existe o no es legible: intentar restaurar desde backup.
-  }
+  const existeDestino = await fs.stat(destino).then((stat) => stat.size > 0).catch(() => false);
+  if (existeDestino) return false;
 
   const backupReciente = await buscarBackupMasReciente(nombreDb);
   if (!backupReciente) return false;
 
+  await fs.mkdir(path.dirname(destino), { recursive: true });
   await fs.copyFile(backupReciente, destino);
+
+  for (const sufijo of ['-wal', '-shm']) {
+    const temporal = `${destino}${sufijo}`;
+    await fs.rm(temporal, { force: true }).catch(() => {});
+  }
+
   return true;
 }
 
 async function reforzarPersistenciaDb() {
-  const enProduccion = esProduccion || enRender || ejecutandoEnRender;
-  const rutaPersistenteRender = path.resolve('/opt/render/data');
-  const rutaDbActual = path.resolve(dbDir);
-  const usandoRutaPersistenteRender = rutaDbActual.startsWith(rutaPersistenteRender);
-
-  if (enProduccion && ejecutandoEnRender && !usandoRutaPersistenteRender && process.env.ALLOW_EPHEMERAL_DB !== '1') {
-    throw new Error(
-      `[DB] Configuración insegura: DB_DIR=${rutaDbActual}. En Render debe usar /opt/render/data. `
-      + 'Define DB_DIR persistente o ALLOW_EPHEMERAL_DB=1 bajo tu propio riesgo.'
-    );
-  }
-
   await fs.mkdir(dbDir, { recursive: true });
   await fs.mkdir(backupDir, { recursive: true });
+  await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
 
-  // Verifica que realmente se puede escribir en disco antes de abrir SQLite.
   const marcaPrueba = path.join(dbDir, '.db-write-test');
   await fs.writeFile(marcaPrueba, `${Date.now()}`, 'utf8');
-  await fs.unlink(marcaPrueba);
+  await fs.unlink(marcaPrueba).catch(() => {});
 
   const restauradas = [];
   for (const nombreDb of DB_FILES) {
@@ -251,7 +976,7 @@ async function reforzarPersistenciaDb() {
   }
 }
 
-console.log('[DB] NODE_ENV=', process.env.NODE_ENV || '(vacío)');
+console.log('[DB] NODE_ENV=', NODE_ENV_EFECTIVO);
 console.log('[DB] Render detectado=', ejecutandoEnRender ? 'sí' : 'no');
 console.log('[DB] Disco Render detectado=', discoRenderDisponible ? 'sí' : 'no');
 console.log('[DB] DB_DIR efectivo=', dbDir);
@@ -330,12 +1055,14 @@ async function crearConexionAdminAuth() {
         correo TEXT,
         rol TEXT DEFAULT 'usuario',
         permisos TEXT,
+        token_version INTEGER DEFAULT 0,
         debe_cambiar_password INTEGER DEFAULT 1,
         creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     await clientePg.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS correo TEXT`);
+    await clientePg.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0`);
     await clientePg.query(`
       CREATE TABLE IF NOT EXISTS auditoria_admin (
         id BIGSERIAL PRIMARY KEY,
@@ -670,7 +1397,6 @@ function obtenerIpsCliente(req) {
   }
 
   const candidatas = [
-    req.headers['cf-connecting-ip'],
     req.headers['x-real-ip'],
     req.socket?.remoteAddress
   ];
@@ -1691,11 +2417,23 @@ const reglasPermisos = [
   { metodos: ['DELETE'], prefijo: '/utensilios', pestana: 'utensilios', accion: 'eliminar' },
 
   { metodos: ['GET'], exacto: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['GET'], exacto: '/api/privado/usuarios/auditoria', pestana: 'admin_usuarios', accion: 'seguridad' },
   { metodos: ['POST'], exacto: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'crear' },
   { metodos: ['PATCH'], prefijo: '/api/privado/usuarios', contiene: '/permisos', pestana: 'admin_usuarios', accion: 'editar_permisos' },
   { metodos: ['PATCH'], prefijo: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'editar_usuario' },
   { metodos: ['POST'], exacto: '/api/privado/usuarios/reset-password', pestana: 'admin_usuarios', accion: 'reset_password' },
+  { metodos: ['POST'], exacto: '/api/privado/usuarios/revocar-sesiones', pestana: 'admin_usuarios', accion: 'seguridad' },
   { metodos: ['DELETE'], prefijo: '/api/privado/usuarios', pestana: 'admin_usuarios', accion: 'eliminar' },
+  { metodos: ['GET'], exacto: '/api/privado/security/estado', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['GET'], exacto: '/api/privado/security/logs', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['GET'], exacto: '/api/privado/security/logs/historial', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['GET'], exacto: '/api/privado/security/bloqueos', pestana: 'admin_usuarios', accion: 'ver' },
+  { metodos: ['POST'], exacto: '/api/privado/security/ping-alerta', pestana: 'admin_usuarios', accion: 'seguridad' },
+  { metodos: ['POST'], exacto: '/api/privado/security/smoke', pestana: 'admin_usuarios', accion: 'seguridad' },
+  { metodos: ['POST'], exacto: '/api/privado/security/rotacion-secretos', pestana: 'admin_usuarios', accion: 'seguridad' },
+  { metodos: ['POST'], exacto: '/api/privado/security/logs/archivar', pestana: 'admin_usuarios', accion: 'seguridad' },
+  { metodos: ['POST'], exacto: '/api/privado/security/logs/limpiar-recientes', pestana: 'admin_usuarios', accion: 'seguridad' },
+  { metodos: ['GET'], exacto: '/api/privado/security/auditoria-admin', pestana: 'admin_usuarios', accion: 'seguridad' },
 
   { metodos: ['GET'], exacto: '/api/exportar/inventario', pestana: 'inventario', accion: 'exportar' },
   { metodos: ['POST'], exacto: '/api/importar/inventario', pestana: 'inventario', accion: 'importar' },
@@ -1727,48 +2465,224 @@ function rutaCoincide(pathname, regla) {
   return true;
 }
 
-app.use((req, res, next) => {
-  const ruta = req.path || req.originalUrl || '';
-  // Permitir importar TODO sin autenticación
-  if (req.method === 'POST' && ruta === '/api/importar/todo') return next();
+const reglasAuditoriaCritica = [
+  { metodos: ['POST'], exacto: '/api/privado/usuarios/revocar-sesiones', tipo: 'usuario_sesiones_revocadas_solicitud' },
+  { metodos: ['POST'], exacto: '/api/privado/security/ping-alerta', tipo: 'seguridad_ping_alerta' },
+  { metodos: ['POST'], exacto: '/api/privado/security/smoke', tipo: 'seguridad_smoke' },
+  { metodos: ['POST'], exacto: '/api/privado/security/rotacion-secretos', tipo: 'seguridad_rotacion_secretos' },
+  { metodos: ['POST'], exacto: '/api/privado/security/logs/archivar', tipo: 'seguridad_logs_archivar' },
+  { metodos: ['POST'], exacto: '/api/privado/security/logs/limpiar-recientes', tipo: 'seguridad_logs_limpiar_recientes' },
+  { metodos: ['POST'], exacto: '/api/importar/todo', tipo: 'importacion_total' },
+  { metodos: ['POST'], exacto: '/api/importar/inventario', tipo: 'importacion_inventario' },
+  { metodos: ['POST'], exacto: '/api/importar/utensilios', tipo: 'importacion_utensilios' },
+  { metodos: ['POST'], exacto: '/api/importar/recetas', tipo: 'importacion_recetas' },
+  { metodos: ['POST'], exacto: '/api/importar/produccion', tipo: 'importacion_produccion' },
+  { metodos: ['POST'], exacto: '/api/importar/ventas', tipo: 'importacion_ventas' },
+  { metodos: ['POST'], exacto: '/api/importar/cortesias', tipo: 'importacion_cortesias' },
+  { metodos: ['GET'], exacto: '/api/exportar/todo', tipo: 'exportacion_total' },
+  { metodos: ['GET'], exacto: '/api/exportar/inventario', tipo: 'exportacion_inventario' },
+  { metodos: ['GET'], exacto: '/api/exportar/utensilios', tipo: 'exportacion_utensilios' },
+  { metodos: ['GET'], exacto: '/api/exportar/recetas', tipo: 'exportacion_recetas' },
+  { metodos: ['GET'], exacto: '/api/exportar/produccion', tipo: 'exportacion_produccion' },
+  { metodos: ['GET'], exacto: '/api/exportar/ventas', tipo: 'exportacion_ventas' },
+  { metodos: ['GET'], exacto: '/api/exportar/cortesias', tipo: 'exportacion_cortesias' },
+  { metodos: ['POST'], exacto: '/tienda/admin/config', tipo: 'trastienda_config_guardada' },
+  { metodos: ['POST'], exacto: '/tienda/admin/descuentos/upsert', tipo: 'trastienda_descuento_guardado' },
+  { metodos: ['POST'], exacto: '/tienda/admin/cupones/upsert', tipo: 'trastienda_cupon_guardado' },
+  { metodos: ['PATCH'], prefijo: '/tienda/admin/cupones', contiene: '/activo', tipo: 'trastienda_cupon_estado' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin/puntos-entrega', tipo: 'trastienda_puntos_entrega' },
+  { metodos: ['POST'], exacto: '/tienda/admin/servicio-domicilio/habilitar', tipo: 'trastienda_servicio_domicilio' },
+  { metodos: ['PATCH'], prefijo: '/tienda/admin/clientes', contiene: '/acciones-app', tipo: 'trastienda_cliente_acciones' },
+  { metodos: ['DELETE'], prefijo: '/tienda/admin/clientes', tipo: 'trastienda_cliente_eliminar' },
+  { metodos: ['POST'], exacto: '/tienda/admin/mail/masivo', tipo: 'trastienda_mail_masivo' },
+  { metodos: ['POST'], exacto: '/tienda/admin/metricas/reset', tipo: 'trastienda_metricas_reset' },
+  { metodos: ['POST'], exacto: '/tienda/catalogo/upsert', tipo: 'trastienda_catalogo_upsert' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin/productos', tipo: 'trastienda_producto_admin' },
+  { metodos: ['POST', 'PATCH', 'DELETE'], prefijo: '/tienda/admin/paquetes', tipo: 'trastienda_paquete_admin' },
+  { metodos: ['POST'], exacto: '/tienda/admin/ordenes/bulk-delete', tipo: 'trastienda_ordenes_bulk_delete' },
+  { metodos: ['POST'], exacto: '/tienda/admin/ordenes/reset-contadores', tipo: 'trastienda_ordenes_reset_contadores' }
+];
 
+const FRASES_CONFIRMACION_CRITICA = {
+  importacionTodo: 'IMPORTAR TODO',
+  backupImportar: 'IMPORTAR DBS',
+  backupRestaurar: 'RESTAURAR BACKUP'
+};
+
+function detalleAuditoriaCritica(req, match, usuario) {
+  const detalle = {
+    ruta: String(req.path || req.originalUrl || '').slice(0, 180),
+    metodo: String(req.method || '').slice(0, 10),
+    pestana: match?.pestana || '',
+    accion: match?.accion || ''
+  };
+
+  if (typeof req.body?.username === 'string' && req.body.username.trim()) {
+    detalle.objetivo = req.body.username.trim().slice(0, 80).toLowerCase();
+  }
+
+  if (typeof req.params?.username === 'string' && req.params.username.trim()) {
+    detalle.objetivo = req.params.username.trim().slice(0, 80).toLowerCase();
+  }
+
+  if (usuario?.username) {
+    detalle.actor = String(usuario.username).slice(0, 80);
+  }
+
+  return detalle;
+}
+
+function extraerConfirmacionCritica(req, { bodyField = 'confirmacion_accion' } = {}) {
+  const header = String(req.get('x-confirm-action') || '').trim();
+  const body = String(req.body?.[bodyField] || '').trim();
+  return header || body;
+}
+
+function exigirConfirmacionCritica(req, res, { expected = '', mensaje = '' } = {}) {
+  if (!expected) return true;
+  const valor = extraerConfirmacionCritica(req);
+  if (compararSecretoSeguro(valor, expected)) {
+    return true;
+  }
+  res.status(400).json({
+    exito: false,
+    mensaje: mensaje || 'Falta confirmación explícita para esta operación.',
+    confirmacion_requerida: expected
+  });
+  return false;
+}
+
+async function registrarAuditoriaCriticaSiAplica(req, match, usuario) {
+  const regla = reglasAuditoriaCritica.find((item) => rutaCoincide({ ruta: req.path || req.originalUrl || '', metodo: req.method }, item));
+  if (!regla) return;
+
+  try {
+    await registrarAuditoriaAdmin(
+      bdAdmin,
+      regla.tipo,
+      detalleAuditoriaCritica(req, match, usuario),
+      usuario?.username || usuario?.id || ''
+    );
+  } catch {
+    // No bloquear la operación principal por fallo de auditoría.
+  }
+}
+
+function nivelEventoOperacionCritica(tipo = '') {
+  const normalizado = String(tipo || '').trim().toLowerCase();
+  if (normalizado.startsWith('seguridad_')) return 'critical';
+  if (normalizado.startsWith('usuario_')) return 'warning';
+  if (normalizado.startsWith('trastienda_')) return 'warning';
+  if (normalizado.startsWith('backup_') || normalizado.startsWith('importacion_') || normalizado.startsWith('exportacion_')) {
+    return 'warning';
+  }
+  return 'warning';
+}
+
+async function registrarEventoOperacionCriticaSiAplica(req, res, match, usuario) {
+  const regla = reglasAuditoriaCritica.find((item) => rutaCoincide({ ruta: req.path || req.originalUrl || '', metodo: req.method }, item));
+  if (!regla) return;
+  if (Number(res?.statusCode || 500) >= 400) return;
+
+  try {
+    await registrarEventoSeguridad(
+      regla.tipo,
+      {
+        ...detalleAuditoriaCritica(req, match, usuario),
+        statusCode: Number(res?.statusCode || 0)
+      },
+      req,
+      nivelEventoOperacionCritica(regla.tipo)
+    );
+  } catch {
+    // No bloquear la operación principal por fallo al registrar eventos operativos.
+  }
+}
+
+app.use(async (req, res, next) => {
+  const ruta = req.path || req.originalUrl || '';
   const match = reglasPermisos.find((regla) => rutaCoincide({ ruta, metodo: req.method }, regla));
 
   if (!match) return next();
 
-  const auth = req.get('Authorization');
-  if (!auth || !auth.startsWith('Bearer ')) {
+  const token = obtenerTokenAdminSolicitud(req);
+  if (!token) {
+    void registrarEventoSeguridad('auth_missing_bearer', { pestana: match.pestana, accion: match.accion }, req, 'warning');
     return res.status(401).json({ exito: false, mensaje: 'No autenticado' });
   }
 
-  const token = auth.replace('Bearer ', '');
+  let decoded;
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'chipactli_jwt_secret');
-    req.usuario = decoded;
+    decoded = jwt.verify(token, JWT_SECRET_SERVIDOR);
   } catch {
+    void registrarEventoSeguridad('auth_invalid_token', { pestana: match.pestana, accion: match.accion }, req, 'error');
     return res.status(401).json({ exito: false, mensaje: 'Token inválido' });
   }
 
+  if (decoded?.tipo !== 'admin_auth' || !decoded?.id) {
+    void registrarEventoSeguridad('auth_invalid_token', { pestana: match.pestana, accion: match.accion }, req, 'error');
+    return res.status(401).json({ exito: false, mensaje: 'Token inválido' });
+  }
+
+  try {
+    const usuarioActual = await dbGetAsync(
+      bdAdmin,
+      'SELECT id, username, nombre, rol, permisos, COALESCE(token_version, 0) AS token_version FROM usuarios WHERE id = ? LIMIT 1',
+      [decoded?.id]
+    );
+
+    if (!usuarioActual) {
+      void registrarEventoSeguridad('auth_user_missing', { pestana: match.pestana, accion: match.accion }, req, 'warning');
+      return res.status(401).json({ exito: false, mensaje: 'Usuario no encontrado' });
+    }
+
+    if (Number(decoded?.token_version || 0) !== Number(usuarioActual?.token_version || 0)) {
+      void registrarEventoSeguridad('auth_token_stale', {
+        pestana: match.pestana,
+        accion: match.accion,
+        usuario: String(usuarioActual?.username || usuarioActual?.id || '').slice(0, 80)
+      }, req, 'warning');
+      return res.status(401).json({ exito: false, mensaje: 'Sesión expirada. Inicia sesión nuevamente.' });
+    }
+
+    req.usuario = {
+      id: usuarioActual.id,
+      username: usuarioActual.username,
+      nombre: usuarioActual.nombre,
+      rol: usuarioActual.rol,
+      permisos: normalizarPermisosUsuario(usuarioActual.permisos, usuarioActual.rol),
+      token_version: Number(usuarioActual.token_version || 0)
+    };
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo validar la sesión' });
+  }
+
   if (!tienePermisoAccion(req.usuario, match.pestana, match.accion)) {
+    void registrarEventoSeguridad('auth_forbidden_action', {
+      pestana: match.pestana,
+      accion: match.accion,
+      usuario: String(req.usuario?.username || req.usuario?.id || '').slice(0, 80)
+    }, req, 'error');
     return res.status(403).json({ exito: false, mensaje: 'Sin permiso para esta acción' });
   }
+
+  res.once('finish', () => {
+    void registrarEventoOperacionCriticaSiAplica(req, res, match, req.usuario);
+  });
+
+  void registrarAuditoriaCriticaSiAplica(req, match, req.usuario);
 
   next();
 });
 
 app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar un archivo multimedia' });
+    const errorArchivo = validarArchivoMultimedia(req.file);
+    if (errorArchivo) {
+      return res.status(400).json({ exito: false, mensaje: errorArchivo });
     }
 
     const mime = String(req.file.mimetype || '').toLowerCase();
-    const esImagen = mime.startsWith('image/');
-    const esVideo = mime.startsWith('video/');
-    if (!esImagen && !esVideo) {
-      return res.status(400).json({ exito: false, mensaje: 'El archivo debe ser imagen o video' });
-    }
-
     const extOriginal = path.extname(String(req.file.originalname || '')).toLowerCase();
     const ext = extOriginal
       || (mime.includes('png') ? '.png'
@@ -1779,7 +2693,7 @@ app.post('/api/uploads/tienda-imagen', upload.single('imagen'), async (req, res)
                 : mime.includes('ogg') ? '.ogv'
                   : mime.includes('quicktime') ? '.mov'
                     : '.jpg');
-    const nombre = `tienda-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const nombre = nombreAleatorioSeguro('tienda', ext);
     const destino = path.join(uploadsDir, 'tienda', nombre);
 
     await fs.writeFile(destino, req.file.buffer);
@@ -1840,24 +2754,15 @@ async function extraerTextoArchivoListaPrecios(file) {
 
 app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ exito: false, mensaje: 'Debes seleccionar un archivo' });
+    const errorArchivo = validarArchivoDocumento(req.file);
+    if (errorArchivo) {
+      return res.status(400).json({ exito: false, mensaje: errorArchivo });
     }
 
     const mime = String(req.file.mimetype || '').toLowerCase();
-    const permitidos = new Set([
-      'application/pdf',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv'
-    ]);
-    if (!permitidos.has(mime)) {
-      return res.status(400).json({ exito: false, mensaje: 'Solo se permite PDF o Excel (XLS/XLSX/CSV)' });
-    }
-
     const extOriginal = path.extname(String(req.file.originalname || '')).toLowerCase();
     const ext = extOriginal || (mime === 'application/pdf' ? '.pdf' : (mime.includes('sheet') ? '.xlsx' : (mime.includes('excel') ? '.xls' : '.csv')));
-    const nombre = `lista-precios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+    const nombre = nombreAleatorioSeguro('lista-precios', ext);
     const destino = path.join(uploadsDir, 'tienda', nombre);
 
     await fs.writeFile(destino, req.file.buffer);
@@ -1876,11 +2781,10 @@ app.post('/api/uploads/lista-precios-archivo', upload.single('archivo'), async (
   }
 });
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-
 function validarAdmin(req, res) {
   const token = req.get("x-admin-token");
-  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+  if (!ADMIN_TOKEN || !compararSecretoSeguro(token, ADMIN_TOKEN)) {
+    void registrarEventoSeguridad('admin_token_invalid', {}, req, 'critical');
     res.status(401).json({ exito: false, mensaje: "No autorizado" });
     return false;
   }
@@ -1892,6 +2796,347 @@ function cerrarBase(db) {
     db.close(() => resolve());
   });
 }
+
+async function obtenerEstadoArchivosCriticos() {
+  const resultados = await Promise.all(DB_FILES.map(async (fileName) => {
+    const filePath = path.join(dbDir, fileName);
+    try {
+      const stat = await fs.stat(filePath);
+      return {
+        archivo: fileName,
+        existe: true,
+        tamano: stat.size,
+        actualizado_en: stat.mtime.toISOString()
+      };
+    } catch {
+      return {
+        archivo: fileName,
+        existe: false,
+        tamano: 0,
+        actualizado_en: ''
+      };
+    }
+  }));
+
+  return resultados;
+}
+
+function resumirEventosSeguridad(eventos = []) {
+  const porTipo = {};
+  const porNivel = {};
+
+  for (const evento of eventos) {
+    const tipo = String(evento?.tipo || 'security_event');
+    const nivel = String(evento?.nivel || 'warning');
+    porTipo[tipo] = (porTipo[tipo] || 0) + 1;
+    porNivel[nivel] = (porNivel[nivel] || 0) + 1;
+  }
+
+  return { porTipo, porNivel };
+}
+
+async function construirEstadoSeguridad(limitRecientes = 50) {
+  await depurarAgrupacionesSeguridad();
+  const retencion = await ejecutarRetencionAutomaticaSeguridad();
+  const recientesCombinados = recentSecurityEvents.concat(obtenerGruposSeguridadActivos());
+  const recientes = recientesCombinados.slice(-Math.max(1, Math.min(200, Number(limitRecientes) || 50)));
+  const archivos = await obtenerEstadoArchivosCriticos();
+  const logStats = await fs.stat(securityLogPath).catch(() => null);
+  const historialStats = await fs.stat(securityHistoryPath).catch(() => null);
+
+  return {
+    entorno: process.env.NODE_ENV || 'development',
+    uptime_segundos: Math.round(process.uptime()),
+    secretos: {
+      fuente: SECRET_SOURCE,
+      jwt_principal_fuerte: esSecretoFuerte(JWT_SECRET_SERVIDOR),
+      jwt_tienda_fuerte: esSecretoFuerte(TIENDA_JWT_SECRET_SERVIDOR),
+      admin_token_fuerte: esSecretoFuerte(ADMIN_TOKEN, 24)
+    },
+    webhook_alertas_configurado: Boolean(SECURITY_ALERT_WEBHOOK_URL),
+    webhook_min_level: SECURITY_ALERT_MIN_LEVEL,
+    cooldown_alerta_ms: SECURITY_ALERT_COOLDOWN_MS,
+    archivo_log_seguridad: {
+      existe: Boolean(logStats),
+      tamano: Number(logStats?.size || 0),
+      actualizado_en: logStats?.mtime ? logStats.mtime.toISOString() : ''
+    },
+    archivo_historial_seguridad: {
+      existe: Boolean(historialStats),
+      tamano: Number(historialStats?.size || 0),
+      actualizado_en: historialStats?.mtime ? historialStats.mtime.toISOString() : ''
+    },
+    archivos_criticos: archivos,
+    retencion_automatica: retencion,
+    agrupacion_eventos: {
+      ventana_ms: SECURITY_EVENT_GROUP_WINDOW_MS,
+      tipos: Array.from(SECURITY_EVENT_GROUP_TYPES),
+      grupos_activos: obtenerGruposSeguridadActivos().length
+    },
+    anomalias_ruta: {
+      umbral_por_ventana: SECURITY_ROUTE_FAIL_THRESHOLD,
+      ventana_ms: SECURITY_ROUTE_FAIL_WINDOW_MS,
+      cooldown_ms: SECURITY_ROUTE_FAIL_ALERT_COOLDOWN_MS
+    },
+    recientes,
+    resumen_recientes: resumirEventosSeguridad(recientes)
+  };
+}
+
+function tokenSeguroRotacion(bytes = 48) {
+  return crypto.randomBytes(Math.max(16, Number(bytes) || 48)).toString('base64url');
+}
+
+function construirPropuestaRotacionSecretos() {
+  const generadoEn = new Date().toISOString();
+  const secretos = {
+    JWT_SECRET: tokenSeguroRotacion(48),
+    TIENDA_JWT_SECRET: tokenSeguroRotacion(48),
+    ADMIN_TOKEN: tokenSeguroRotacion(36)
+  };
+
+  const lineasEnv = [
+    `# Generado en ${generadoEn}`,
+    '# Aplica primero en Render o en tu entorno seguro y despues reinicia el servicio.',
+    ...Object.entries(secretos).map(([clave, valor]) => `${clave}=${valor}`)
+  ];
+
+  return {
+    generado_en: generadoEn,
+    secretos,
+    lineas_env: lineasEnv,
+    instrucciones: [
+      'Actualiza las variables en Render o en tu entorno seguro.',
+      'Reinicia el backend despues de aplicar los nuevos valores.',
+      'Vuelve a iniciar sesion en el panel administrativo para usar los nuevos tokens.'
+    ]
+  };
+}
+
+async function construirLogsSeguridad(limit = 100) {
+  await depurarAgrupacionesSeguridad();
+  await ejecutarRetencionAutomaticaSeguridad();
+  const eventos = (await leerEventosSeguridad(limit))
+    .concat(obtenerGruposSeguridadActivos())
+    .filter(esEventoVisibleEnLogActivo);
+  return {
+    total: eventos.length,
+    resumen: resumirEventosSeguridad(eventos),
+    eventos
+  };
+}
+
+async function construirHistorialSeguridad(limit = 100) {
+  const eventos = await leerEventosSeguridadDesdeArchivo(securityHistoryPath, limit);
+  return {
+    total: eventos.length,
+    resumen: resumirEventosSeguridad(eventos),
+    eventos
+  };
+}
+
+async function ejecutarPruebasSeguridadActivas() {
+  const resultados = [];
+  const registrar = (nombre, ok, detalle = '') => {
+    resultados.push({ nombre, ok: Boolean(ok), detalle: String(detalle || '') });
+  };
+
+  registrar('JWT principal fuerte', esSecretoFuerte(JWT_SECRET_SERVIDOR), 'JWT_SECRET debe tener al menos 32 caracteres');
+  registrar('JWT tienda fuerte', esSecretoFuerte(TIENDA_JWT_SECRET_SERVIDOR), 'TIENDA_JWT_SECRET debe tener al menos 32 caracteres');
+  registrar('Admin token fuerte', esSecretoFuerte(ADMIN_TOKEN, 24), 'ADMIN_TOKEN debe tener al menos 24 caracteres');
+  registrar('Fuente de secretos segura', SECRET_SOURCE !== 'missing', SECRET_SOURCE === 'env' ? 'Variables de entorno activas' : 'Secretos locales persistentes generados');
+  registrar('Webhook de alertas configurado', Boolean(SECURITY_ALERT_WEBHOOK_URL), 'Sin webhook no hay notificaciones activas fuera del servidor');
+
+  const urlsPublicas = ['FRONTEND_URL', 'PUBLIC_APP_URL', 'APP_BASE_URL'];
+  for (const clave of urlsPublicas) {
+    const valor = String(process.env[clave] || '').trim();
+    registrar(`${clave} publica`, Boolean(valor) && !esUrlLocal(valor), valor ? valor : 'Falta configurar la URL pública');
+  }
+
+  const corsAllowed = String(process.env.CORS_ALLOWED_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean);
+  registrar('CORS_ALLOWED_ORIGINS configurado', corsAllowed.length > 0, corsAllowed.length ? `${corsAllowed.length} origen(es)` : 'Debes definir al menos un origen permitido');
+
+  const archivos = await obtenerEstadoArchivosCriticos();
+  registrar('Bases críticas presentes', archivos.every((item) => item.existe), `${archivos.filter((item) => !item.existe).map((item) => item.archivo).join(', ') || 'Todas presentes'}`);
+
+  try {
+    await fs.mkdir(path.dirname(securityLogPath), { recursive: true });
+    registrar('Ruta de log operativa', true, securityLogPath);
+  } catch (error) {
+    registrar('Ruta de log operativa', false, error?.message || 'No se pudo preparar el directorio de logs');
+  }
+
+  const fallos = resultados.filter((item) => !item.ok).length;
+  return {
+    ejecutado_en: new Date().toISOString(),
+    total: resultados.length,
+    exitosos: resultados.length - fallos,
+    fallos,
+    resultados
+  };
+}
+
+app.get('/api/health', async (_req, res) => {
+  const archivos = await obtenerEstadoArchivosCriticos();
+  const faltantes = archivos.filter((item) => !item.existe).map((item) => item.archivo);
+  const estado = faltantes.length ? 'degraded' : 'ok';
+  return res.status(estado === 'ok' ? 200 : 503).json({
+    ok: estado === 'ok',
+    estado,
+    entorno: process.env.NODE_ENV || 'development',
+    uptime_segundos: Math.round(process.uptime()),
+    hora_servidor: new Date().toISOString(),
+    webhook_alertas_configurado: Boolean(SECURITY_ALERT_WEBHOOK_URL),
+    archivos
+  });
+});
+
+app.get('/api/admin/security/estado', async (req, res) => {
+  if (!validarAdmin(req, res)) return;
+
+  return res.json({ exito: true, ...(await construirEstadoSeguridad(50)) });
+});
+
+app.get('/api/admin/security/logs', async (req, res) => {
+  if (!validarAdmin(req, res)) return;
+
+  const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
+  return res.json({ exito: true, ...(await construirLogsSeguridad(limit)) });
+});
+
+app.post('/api/admin/security/ping-alerta', async (req, res) => {
+  if (!validarAdmin(req, res)) return;
+  await registrarEventoSeguridad('manual_security_alert_test', {
+    origen: 'admin_endpoint'
+  }, req, 'critical');
+  return res.json({
+    exito: true,
+    mensaje: 'Alerta de prueba registrada'
+  });
+});
+
+app.get('/api/privado/security/estado', async (_req, res) => {
+  return res.json({ exito: true, ...(await construirEstadoSeguridad(50)) });
+});
+
+app.get('/api/privado/security/logs', async (req, res) => {
+  const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
+  return res.json({ exito: true, ...(await construirLogsSeguridad(limit)) });
+});
+
+app.get('/api/privado/security/logs/historial', async (req, res) => {
+  const limit = Math.max(1, Math.min(500, Number(req.query?.limit) || 100));
+  return res.json({ exito: true, ...(await construirHistorialSeguridad(limit)) });
+});
+
+app.post('/api/privado/security/ping-alerta', async (req, res) => {
+  await registrarEventoSeguridad('manual_security_alert_test', {
+    origen: 'frontend_security_dashboard',
+    usuario: String(req.usuario?.username || req.usuario?.id || '').slice(0, 80)
+  }, req, 'critical');
+
+  return res.json({
+    exito: true,
+    mensaje: 'Alerta de prueba registrada'
+  });
+});
+
+app.post('/api/privado/security/smoke', async (_req, res) => {
+  return res.json({
+    exito: true,
+    resultado: await ejecutarPruebasSeguridadActivas()
+  });
+});
+
+app.post('/api/privado/security/rotacion-secretos', async (req, res) => {
+  const propuesta = construirPropuestaRotacionSecretos();
+
+  await persistirEntradaSeguridadHistorial(construirEntradaSeguridad('manual_secret_rotation_preview', {
+    origen: 'frontend_security_dashboard',
+    usuario: String(req.usuario?.username || req.usuario?.id || '').slice(0, 80)
+  }, req, 'warning'));
+
+  return res.json({
+    exito: true,
+    propuesta
+  });
+});
+
+app.post('/api/privado/security/logs/archivar', async (req, res) => {
+  const filtros = req.body?.filtros && typeof req.body.filtros === 'object' ? req.body.filtros : {};
+  const resultado = await archivarEventosSeguridad(filtros);
+
+  await persistirEntradaSeguridadHistorial(construirEntradaSeguridad('manual_security_logs_archived', {
+    origen: 'frontend_security_dashboard',
+    usuario: String(req.usuario?.username || req.usuario?.id || '').slice(0, 80),
+    archivados: resultado.archivados,
+    filtros
+  }, req, 'warning'));
+
+  return res.json({
+    exito: true,
+    mensaje: resultado.archivados
+      ? `${resultado.archivados} eventos enviados a historial`
+      : 'No hubo eventos que coincidieran con el filtro actual',
+    resultado
+  });
+});
+
+app.post('/api/privado/security/logs/limpiar-recientes', async (req, res) => {
+  const filtros = req.body?.filtros && typeof req.body.filtros === 'object' ? req.body.filtros : {};
+  const resultado = limpiarEventosRecientesSeguridad(filtros);
+
+  await persistirEntradaSeguridadHistorial(construirEntradaSeguridad('manual_security_recent_cleared', {
+    origen: 'frontend_security_dashboard',
+    usuario: String(req.usuario?.username || req.usuario?.id || '').slice(0, 80),
+    eliminados: resultado.eliminados,
+    filtros
+  }, req, 'warning'));
+
+  return res.json({
+    exito: true,
+    mensaje: resultado.eliminados
+      ? `${resultado.eliminados} eventos recientes removidos de memoria`
+      : 'No hubo eventos recientes que coincidieran con el filtro actual',
+    resultado
+  });
+});
+
+app.get('/api/privado/security/auditoria-admin', async (req, res) => {
+  const limit = Math.max(1, Math.min(300, Number(req.query?.limit) || 80));
+  try {
+    const eventos = await listarAuditoriaAdmin(bdAdmin, limit);
+    return res.json({
+      exito: true,
+      total: eventos.length,
+      eventos
+    });
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo cargar la auditoría administrativa' });
+  }
+});
+
+app.get('/api/privado/security/bloqueos', async (req, res) => {
+  const limit = Math.max(1, Math.min(300, Number(req.query?.limit) || 50));
+  try {
+    const admin = listLoginProtectionEntries({ scope: 'admin-auth', limit });
+    const tienda = listLoginProtectionEntries({ scope: 'tienda-auth', limit });
+    const adminBloqueados = admin.filter((item) => item.blocked).length;
+    const tiendaBloqueados = tienda.filter((item) => item.blocked).length;
+    return res.json({
+      exito: true,
+      resumen: {
+        admin_bloqueados: adminBloqueados,
+        tienda_bloqueados: tiendaBloqueados,
+        total_bloqueados: adminBloqueados + tiendaBloqueados
+      },
+      admin,
+      tienda
+    });
+  } catch {
+    return res.status(500).json({ exito: false, mensaje: 'No se pudo cargar el estado de bloqueos' });
+  }
+});
 
 // Registrar rutas
 registrarRutasUsuarios(app, bdAdminAuth);
@@ -1907,6 +3152,7 @@ registrarRutasTienda(app, bdProduccionRutas, bdRecetasRutas, bdVentasRutas, bdIn
 // Rutas de backup
 app.post("/api/backup/crear", async (req, res) => {
   if (!validarAdmin(req, res)) return;
+  void registrarAuditoriaAdmin(bdAdmin, 'backup_crear', { ruta: '/api/backup/crear', metodo: 'POST' }, 'admin_token');
   const resultado = await crearBackup();
   res.json({ exito: resultado, mensaje: resultado ? "Backup creado exitosamente" : "Error al crear backup" });
 });
@@ -2000,7 +3246,16 @@ app.get("/api/backup/estado", async (req, res) => {
 
 app.post("/api/backup/restaurar", async (req, res) => {
   if (!validarAdmin(req, res)) return;
+  if (!exigirConfirmacionCritica(req, res, {
+    expected: FRASES_CONFIRMACION_CRITICA.backupRestaurar,
+    mensaje: 'Debes confirmar explícitamente la restauración del backup antes de continuar.'
+  })) return;
   const { timestamp } = req.body;
+  void registrarAuditoriaAdmin(bdAdmin, 'backup_restaurar', {
+    ruta: '/api/backup/restaurar',
+    metodo: 'POST',
+    timestamp: String(timestamp || '').slice(0, 80)
+  }, 'admin_token');
   const resultado = await restaurarBackup(timestamp);
   res.json({ exito: resultado, mensaje: resultado ? "Backup restaurado exitosamente" : "Error al restaurar backup" });
 });
@@ -2033,6 +3288,15 @@ app.post("/api/backup/importar", upload.fields([
   { name: 'admin', maxCount: 1 }
 ]), async (req, res) => {
   if (!validarAdmin(req, res)) return;
+  if (!exigirConfirmacionCritica(req, res, {
+    expected: FRASES_CONFIRMACION_CRITICA.backupImportar,
+    mensaje: 'Debes confirmar explícitamente la importación de bases antes de continuar.'
+  })) return;
+  void registrarAuditoriaAdmin(bdAdmin, 'backup_importar', {
+    ruta: '/api/backup/importar',
+    metodo: 'POST',
+    archivos: Object.keys(req.files || {}).join(',').slice(0, 180)
+  }, 'admin_token');
 
   const mapaArchivos = {
     inventario: path.join(dbDir, "inventario.db"),
@@ -2057,6 +3321,10 @@ app.post("/api/backup/importar", upload.fields([
     for (const [clave, rutaArchivo] of Object.entries(mapaArchivos)) {
       if (!req.files[clave]) continue;
       const archivo = req.files[clave][0];
+      const errorArchivo = validarArchivoBackup(archivo);
+      if (errorArchivo) {
+        return res.status(400).json({ exito: false, mensaje: `${clave}: ${errorArchivo}` });
+      }
       await fs.writeFile(rutaArchivo, archivo.buffer);
     }
 
@@ -2382,6 +3650,10 @@ app.get('/api/exportar/todo', async (req, res) => {
 
 // Importar respaldo completo (todas las tablas de todas las DBs).
 app.post('/api/importar/todo', async (req, res) => {
+  if (!exigirConfirmacionCritica(req, res, {
+    expected: FRASES_CONFIRMACION_CRITICA.importacionTodo,
+    mensaje: 'Debes confirmar explícitamente la importación TOTAL antes de continuar.'
+  })) return;
   const payload = req.body;
 
   const dbsEntrada = normalizarEntradaImportacionTodo(payload);

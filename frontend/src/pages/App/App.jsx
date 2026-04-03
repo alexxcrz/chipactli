@@ -17,13 +17,16 @@ import Recetas from '../Recetas/Recetas.jsx';
 import Produccion from '../Produccion/Produccion.jsx';
 import Ventas from '../Ventas/Ventas.jsx';
 import Tienda from '../Tienda/Tienda.jsx';
+import TiendaAnalisis from '../Tienda/TiendaAnalisis.jsx';
 import Utensilios from '../utensilios/Utensilios.jsx';
 import AdminUsuarios from '../admin-usuarios/AdminUsuarios.jsx';
+import AdminSeguridad from '../admin-seguridad/AdminSeguridad.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 import { mostrarModalCambiarPassword } from '../modal-cambiar-password.jsx';
-import { inicializarCierreModalConEsc } from '../../utils/modales.jsx';
+import { inicializarCierreModalConEsc, mostrarConfirmacion } from '../../utils/modales.jsx';
 import { conectarWebSocket, cerrarWebSocket } from '../../utils/websocket.jsx';
+import { CONFIRMACION_IMPORTAR_TODO, construirPayloadImportacionTodoConfirmado } from '../../utils/importar-exportar.jsx';
 
 let secuenciaCampoAuto = 0;
 
@@ -79,7 +82,8 @@ const MAPEO_PESTANA_PERMISO = {
   tienda: 'tienda',
   trastienda: 'trastienda',
   utensilios: 'utensilios',
-  'admin-usuarios': 'admin_usuarios'
+  'admin-usuarios': 'admin_usuarios',
+  'admin-seguridad': 'admin_usuarios'
 };
 
 const TITULOS_PAGINA = {
@@ -90,7 +94,8 @@ const TITULOS_PAGINA = {
   tienda: 'Chipactli - vitrina',
   trastienda: 'Chipactli - trastienda',
   utensilios: 'Chipactli - utensilios',
-  'admin-usuarios': 'Chipactli - admin usuarios'
+  'admin-usuarios': 'Chipactli - admin usuarios',
+  'admin-seguridad': 'Chipactli - seguridad'
 };
 
 const TITULO_PESTANA = 'Chipactli - Cosmética Sólida para tu Cuidado';
@@ -157,6 +162,18 @@ function obtenerUsuarioGuardado() {
   }
 }
 
+const ADMIN_COOKIE_SESSION_SENTINEL = '__cookie_admin__';
+
+function notificarCambioSesionInterna(token = '', usuario = null) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('chipactli:session-token', {
+    detail: {
+      token: String(token || ''),
+      usuario: usuario || null
+    }
+  }));
+}
+
 export default function App() {
   const [page, setPage] = useState('tienda');
   const [showAccesoSistema, setShowAccesoSistema] = useState(false);
@@ -168,8 +185,9 @@ export default function App() {
   const [showPendientes, setShowPendientes] = useState(false);
   const [showAlertas, setShowAlertas] = useState(false);
   const [mostrarBotonInicio, setMostrarBotonInicio] = useState(false);
-  const [token, setToken] = useState(localStorage.getItem('token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem('token') || '');
   const [currentUser, setCurrentUser] = useState(obtenerUsuarioGuardado());
+  const [sesionInternaValidada, setSesionInternaValidada] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -214,6 +232,7 @@ export default function App() {
   const escudoCapturaTimeoutRef = useRef(0);
 
   const isAuthenticated = Boolean(token && currentUser?.username);
+  const isAuthenticatedReady = isAuthenticated && sesionInternaValidada;
 
   const irAlInicio = useCallback(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -253,15 +272,18 @@ export default function App() {
     ventas: '#/ventas',
     trastienda: '#/trastienda',
     utensilios: '#/utensilios',
-    'admin-usuarios': '#/admin-usuarios'
+    'admin-usuarios': '#/admin-usuarios',
+    'admin-seguridad': '#/admin-seguridad'
   };
 
   const getPageFromLocation = () => {
     const pathname = String(window.location.pathname || '/').trim().toLowerCase();
+    if (pathname === '/metricas-analisis' || pathname.startsWith('/metricas-analisis/')) return 'metricas-analisis';
     if (pathname === '/vitrina' || pathname.startsWith('/vitrina/')) return 'tienda';
     if (pathname === '/tienda' || pathname.startsWith('/tienda/')) return 'tienda';
 
     const h = window.location.hash || '';
+    if (h.startsWith('#/metricas-analisis')) return 'metricas-analisis';
     if (h.startsWith('#/trastienda')) return 'trastienda';
     if (h.startsWith('#/vitrina')) return 'tienda';
     if (h.startsWith('#/tienda')) return 'tienda';
@@ -605,10 +627,12 @@ export default function App() {
         permisos: normalizarPermisos(loginRes.permisos, loginRes.rol || 'ceo')
       };
 
-      localStorage.setItem('token', loginRes.token);
+      localStorage.setItem('token', ADMIN_COOKIE_SESSION_SENTINEL);
       localStorage.setItem('usuario', JSON.stringify(usuario));
-      setToken(loginRes.token);
+      setToken(ADMIN_COOKIE_SESSION_SENTINEL);
+      setSesionInternaValidada(true);
       setCurrentUser(usuario);
+      notificarCambioSesionInterna(ADMIN_COOKIE_SESSION_SENTINEL, usuario);
       setShowAccesoSistema(false);
       setPage(getPageFromLocation());
 
@@ -670,17 +694,36 @@ export default function App() {
         rol: res.rol || 'usuario',
         permisos: normalizarPermisos(res.permisos, res.rol || 'usuario')
       };
-      localStorage.setItem('token', res.token);
+      localStorage.setItem('token', ADMIN_COOKIE_SESSION_SENTINEL);
       localStorage.setItem('usuario', JSON.stringify(usuario));
-      setToken(res.token);
+      setToken(ADMIN_COOKIE_SESSION_SENTINEL);
+      setSesionInternaValidada(true);
       setCurrentUser(usuario);
+      notificarCambioSesionInterna(ADMIN_COOKIE_SESSION_SENTINEL, usuario);
       setShowAccesoSistema(false);
       setLoginForm({ username: '', password: '' });
       setPage(getPageFromLocation());
 
       if (importacionTodoPendiente?.datos) {
         try {
-          const payloadImportacion = limpiarPayloadImportacionTodo(importacionTodoPendiente.datos);
+          let payloadImportacion = importacionTodoPendiente.datos;
+          if (!(payloadImportacion && typeof payloadImportacion === 'object' && payloadImportacion.confirmacion_accion === CONFIRMACION_IMPORTAR_TODO)) {
+            const confirmar = await mostrarConfirmacion(
+              'Hay una importación TOTAL pendiente. Esta operación reemplazará datos y configuración actuales.',
+              'Reanudar importación TOTAL'
+            );
+            if (!confirmar) {
+              setImportacionTodoPendiente(null);
+              return;
+            }
+            payloadImportacion = await construirPayloadImportacionTodoConfirmado(importacionTodoPendiente.datos);
+            if (!payloadImportacion) {
+              setImportacionTodoPendiente(null);
+              return;
+            }
+          } else {
+            payloadImportacion = limpiarPayloadImportacionTodo(payloadImportacion);
+          }
           await fetchAPIJSON('/api/importar/todo', {
             method: 'POST',
             body: payloadImportacion
@@ -731,11 +774,18 @@ export default function App() {
     }
   };
 
-  const cerrarSesion = useCallback(() => {
+  const cerrarSesion = useCallback(async () => {
+    try {
+      await fetchAPIJSON('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // No bloquear cierre local si el backend ya invalidó la cookie o no responde.
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('usuario');
     setToken('');
     setCurrentUser(null);
+    setSesionInternaValidada(false);
+    notificarCambioSesionInterna('', null);
     setShowAccesoSistema(false);
     setShowSidebar(false);
     setShowAlertas(false);
@@ -744,10 +794,41 @@ export default function App() {
   }, [navegarASeccion]);
 
   React.useEffect(() => {
+    let cancelado = false;
+
+    setSesionInternaValidada(false);
+    fetchAPIJSON('/api/auth/validar').then((res) => {
+      if (cancelado) return;
+      const usuarioNormalizado = normalizarUsuario(res?.usuario || currentUser);
+      localStorage.setItem('token', ADMIN_COOKIE_SESSION_SENTINEL);
+      localStorage.setItem('usuario', JSON.stringify(usuarioNormalizado));
+      setToken(ADMIN_COOKIE_SESSION_SENTINEL);
+      setCurrentUser(usuarioNormalizado);
+      setSesionInternaValidada(true);
+      notificarCambioSesionInterna(ADMIN_COOKIE_SESSION_SENTINEL, usuarioNormalizado);
+    }).catch(() => {
+      if (cancelado) return;
+      localStorage.removeItem('token');
+      if (currentUser?.username) {
+        localStorage.removeItem('usuario');
+        setCurrentUser(null);
+        setLoginError('Tu sesión expiró. Inicia sesión nuevamente.');
+      }
+      setToken('');
+      setSesionInternaValidada(true);
+    });
+
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
     const onAuthInvalid = (event) => {
       const mensaje = event?.detail?.mensaje || 'Tu sesión expiró. Inicia sesión nuevamente.';
-      cerrarSesion();
-      setLoginError(mensaje);
+      Promise.resolve(cerrarSesion()).finally(() => {
+        setLoginError(mensaje);
+      });
     };
 
     window.addEventListener('chipactli:auth-invalid', onAuthInvalid);
@@ -1009,14 +1090,14 @@ export default function App() {
   }, [isAuthenticated]);
 
   React.useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticatedReady) {
       setProveedoresPendientes({ visible: false, cargando: false, guardandoClave: '', pendientes: [], drafts: {} });
       setFichasProveedorPendientes({ visible: false, cargando: false, guardandoClave: '', pendientes: [], drafts: {} });
       return;
     }
     cargarProveedoresPendientes();
     cargarFichasProveedorPendientes();
-  }, [isAuthenticated, cargarProveedoresPendientes, cargarFichasProveedorPendientes]);
+  }, [isAuthenticatedReady, cargarProveedoresPendientes, cargarFichasProveedorPendientes]);
 
   // expose helpers to legacy code
   React.useEffect(() => {
@@ -1132,13 +1213,19 @@ export default function App() {
       key: 'administracion',
       label: 'Administración',
       items: [
-        { key: 'admin-usuarios', label: 'Admin Usuarios' }
+        { key: 'admin-usuarios', label: 'Admin Usuarios' },
+        { key: 'admin-seguridad', label: 'Seguridad' }
       ]
     }
   ];
 
   const canViewPage = (pageKey) => {
     if (!currentUser) return false;
+    if (pageKey === 'metricas-analisis') {
+      const permiso = MAPEO_PESTANA_PERMISO.trastienda;
+      if (currentUser.rol === 'ceo' || currentUser.rol === 'admin') return true;
+      return Boolean(currentUser.permisos?.[permiso]?.ver);
+    }
     const permiso = MAPEO_PESTANA_PERMISO[pageKey];
     if (!permiso) return false;
     if (currentUser.rol === 'ceo' || currentUser.rol === 'admin') return true;
@@ -1185,11 +1272,17 @@ export default function App() {
     case 'trastienda':
       pageContent = <Tienda modo="trastienda" />;
       break;
+    case 'metricas-analisis':
+      pageContent = <TiendaAnalisis />;
+      break;
     case 'utensilios':
       pageContent = <Utensilios />;
       break;
     case 'admin-usuarios':
       pageContent = <AdminUsuarios />;
+      break;
+    case 'admin-seguridad':
+      pageContent = <AdminSeguridad />;
       break;
     default:
       pageContent = null;
@@ -1486,6 +1579,17 @@ export default function App() {
     );
   }
 
+  if (page === 'metricas-analisis') {
+    return (
+      <div className="app" style={{ minHeight: '100vh', backgroundColor: '#eef3ef' }}>
+        <div className={escudoCapturaActivo ? 'escudoAntiCaptura activo' : 'escudoAntiCaptura'} aria-hidden={!escudoCapturaActivo}>
+          <span>Contenido protegido</span>
+        </div>
+        {pageContent}
+      </div>
+    );
+  }
+
   return (
     <div className="app" style={{ display: 'flex', minHeight: '100vh' }}>
       <div className={escudoCapturaActivo ? 'escudoAntiCaptura activo' : 'escudoAntiCaptura'} aria-hidden={!escudoCapturaActivo}>
@@ -1592,7 +1696,15 @@ export default function App() {
             <h3 id="tituloNotificacion"></h3>
             <button className="cerrarModal" onClick={() => cerrarNotificacion()}>&times;</button>
           </div>
-          <div id="mensajeNotificacion" className="cuerpoModal"></div>
+          <div className="cuerpoModal cuerpoModalNotificacion">
+            <p id="mensajeNotificacion" className="mensajeNotificacion"></p>
+            <p id="detalleNotificacion" className="detalleNotificacion" style={{ display: 'none' }}></p>
+            <textarea id="valorCopiableNotificacion" className="valorCopiableNotificacion" rows="3" readOnly style={{ display: 'none' }}></textarea>
+            <div className="accionesNotificacion">
+              <button id="btnCopiarNotificacion" type="button" className="boton" style={{ display: 'none' }}>Copiar</button>
+              <button id="btnCerrarNotificacion" type="button" className="boton botonDanger" onClick={() => cerrarNotificacion()}>Cerrar</button>
+            </div>
+          </div>
         </div>
       </div>
       <div id="fondoNotificacion" className="fondoNotificacion" onClick={() => cerrarNotificacion()} style={{ display: 'none' }}></div>
@@ -1605,6 +1717,11 @@ export default function App() {
           </div>
           <div className="cajaFormulario">
             <p id="textoConfirmacion" style={{ marginBottom: '16px' }}></p>
+            <div id="contenedorEntradaConfirmacion" className="contenedorEntradaConfirmacion" style={{ display: 'none' }}>
+              <p id="descripcionEntradaConfirmacion" className="descripcionEntradaConfirmacion" style={{ display: 'none' }}></p>
+              <label htmlFor="inputConfirmacion" id="labelEntradaConfirmacion">Escribe para continuar</label>
+              <input id="inputConfirmacion" type="text" autoComplete="off" />
+            </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button id="btnConfirmacionCancelar" type="button" className="boton">Cancelar</button>
               <button id="btnConfirmacionAceptar" type="button" className="boton botonDanger">Aceptar</button>

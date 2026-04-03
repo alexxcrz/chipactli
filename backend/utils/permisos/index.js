@@ -6,7 +6,7 @@ export const PERMISOS_DEFINICION = {
   tienda: ['ver'],
   trastienda: ['ver', 'editar', 'pedidos', 'clientes', 'puntos', 'catalogo', 'descuentos', 'cupones', 'config', 'metricas'],
   utensilios: ['ver', 'crear', 'editar', 'eliminar', 'recuperar', 'ver_historial', 'ver_estadisticas', 'exportar', 'importar'],
-  admin_usuarios: ['ver', 'crear', 'editar_usuario', 'editar_permisos', 'eliminar', 'reset_password']
+  admin_usuarios: ['ver', 'crear', 'editar_usuario', 'editar_permisos', 'eliminar', 'reset_password', 'seguridad']
 };
 
 export const PERMISOS_PESTANAS = Object.keys(PERMISOS_DEFINICION);

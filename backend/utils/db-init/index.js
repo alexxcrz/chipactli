@@ -1025,6 +1025,7 @@ export function inicializarBdAdmin(bdAdmin, bdInventario) {
       correo TEXT,
       rol TEXT DEFAULT 'usuario',
       permisos TEXT,
+      token_version INTEGER DEFAULT 0,
       debe_cambiar_password INTEGER DEFAULT 1,
       creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
       actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
@@ -1108,7 +1109,18 @@ export function inicializarBdAdmin(bdAdmin, bdInventario) {
       }
 
       if (!cols.some(col => col.name === "correo")) {
-        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN correo TEXT", [], () => continuar());
+        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN correo TEXT", [], () => {
+          if (!cols.some(col => col.name === "token_version")) {
+            bdAdmin.run("ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0", [], () => continuar());
+            return;
+          }
+          continuar();
+        });
+        return;
+      }
+
+      if (!cols.some(col => col.name === "token_version")) {
+        bdAdmin.run("ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0", [], () => continuar());
         return;
       }
 

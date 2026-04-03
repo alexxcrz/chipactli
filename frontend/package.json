@@ -6,6 +6,7 @@
   "scripts": {
     "guard:local": "node ../scripts/ensure-local-path.mjs",
     "dev": "npm run guard:local && vite",
+    "dev:safe": "npm run guard:local && node ../scripts/free-dev-ports.mjs 3000 && vite",
     "build": "npm run guard:local && vite build",
     "preview": "npm run guard:local && vite preview",
     "prepare-assets": "node scripts/copy-assets.js",

@@ -821,6 +821,16 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   box-shadow: 0 0 0 4px rgba(212, 165, 116, 0.28), 0 24px 70px rgba(0,0,0,0.35) !important;
 }
 
+.contenedorEntradaConfirmacion {
+  margin-bottom: 16px;
+}
+
+.descripcionEntradaConfirmacion {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: #5c5549;
+}
+
 .modalNotificacion.chipactli-modal-top {
   outline: 3px solid rgba(212, 165, 116, 0.95);
   outline-offset: 2px;
@@ -1289,68 +1299,94 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 .modalNotificacion {
   display: none;
   position: fixed;
-  right: 10px;
-  bottom: 10px;
+  inset: 0;
   z-index: 5600;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 0;
-  pointer-events: none;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
 }
 
 .modalNotificacion .contenidoModal {
-  width: min(340px, calc(100vw - 20px));
-  min-width: 220px;
+  width: min(560px, calc(100vw - 24px));
+  min-width: 280px;
   margin: 0;
-  border-radius: 12px;
+  border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
-  pointer-events: auto;
-  animation: toastIn 0.2s ease;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+  animation: slideInCenter 0.18s ease;
 }
 
-.modalNotificacion .encabezadoModal { display: none; }
+.modalNotificacion .encabezadoModal { display: flex; }
 
 @keyframes slideInCenter {
   from { transform: translateY(-12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
-@keyframes toastIn {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
 @keyframes toastOut {
   from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(6px); opacity: 0; }
+  to { transform: translateY(10px); opacity: 0; }
 }
 
 .modalNotificacion.toast-hiding .contenidoModal {
   animation: toastOut 0.16s ease forwards;
 }
 
+.modalNotificacion .cuerpoModalNotificacion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .modalNotificacion #mensajeNotificacion {
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 600;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-primary);
   text-align: left;
 }
 
+.modalNotificacion .detalleNotificacion {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.modalNotificacion .valorCopiableNotificacion {
+  width: 100%;
+  min-height: 86px;
+  padding: 12px 14px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 2px dashed rgba(42,0,0,0.12);
+  background: rgba(255,255,255,0.72);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.modalNotificacion .accionesNotificacion {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .modalNotificacion.exito .contenidoModal {
-  border-left: 4px solid #2e7d32;
-  background: #eef8ee;
+  border: 1px solid rgba(46,125,50,0.18);
+  background: linear-gradient(180deg, #f6fcf6 0%, #eef8ee 100%);
 }
 
 .modalNotificacion.error .contenidoModal {
-  border-left: 4px solid #c62828;
-  background: #fdeeee;
+  border: 1px solid rgba(198,40,40,0.16);
+  background: linear-gradient(180deg, #fff6f6 0%, #fdeeee 100%);
 }
 
 .modalNotificacion.advertencia .contenidoModal {
-  border-left: 4px solid #f9a825;
-  background: #fff9e8;
+  border: 1px solid rgba(249,168,37,0.18);
+  background: linear-gradient(180deg, #fffdf2 0%, #fff9e8 100%);
 }
 
 .modalNotificacion.exito h3 { color: var(--success); }
@@ -1370,7 +1406,7 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 }
 
 .fondoNotificacion {
-  display: none !important;
+  z-index: 5590;
 }
 
 .selectorPeriodo { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; width:100%; max-width:100%; }

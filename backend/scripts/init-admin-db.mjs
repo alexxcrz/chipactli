@@ -19,6 +19,7 @@ const createUsuariosSql = `CREATE TABLE IF NOT EXISTS usuarios (
   correo TEXT,
   rol TEXT DEFAULT 'usuario',
   permisos TEXT,
+  token_version INTEGER DEFAULT 0,
   debe_cambiar_password INTEGER DEFAULT 1,
   creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
   actualizado_en TEXT DEFAULT CURRENT_TIMESTAMP
@@ -131,6 +132,28 @@ adminDb.serialize(() => {
               closeAll();
               process.exit(1);
             }
+            if (!cols.some(col => col.name === 'token_version')) {
+              adminDb.run('ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0', [], (tokenVersionErr) => {
+                if (tokenVersionErr) {
+                  console.error('Error agregando columna token_version:', tokenVersionErr.message);
+                  closeAll();
+                  process.exit(1);
+                }
+                continuar();
+              });
+              return;
+            }
+            continuar();
+          });
+          return;
+        }
+        if (!cols.some(col => col.name === 'token_version')) {
+          adminDb.run('ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0', [], (tokenVersionErr) => {
+            if (tokenVersionErr) {
+              console.error('Error agregando columna token_version:', tokenVersionErr.message);
+              closeAll();
+              process.exit(1);
+            }
             continuar();
           });
           return;
@@ -144,6 +167,29 @@ adminDb.serialize(() => {
       adminDb.run('ALTER TABLE usuarios ADD COLUMN correo TEXT', [], (correoErr) => {
         if (correoErr) {
           console.error('Error agregando columna correo:', correoErr.message);
+          closeAll();
+          process.exit(1);
+        }
+        if (!cols.some(col => col.name === 'token_version')) {
+          adminDb.run('ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0', [], (tokenVersionErr) => {
+            if (tokenVersionErr) {
+              console.error('Error agregando columna token_version:', tokenVersionErr.message);
+              closeAll();
+              process.exit(1);
+            }
+            continuar();
+          });
+          return;
+        }
+        continuar();
+      });
+      return;
+    }
+
+    if (!cols.some(col => col.name === 'token_version')) {
+      adminDb.run('ALTER TABLE usuarios ADD COLUMN token_version INTEGER DEFAULT 0', [], (tokenVersionErr) => {
+        if (tokenVersionErr) {
+          console.error('Error agregando columna token_version:', tokenVersionErr.message);
           closeAll();
           process.exit(1);
         }

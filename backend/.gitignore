@@ -18,3 +18,5 @@ database.db
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/security/
+data/security/*.json

@@ -102,6 +102,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tiendaMetricasAcciones .botonSecundario {
+  background: #f3f8f5;
+  color: #2f4a3f;
+  border: 1px solid #ccd7d1;
 }
 
 .tiendaMetricasSubTabs {
@@ -179,11 +186,31 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+.tiendaMetricasResumenLayout {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.05fr) minmax(360px, 1.35fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.tiendaMetricasResumenColumna {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .tiendaMetricasBloque {
   border: 1px solid #d8e1dc;
   border-radius: 12px;
   background: #fff;
   padding: 10px 12px;
+}
+
+.tiendaMetricasBloqueHistorialCompacto {
+  min-width: 0;
+  max-height: 520px;
+  display: flex;
+  flex-direction: column;
 }
 
 .tiendaMetricasBloqueAncho {
@@ -194,6 +221,72 @@
   margin: 0 0 8px;
   font-size: 14px;
   color: #2d4f40;
+}
+
+.tiendaMetricasLista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tiendaMetricasLista li {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  column-gap: 14px;
+  padding-left: 18px;
+}
+
+.tiendaMetricasLista li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #1f3f32;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.tiendaMetricasLista li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.tiendaMetricasLista li strong {
+  justify-self: end;
+  text-align: right;
+  white-space: nowrap;
+  color: #1f3f32;
+}
+
+.tiendaMetricasListaHoras li strong {
+  min-width: 2ch;
+}
+
+.tiendaHistorialVisitasChart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tiendaHistorialVisitasFila {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.tiendaHistorialVisitasFila span {
+  color: #476457;
 }
 
 .tiendaMetricasHorasHeader {
@@ -245,6 +338,10 @@
 }
 
 @media (max-width: 700px) {
+  .tiendaMetricasResumenLayout {
+    grid-template-columns: 1fr;
+  }
+
   .tiendaVisitasActivas {
     flex-direction: column;
     align-items: flex-start;
@@ -257,6 +354,14 @@
   .tiendaMetricasSubTab {
     flex: 1;
     text-align: center;
+  }
+
+  .tiendaMetricasLista li {
+    column-gap: 10px;
+  }
+
+  .tiendaMetricasBloqueHistorialCompacto {
+    max-height: none;
   }
 
   .tiendaHistorialVisitasFila {
@@ -6217,11 +6322,13 @@
   border: 2px solid #2a2a2a;
   border-radius: 28px;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.22);
-  overflow: visible;
+  overflow: auto;
   position: relative;
   backdrop-filter: blur(3px);
   text-align: center;
   padding: 24px 22px;
+  max-height: min(720px, calc(100dvh - 20px));
+  -webkit-overflow-scrolling: touch;
 }
 
 .tiendaAuthHeader {
@@ -6314,7 +6421,7 @@
   background: #fff;
   box-shadow: none;
   padding: 11px 12px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .tiendaAuthModalLogin .tiendaAuth input:not([type='checkbox']):focus,
@@ -6335,6 +6442,50 @@
 .tiendaPreviewCorreoModal textarea:focus {
   border-color: #4a7c59;
   box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.16);
+}
+
+.tiendaAuthModalLogin .tiendaAuth .tiendaAuthInputError:not([type='checkbox']),
+.tiendaPerfilModalPro .tiendaAuthInputError:not([type='checkbox']) {
+  border-color: #c75550;
+  box-shadow: 0 0 0 3px rgba(199, 85, 80, 0.14);
+  background: #fff8f8;
+}
+
+.tiendaAuthModalShake {
+  animation: tiendaAuthShake 0.34s ease;
+}
+
+@keyframes tiendaAuthShake {
+  0% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+
+.tiendaAuthErrorMsg {
+  font-size: 12px;
+  color: #9f2f2a;
+  background: rgba(199, 85, 80, 0.12);
+  border: 1px solid rgba(199, 85, 80, 0.3);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.tiendaTurnstileWrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.tiendaTurnstileWrapRecuperacion {
+  margin-top: 10px;
+}
+
+.turnstileWidgetSlot {
+  min-height: 65px;
 }
 
 .tiendaRegistroPasos {
@@ -6372,6 +6523,15 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+}
+
+.tiendaAuthBotonError,
+.tiendaAuthBotonError:hover,
+.tiendaAuthBotonError:focus-visible {
+  background: #c75550;
+  border-color: #c75550;
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(199, 85, 80, 0.28);
 }
 
 .tiendaAuthRecuperarBtn,
@@ -6672,9 +6832,26 @@
     height: calc(100dvh - 96px) !important;
     overflow-y: auto;
     overflow-x: hidden;
-    overscroll-behavior-y: none;
+    overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCatalogo,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminPanel,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminForm,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminPanel * {
+    touch-action: pan-y;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminTabs,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminTabs *,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaMetricasSubTabs,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaMetricasSubTabs *,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCuponWizardPasos,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCuponWizardPasos * {
+    touch-action: pan-x;
   }
 
   .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCatalogo,
@@ -6682,6 +6859,22 @@
   .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminForm {
     touch-action: pan-y;
     overscroll-behavior-y: contain;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaGridAdminFull .tiendaCatalogo,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminPanel,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminForm,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaCatalogo.tarjeta {
+    min-height: auto;
+    max-height: none;
+    height: auto;
+    overflow: visible;
+  }
+
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaAdminListado,
+  .tiendaRootScroll.tiendaRootScrollAdminMovil .tiendaDescuentoExclusionLista {
+    max-height: none;
+    overflow: visible;
   }
 
   .tiendaGridAdminFull .tiendaCatalogo {
@@ -6735,6 +6928,19 @@
 }
 
 @media (max-width: 768px) {
+  .tiendaAuthModalLogin {
+    width: min(96vw, 430px);
+    max-height: calc(100dvh - 10px);
+    padding: 18px 16px;
+    border-radius: 20px;
+    margin: 0;
+  }
+
+  .tiendaTurnstileWrap {
+    transform: scale(0.94);
+    transform-origin: center top;
+  }
+
   .tiendaCuponesListaTabla {
     grid-template-columns: 1fr;
   }
@@ -6783,6 +6989,12 @@
 }
 
 @media (max-width: 480px) {
+  .tiendaAuthModalLogin {
+    width: calc(100vw - 8px);
+    max-height: calc(100dvh - 8px);
+    padding: 16px 14px;
+  }
+
   .tiendaHeaderAcciones {
     gap: 4px;
   }

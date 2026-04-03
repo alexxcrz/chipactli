@@ -1,0 +1,474 @@
+.tiendaAnalisisPantalla {
+  min-height: 100vh;
+  padding: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(127, 174, 149, 0.22), transparent 28%),
+    linear-gradient(180deg, #f5f9f6 0%, #edf3ef 100%);
+  color: #183228;
+}
+
+.tiendaAnalisisHero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(74, 124, 89, 0.18);
+  box-shadow: 0 24px 60px rgba(63, 96, 77, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.tiendaAnalisisHero h1 {
+  margin: 6px 0 10px;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1;
+}
+
+.tiendaAnalisisHero p {
+  margin: 0;
+  max-width: 760px;
+  color: #466457;
+  line-height: 1.6;
+}
+
+.tiendaAnalisisEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #e2efe7;
+  color: #2b5844;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tiendaAnalisisHeroAcciones {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tiendaAnalisisHeroAcciones label,
+.tiendaAnalisisComparadorControles label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #3c5d4d;
+}
+
+.tiendaAnalisisHeroAcciones input,
+.tiendaAnalisisComparadorControles select {
+  min-width: 180px;
+  border: 1px solid #c9d9cf;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #183228;
+}
+
+.botonSecundario {
+  background: #f4f8f5;
+  color: #274d3b;
+  border: 1px solid #c8d7ce;
+}
+
+.tiendaAnalisisTabs {
+  display: inline-flex;
+  gap: 6px;
+  margin: 18px 0;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(74, 124, 89, 0.12);
+}
+
+.tiendaAnalisisTabs button {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #365246;
+  padding: 10px 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tiendaAnalisisTabs button.activa {
+  background: #2f6a4a;
+  color: #fff;
+}
+
+.tiendaAnalisisResumen,
+.tiendaAnalisisGrid,
+.tiendaAnalisisComparadorMetricas,
+.tiendaAnalisisComparadorTablas,
+.tiendaAnalisisComparadorRangos {
+  display: grid;
+  gap: 14px;
+}
+
+.tiendaAnalisisResumen {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 18px;
+}
+
+.tiendaAnalisisKpi,
+.tiendaAnalisisCard,
+.tiendaAnalisisComparadorCard,
+.tiendaAnalisisComparadorRangos article {
+  border-radius: 20px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(74, 124, 89, 0.12);
+  box-shadow: 0 12px 36px rgba(50, 81, 64, 0.07);
+}
+
+.tiendaAnalisisKpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaAnalisisKpi span,
+.tiendaAnalisisCardHead span,
+.tiendaAnalisisKpi small,
+.tiendaAnalisisComparadorRangos small,
+.tiendaAnalisisComparadorCard small {
+  color: #557364;
+}
+
+.tiendaAnalisisKpi strong,
+.tiendaAnalisisComparadorCard strong {
+  font-size: clamp(20px, 3vw, 32px);
+  line-height: 1.05;
+}
+
+.tiendaAnalisisGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tiendaAnalisisCardAncha {
+  grid-column: 1 / -1;
+}
+
+.tiendaAnalisisCardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.tiendaAnalisisCardHead h2,
+.tiendaAnalisisModalHead h2,
+.tiendaAnalisisComparadorTablas h3 {
+  margin: 0;
+}
+
+.tiendaAnalisisChartLista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 440px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.tiendaAnalisisChartLista.compacta {
+  max-height: 360px;
+}
+
+.tiendaAnalisisChartFila {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 44px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.tiendaAnalisisChartBarraWrap {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e7efea;
+}
+
+.tiendaAnalisisChartBarra {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #89b49a 0%, #4c8763 100%);
+}
+
+.tiendaAnalisisListaTop {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tiendaAnalisisListaTop li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 12px;
+  align-items: start;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #edf3ef;
+}
+
+.tiendaAnalisisListaTop li:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.tiendaAnalisisListaTop span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tiendaAnalisisListaTop strong,
+.tiendaAnalisisChartFila strong {
+  text-align: right;
+  color: #1f3f32;
+}
+
+.tiendaAnalisisNarrativa {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #365246;
+  line-height: 1.6;
+}
+
+.tiendaAnalisisModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 28, 20, 0.46);
+  backdrop-filter: blur(6px);
+}
+
+.tiendaAnalisisModal {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border-radius: 24px;
+  padding: 18px;
+  background: #f9fcfa;
+  box-shadow: 0 30px 70px rgba(16, 35, 26, 0.22);
+}
+
+.tiendaAnalisisModal .tiendaAnalisisEyebrow {
+  padding: 5px 11px;
+  font-size: 11px;
+}
+
+.tiendaAnalisisModalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.tiendaAnalisisModalHead h2 {
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.tiendaAnalisisModalHead .cerrarModal {
+  border: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: #e8f1eb;
+  color: #274d3b;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tiendaAnalisisComparadorControles {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorControles label {
+  font-size: 11px;
+  gap: 5px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorControles select,
+.tiendaAnalisisModal .tiendaAnalisisComparadorFechasGrupo input {
+  font-size: 13px;
+  padding: 9px 11px;
+}
+
+.tiendaAnalisisComparadorFechas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+  flex: 1 1 520px;
+}
+
+.tiendaAnalisisComparadorFechasGrupo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: #f2f7f4;
+  border: 1px solid #d6e3dc;
+}
+
+.tiendaAnalisisComparadorFechasGrupo strong {
+  grid-column: 1 / -1;
+  font-size: 14px;
+  color: #214233;
+}
+
+.tiendaAnalisisComparadorFechasGrupo input {
+  width: 100%;
+  border: 1px solid #c9d9cf;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #183228;
+}
+
+.tiendaAnalisisComparadorRangos,
+.tiendaAnalisisComparadorMetricas,
+.tiendaAnalisisComparadorTablas {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorRangos,
+.tiendaAnalisisModal .tiendaAnalisisComparadorMetricas,
+.tiendaAnalisisModal .tiendaAnalisisComparadorTablas {
+  gap: 10px;
+}
+
+.tiendaAnalisisComparadorCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorCard,
+.tiendaAnalisisModal .tiendaAnalisisComparadorRangos article {
+  padding: 14px;
+  border-radius: 18px;
+}
+
+.tiendaAnalisisComparadorRangos article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tiendaAnalisisComparadorRangos article strong {
+  font-size: 16px;
+  line-height: 1.35;
+  color: #1c3b2e;
+  font-weight: 700;
+}
+
+.tiendaAnalisisComparadorRangos article small {
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorCard span,
+.tiendaAnalisisModal .tiendaAnalisisComparadorRangos article span,
+.tiendaAnalisisModal .tiendaAnalisisComparadorCard small,
+.tiendaAnalisisModal .tiendaAnalisisComparadorRangos article small,
+.tiendaAnalisisModal .tiendaAnalisisComparadorTablas h3,
+.tiendaAnalisisModal .tiendaAnalisisListaTop li {
+  font-size: 13px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorCard strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisComparadorCard em {
+  font-size: 13px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisListaTop {
+  gap: 8px;
+}
+
+.tiendaAnalisisModal .tiendaAnalisisListaTop li {
+  padding-bottom: 8px;
+  gap: 10px;
+}
+
+.tiendaAnalisisComparadorCard em {
+  font-style: normal;
+  font-weight: 800;
+}
+
+.tiendaAnalisisComparadorCard em.positivo {
+  color: #217148;
+}
+
+.tiendaAnalisisComparadorCard em.negativo {
+  color: #b04b4b;
+}
+
+.tiendaAnalisisComparadorCard em.neutro {
+  color: #6a7f73;
+}
+
+.tiendaAnalisisError,
+.tiendaAnalisisVacio {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fff4e8;
+  border: 1px solid #efcfaa;
+  color: #8a5a1d;
+}
+
+@media (max-width: 900px) {
+  .tiendaAnalisisPantalla {
+    padding: 16px;
+  }
+
+  .tiendaAnalisisHero,
+  .tiendaAnalisisGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAnalisisHero {
+    flex-direction: column;
+  }
+
+  .tiendaAnalisisChartFila {
+    grid-template-columns: 88px minmax(0, 1fr) 40px;
+  }
+
+  .tiendaAnalisisComparadorFechas {
+    grid-template-columns: 1fr;
+  }
+
+  .tiendaAnalisisComparadorFechasGrupo {
+    grid-template-columns: 1fr;
+  }
+}

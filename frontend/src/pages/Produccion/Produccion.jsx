@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './Produccion.css';
 import { mostrarNotificacion } from '../../utils/notificaciones.jsx';
-import { abrirModal, cerrarModal } from '../../utils/modales.jsx';
+import { abrirModal, cerrarModal, mostrarConfirmacion, solicitarTextoModal } from '../../utils/modales.jsx';
 import { fetchAPIJSON } from '../../utils/api.jsx';
 import { normalizarTextoBusqueda } from '../../utils/texto.jsx';
 
@@ -19,9 +19,32 @@ function formatearMoneda(valor) {
   return `$${Number(valor || 0).toFixed(2)}`;
 }
 
+async function confirmarAccionCriticaProduccion({ titulo = 'Confirmar acción', mensaje = '', frase = '' } = {}) {
+  const confirmado = await mostrarConfirmacion(mensaje || 'Confirma esta acción para continuar.', titulo);
+  if (!confirmado) return false;
+  if (!frase) return true;
+
+  const entrada = await solicitarTextoModal({
+    titulo,
+    mensaje,
+    descripcion: `Escribe exactamente ${frase} para continuar.`,
+    etiqueta: 'Frase de confirmación',
+    placeholder: frase,
+    aceptarLabel: 'Continuar'
+  });
+  if (entrada === null) return false;
+  if (String(entrada || '').trim().toUpperCase() !== String(frase || '').trim().toUpperCase()) {
+    mostrarNotificacion('Acción cancelada: la frase de confirmación no coincide.', 'advertencia');
+    return false;
+  }
+
+  return true;
+}
+
 export default function Produccion() {
   const [produccionData, setProduccionData] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroDisponibilidad, setFiltroDisponibilidad] = useState('todos');
   const [mostrarTarjetasStats, setMostrarTarjetasStats] = useState(false);
   const [modalHistorialAbierto, setModalHistorialAbierto] = useState(false);
   const [historialData, setHistorialData] = useState({ produccion: [], ventasCortesias: [] });
@@ -156,6 +179,14 @@ export default function Produccion() {
     const receta = modalEliminar?.receta;
     const total = Number(receta?.piezas_producidas || 0);
     if (!receta || total <= 0) return;
+
+    const confirmado = await confirmarAccionCriticaProduccion({
+      titulo: 'Eliminar toda la producción',
+      mensaje: `Vas a eliminar toda la producción disponible de ${String(receta?.nombre_receta || '').trim() || 'esta receta'}.`,
+      frase: 'ELIMINAR TODO'
+    });
+    if (!confirmado) return;
+
     await ejecutarEliminacion(receta, total);
   }
 
@@ -163,6 +194,14 @@ export default function Produccion() {
     const receta = modalEliminar?.receta;
     const cantidad = Number(modalEliminar?.cantidad || 0);
     if (!receta) return;
+
+    const confirmado = await confirmarAccionCriticaProduccion({
+      titulo: 'Eliminar cantidad de producción',
+      mensaje: `Vas a eliminar ${Number.isFinite(cantidad) ? cantidad : 0} pieza(s) de ${String(receta?.nombre_receta || '').trim() || 'esta receta'}.`,
+      frase: 'ELIMINAR CANTIDAD'
+    });
+    if (!confirmado) return;
+
     await ejecutarEliminacion(receta, cantidad);
   }
 
@@ -383,9 +422,27 @@ export default function Produccion() {
     return (Array.isArray(produccionData) ? produccionData : []).filter((item) => {
       const nombre = normalizarTextoBusqueda(item?.nombre_receta || '');
       const categoria = normalizarTextoBusqueda(item?.categoria || '');
-      return !term || nombre.includes(term) || categoria.includes(term);
+      const disponibles = Number(item?.piezas_disponibles || 0);
+      const coincideBusqueda = !term || nombre.includes(term) || categoria.includes(term);
+      const coincideFiltro = filtroDisponibilidad === 'disponibles'
+        ? disponibles > 0
+        : (filtroDisponibilidad === 'cero' ? disponibles <= 0 : true);
+      return coincideBusqueda && coincideFiltro;
     });
-  }, [produccionData, busqueda]);
+  }, [produccionData, busqueda, filtroDisponibilidad]);
+
+  const resumenDisponibilidad = useMemo(() => {
+    return (Array.isArray(produccionData) ? produccionData : []).reduce((acc, receta) => {
+      const disponibles = Number(receta?.piezas_disponibles || 0);
+      acc.todos += 1;
+      if (disponibles > 0) {
+        acc.disponibles += 1;
+      } else {
+        acc.cero += 1;
+      }
+      return acc;
+    }, { todos: 0, disponibles: 0, cero: 0 });
+  }, [produccionData]);
 
   const estadisticasGenerales = useMemo(() => {
     const base = {
@@ -427,7 +484,7 @@ export default function Produccion() {
       <div className="tarjeta">
         <div className="encabezadoTarjeta">
           <h2>Registro de Producción</h2>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div className="produccionControlesEncabezado">
             <button
               type="button"
               className={`boton botonHojitaProduccion ${mostrarTarjetasStats ? 'activo' : ''}`}
@@ -437,6 +494,29 @@ export default function Produccion() {
               <span className="iconoHojitaProduccion">🍃</span>
               {mostrarTarjetasStats ? 'Ocultar tarjetas' : 'Mostrar tarjetas'}
             </button>
+            <div className="produccionFiltrosRapidos" role="group" aria-label="Filtros de disponibilidad">
+              <button
+                type="button"
+                className={`chipFiltroProduccion${filtroDisponibilidad === 'todos' ? ' activo' : ''}`}
+                onClick={() => setFiltroDisponibilidad('todos')}
+              >
+                Todas ({resumenDisponibilidad.todos})
+              </button>
+              <button
+                type="button"
+                className={`chipFiltroProduccion${filtroDisponibilidad === 'disponibles' ? ' activo' : ''}`}
+                onClick={() => setFiltroDisponibilidad('disponibles')}
+              >
+                Disponibles ({resumenDisponibilidad.disponibles})
+              </button>
+              <button
+                type="button"
+                className={`chipFiltroProduccion${filtroDisponibilidad === 'cero' ? ' activo' : ''}`}
+                onClick={() => setFiltroDisponibilidad('cero')}
+              >
+                En 0 ({resumenDisponibilidad.cero})
+              </button>
+            </div>
             <input
               type="text"
               className="cajaBusqueda"
@@ -470,7 +550,7 @@ export default function Produccion() {
 
         <div className="produccionCardsGrid">
           {!recetasFiltradas.length ? (
-            <div className="produccionCardVacia">No hay recetas que coincidan con la búsqueda.</div>
+            <div className="produccionCardVacia">No hay recetas que coincidan con la búsqueda o el filtro seleccionado.</div>
           ) : (
             recetasFiltradas.map((receta) => {
               const idReceta = Number(receta?.id_receta || 0);
@@ -485,15 +565,19 @@ export default function Produccion() {
               const costoTotalPiezasProducidas = historialActivo.reduce((acc, lote) => acc + (Number(lote?.costo_produccion || 0)), 0);
               const costoPorPiezaProducida = piezasProducidas > 0 ? (costoTotalPiezasProducidas / piezasProducidas) : 0;
               const loteVenta = receta?.lote_venta || null;
+              const claseDisponibles = piezasDisponibles > 0
+                ? 'estadoDisponiblesPositivo'
+                : (piezasDisponibles < 0 ? 'estadoDisponiblesNegativo' : 'estadoDisponiblesCero');
+              const claseTarjeta = piezasDisponibles < 0 ? 'produccionCard produccionCardNegativa' : 'produccionCard';
 
               return (
-                <article className="produccionCard" key={idReceta}>
+                <article className={claseTarjeta} key={idReceta}>
                   <header className="produccionCardHeader">
                     <div>
                       <h3>{nombreReceta || 'Receta sin nombre'}</h3>
                       <p>{categoria || 'Sin categoría'}{gramaje > 0 ? ` • ${gramaje}g` : ''}</p>
                     </div>
-                    <span className="badgeDisponibles">Disponibles: {piezasDisponibles.toFixed(2)}</span>
+                    <span className={`badgeDisponibles ${claseDisponibles}`}>Disponibles: {piezasDisponibles.toFixed(2)}</span>
                   </header>
 
                   <div className="produccionCardStats">

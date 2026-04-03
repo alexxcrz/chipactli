@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
 
@@ -19,6 +19,8 @@ export default function TurnstileWidget({
   const onVerifyRef = useRef(onVerify);
   const onExpireRef = useRef(onExpire);
   const onErrorRef = useRef(onError);
+  const [estadoWidget, setEstadoWidget] = useState('idle');
+  const [intentoRender, setIntentoRender] = useState(0);
 
   useEffect(() => {
     onVerifyRef.current = onVerify;
@@ -36,6 +38,7 @@ export default function TurnstileWidget({
     if (!TURNSTILE_SITE_KEY || !containerRef.current || typeof window === 'undefined') return undefined;
 
     let cancelled = false;
+    setEstadoWidget('idle');
 
     function renderizar() {
       if (cancelled || !containerRef.current || !window.turnstile?.render) return;
@@ -45,13 +48,23 @@ export default function TurnstileWidget({
         action,
         theme,
         size,
+        retry: 'never',
+        'refresh-expired': 'manual',
+        'refresh-timeout': 'manual',
         callback: (token) => {
+          setEstadoWidget('verified');
           if (typeof onVerifyRef.current === 'function') onVerifyRef.current(String(token || ''));
         },
         'expired-callback': () => {
+          setEstadoWidget('expired');
           if (typeof onExpireRef.current === 'function') onExpireRef.current();
         },
         'error-callback': () => {
+          setEstadoWidget('error');
+          if (typeof onErrorRef.current === 'function') onErrorRef.current();
+        },
+        'unsupported-callback': () => {
+          setEstadoWidget('error');
           if (typeof onErrorRef.current === 'function') onErrorRef.current();
         }
       });
@@ -83,9 +96,32 @@ export default function TurnstileWidget({
         widgetIdRef.current = null;
       }
     };
-  }, [action, size, theme]);
+  }, [action, size, theme, intentoRender]);
 
   if (!TURNSTILE_SITE_KEY) return null;
 
-  return <div ref={containerRef} className="turnstileWidgetSlot" />;
+  return (
+    <div>
+      <div ref={containerRef} className="turnstileWidgetSlot" />
+      {(estadoWidget === 'error' || estadoWidget === 'expired') && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <span style={{ fontSize: 13, color: '#7a2f2f' }}>
+            {estadoWidget === 'expired'
+              ? 'La verificación expiró. Intenta nuevamente.'
+              : 'La verificación no se pudo completar. Intenta nuevamente.'}
+          </span>
+          <button
+            type="button"
+            className="botonPequeno"
+            onClick={() => {
+              setEstadoWidget('idle');
+              setIntentoRender((prev) => prev + 1);
+            }}
+          >
+            Reintentar verificación
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }

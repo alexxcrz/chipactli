@@ -1304,8 +1304,10 @@ function Tienda({
 
   useEffect(() => {
     let cancelado = false;
+    const requiereValidacionInterna = Boolean(tokenInterno)
+      && (tokenPareceJwt(tokenInterno) || esVistaTrastienda || vistaActiva === 'trastienda');
 
-    if (!tokenInterno) {
+    if (!tokenInterno || !requiereValidacionInterna) {
       setSesionInternaValidada(false);
       return undefined;
     }
@@ -1334,7 +1336,7 @@ function Tienda({
     return () => {
       cancelado = true;
     };
-  }, [tokenInterno]);
+  }, [esVistaTrastienda, tokenInterno, vistaActiva]);
 
   const esRolInternoTotal = useMemo(() => {
     const rol = String(usuarioInterno?.rol || '').trim().toLowerCase();

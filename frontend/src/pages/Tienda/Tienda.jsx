@@ -10518,7 +10518,7 @@ function Tienda({
                     aria-invalid={errorAuthCliente ? 'true' : 'false'}
                     required
                   />
-                  {TURNSTILE_PUBLIC_AUTH_ENABLED && (
+                  {TURNSTILE_PUBLIC_AUTH_ENABLED && !mostrarPanelRecuperarCliente && (
                     <div className="tiendaTurnstileWrap">
                       <TurnstileWidget
                         key={`auth-${modoAuth}-${clienteTurnstileResetKey}`}

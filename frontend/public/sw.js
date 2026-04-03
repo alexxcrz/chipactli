@@ -6,10 +6,6 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener('fetch', () => {
-  // No-op service worker placeholder
-});
-
 self.addEventListener('push', (event) => {
   const data = (() => {
     try {

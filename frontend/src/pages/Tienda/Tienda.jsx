@@ -1745,26 +1745,8 @@ function Tienda({
 
       cargandoUbicacionVisitanteRef.current = true;
       try {
-        const resp = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        const ubicacion = {
-          pais: String(data?.country_name || data?.country || '').trim(),
-          region: String(data?.region || data?.region_code || '').trim(),
-          ciudad: String(data?.city || '').trim()
-        };
-        if (ubicacion.pais || ubicacion.region || ubicacion.ciudad) {
-          ubicacionVisitanteRef.current = ubicacion;
-          try {
-            sessionStorage.setItem('chipactli:geo-visita', JSON.stringify({
-              ...ubicacion,
-              expiracion: Date.now() + (6 * 60 * 60 * 1000)
-            }));
-          } catch {
-            // Ignorar errores de almacenamiento.
-          }
-          return ubicacion;
-        }
+        // La geolocalización ya se resuelve en backend a partir de la IP real.
+        // Aquí solo reutilizamos cache local si existe para evitar dependencias CORS de terceros.
         return null;
       } catch {
         return null;

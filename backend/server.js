@@ -262,6 +262,7 @@ app.use(helmet({
         }
       }
     : false,
+  permissionsPolicy: false,
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   hsts: esProduccion ? undefined : false,

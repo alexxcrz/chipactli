@@ -115,16 +115,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 16px;
 }
 
 .contenidoModalAdminUsuarios {
   width: min(700px, 92vw);
-  max-height: 82vh;
+  max-height: 90vh;
   overflow: hidden;
   background: var(--card-bg);
   border: 2px solid #2a2a2a;
-  border-radius: 22px;
+  border-radius: 30px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.25);
   display: flex;
   flex-direction: column;
@@ -136,13 +136,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 20px;
   border-bottom: 2px solid #2a2a2a;
 }
 
 .encabezadoModalAdminUsuarios h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 800;
 }
 
@@ -156,27 +156,38 @@
 }
 
 .tabsModalAdminUsuarios button {
-  border: 1px solid #2a2a2a;
+  border: 2px solid #2a2a2a;
   border-radius: 14px;
-  background: #f6f2eb;
-  padding: 6px 10px;
+  background: var(--card-bg);
+  color: var(--primary);
+  padding: 6px 12px;
   cursor: pointer;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
+  transition: all 0.25s;
+}
+
+.tabsModalAdminUsuarios button:hover {
+  background: var(--primary);
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(74,124,89,0.22);
+  border-color: var(--primary);
 }
 
 .tabsModalAdminUsuarios .tabActiva {
-  background: #4a7c59;
+  background: var(--primary);
   color: #fff;
+  border-color: var(--primary);
 }
 
 .tabPanelAdminUsuarios {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 16px;
   overflow-y: auto;
-  max-height: calc(82vh - 126px);
+  max-height: calc(90vh - 152px);
 }
 
 .tabPanelAdminUsuarios label {
@@ -322,6 +333,7 @@
 
 .botonWarning {
   background: #d9a441;
+  border-color: #d9a441;
   color: #1f1a10;
 }
 
@@ -331,13 +343,21 @@
 }
 
 .botonSecundario {
-  border: 1px solid #8b7b5a;
+  border: 2px solid #8b7b5a;
   background: #f2ead8;
   color: #3b3528;
-  border-radius: 12px;
-  padding: 9px 12px;
+  border-radius: 14px;
+  padding: 8px 12px;
   font-weight: 700;
   cursor: pointer;
+  transition: all 0.25s;
+}
+
+.botonSecundario:hover:not(:disabled) {
+  background: #8b7b5a;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(139,123,90,0.24);
 }
 
 .botonSecundario:disabled {
@@ -370,6 +390,17 @@
 @media (max-width: 768px) {
   .modalAdminUsuarios {
     padding: 8px;
+  }
+
+  .tablaUsuariosAdmin td:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 220px;
+  }
+
+  .tablaUsuariosAdmin td:last-child .botonPequeno {
+    margin: 0;
   }
 
   .contenidoModalAdminUsuarios {

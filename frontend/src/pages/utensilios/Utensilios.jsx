@@ -127,7 +127,7 @@ export default function Utensilios({ mostrarTarjetasStats = false }) {
         </div>
 
         <div id="modalHistorialAgregadoUtensilios" className="modal" onClick={() => cerrarModal('modalHistorialAgregadoUtensilios')}>
-          <div className="contenidoModal" style={{ maxWidth: '980px' }} onClick={e => e.stopPropagation()}>
+          <div className="contenidoModal modalAncho980" onClick={e => e.stopPropagation()}>
             <div className="encabezadoModal"><h3>Historial agrupado de utensilios</h3><button className="cerrarModal" onClick={() => cerrarModal('modalHistorialAgregadoUtensilios')}>&times;</button></div>
             <div id="listaHistorialAgregadoUtensilios" style={{ maxHeight: '65vh', overflowY: 'auto' }}></div>
           </div>

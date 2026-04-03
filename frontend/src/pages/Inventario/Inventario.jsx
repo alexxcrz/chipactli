@@ -2216,7 +2216,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalPendientesInventario" className="modal" onClick={() => cerrarModalPendientesInventario()}>
-        <div className="contenidoModal" style={{ maxWidth: '900px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho900" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Insumos pendientes</h3>
             <button className="cerrarModal" onClick={() => cerrarModalPendientesInventario()}>&times;</button>
@@ -2240,14 +2240,14 @@ export default function Inventario() {
       </div>
 
       <div id="modalHistorialInv" className="modal" onClick={() => cerrarModal('modalHistorialInv')}>
-        <div className="contenidoModal" style={{ maxWidth: '1000px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho1000" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal"><h3>Historial de Inversión por Fecha</h3><button className="cerrarModal" onClick={() => cerrarModal('modalHistorialInv')}>&times;</button></div>
           <div id="listaHistorialPorFecha" style={{ maxHeight: '65vh', overflowY: 'auto', padding: '10px' }}></div>
         </div>
       </div>
 
       <div id="modalProveedoresInventario" className="modal" style={{ zIndex: 3600 }} onClick={() => cerrarModal('modalProveedoresInventario')}>
-        <div className="contenidoModal" style={{ maxWidth: '820px', marginTop: '70px', maxHeight: 'calc(100vh - 90px)', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho820 modalConOffsetSuperior" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal"><h3>Proveedor</h3><button className="cerrarModal" onClick={() => cerrarModal('modalProveedoresInventario')}>&times;</button></div>
           <div className="cajaFormulario">
             <form id="formProveedorInventario" onSubmit={guardarProveedor} className="cajaFormulario" style={{ marginBottom: 0 }}>
@@ -2278,7 +2278,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalReasignarProveedorInventario" className="modal" onClick={() => cerrarModalReasignacionProveedor()}>
-        <div className="contenidoModal" style={{ maxWidth: '700px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho700" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Reasignar insumos del proveedor</h3>
             <button className="cerrarModal" onClick={() => cerrarModalReasignacionProveedor()}>&times;</button>
@@ -2297,7 +2297,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalProveedorRapidoOrden" className="modal" onClick={() => cerrarModal('modalProveedorRapidoOrden')}>
-        <div className="contenidoModal" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho520" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Nuevo proveedor para orden</h3>
             <button className="cerrarModal" onClick={() => cerrarModal('modalProveedorRapidoOrden')}>&times;</button>
@@ -2315,7 +2315,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalEditarItemOrdenCompra" className="modal" onClick={() => cerrarModalEditarItemOrden()}>
-        <div className="contenidoModal" style={{ maxWidth: '560px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho560" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Editar item de orden</h3>
             <button className="cerrarModal" onClick={() => cerrarModalEditarItemOrden()}>&times;</button>
@@ -2335,7 +2335,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalEditarPrecioListaOC" className="modal" onClick={() => cerrarModalEditarPrecioLista()}>
-        <div className="contenidoModal" style={{ maxWidth: '620px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho620" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Editar registro de lista de precios</h3>
             <button className="cerrarModal" onClick={() => cerrarModalEditarPrecioLista()}>&times;</button>
@@ -2365,7 +2365,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalHistorialPrecioListaOC" className="modal" onClick={() => cerrarModal('modalHistorialPrecioListaOC')}>
-        <div className="contenidoModal" style={{ maxWidth: '920px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho920" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3 id="tituloHistorialPrecioListaOC">Historial de precio</h3>
             <button className="cerrarModal" onClick={() => cerrarModal('modalHistorialPrecioListaOC')}>&times;</button>
@@ -2382,7 +2382,7 @@ export default function Inventario() {
       </div>
 
       <div id="modalSurtirItemOrdenCompra" className="modal" onClick={() => cancelarSurtirItemOrden()}>
-        <div className="contenidoModal" style={{ maxWidth: '580px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="contenidoModal modalAncho580" onClick={(e) => e.stopPropagation()}>
           <div className="encabezadoModal">
             <h3>Surtir item de orden</h3>
             <button className="cerrarModal" onClick={() => cancelarSurtirItemOrden()}>&times;</button>

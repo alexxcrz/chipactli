@@ -81,20 +81,23 @@ body,
 
 .botonSalir{
   border:2px solid #9e3a35;
-  border-radius:999px;
+  border-radius:14px;
   background:#c75550;
   color:#fff;
-  font-size:12px;
-  padding:8px 12px;
+  font-size:11px;
+  padding:6px 12px;
   cursor:pointer;
   font-weight:700;
-  box-shadow:0 2px 8px rgba(120,35,31,0.28);
+  transition:all 0.25s;
+  box-shadow:0 4px 10px rgba(120,35,31,0.22);
 }
 
 .botonSalir:hover{
   background:#a83f3a;
   color:#fff;
   border-color:#8e3430;
+  transform:translateY(-2px);
+  box-shadow:0 8px 16px rgba(199,85,80,0.3);
 }
 
 .botonSalir:focus-visible{
@@ -110,7 +113,7 @@ body,
 .headerCardFijo .botonToggleMenu {
   position: static;
   margin: 0;
-  border-radius: 999px;
+  border-radius: 14px;
   width: 40px;
   height: 40px;
   border: 2px solid #2a2a2a;
@@ -122,11 +125,14 @@ body,
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  transition: all 0.25s;
 }
 
 .headerCardFijo .botonToggleMenu:hover {
   background: var(--primary);
   color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(74,124,89,0.22);
 }
 .headerCardFijo #logoEncabezado {
   width: 62px;
@@ -383,10 +389,10 @@ html, body {
   width:min(410px, 94vw);
   background:#fff;
   border:2px solid #2a2a2a;
-  border-radius:18px;
+  border-radius:22px;
   box-shadow:0 18px 40px rgba(0,0,0,0.25);
   padding:16px;
-  text-align:left;
+  text-align:center;
 }
 
 .miniModalRecuperarPasswordCard h3{
@@ -396,29 +402,61 @@ html, body {
 }
 
 .miniModalRecuperarPasswordCard p{
-  margin:0 0 10px;
+  margin:0 auto 10px;
   color:#60584d;
   font-size:13px;
   line-height:1.45;
+  max-width:320px;
+}
+
+.miniModalRecuperarPasswordCard .loginFormulario{
+  align-items:center;
+  width:min(100%, 330px);
+  margin:0 auto;
+}
+
+.miniModalRecuperarPasswordCard .loginInput,
+.miniModalRecuperarPasswordCard .loginError,
+.miniModalRecuperarPasswordCard .loginSuccess{
+  width:min(100%, 330px);
+  box-sizing:border-box;
+  text-align:left;
 }
 
 .miniModalRecuperarPasswordAcciones{
   display:flex;
   gap:8px;
   flex-wrap:wrap;
+  justify-content:center;
+}
+
+.miniModalRecuperarPasswordAcciones > button{
+  flex:1 1 160px;
+  min-width:0;
+  margin-right:0;
 }
 
 .loginBoton{
-  border:none;
+  border:2px solid var(--success);
   border-radius:14px;
   padding:11px 12px;
-  font-size:14px;
-  background:linear-gradient(90deg,var(--primary),var(--accent));
+  font-size:13px;
+  font-weight:800;
+  line-height:1.2;
+  background:var(--success);
   color:#fff;
   cursor:pointer;
+  transition:all 0.25s;
 }
 
-.loginBoton:disabled{opacity:.7;cursor:not-allowed}
+.loginBoton:hover{
+  background:#5a8d5e;
+  border-color:#5a8d5e;
+  transform:translateY(-2px);
+  box-shadow:0 8px 16px rgba(107,158,111,0.3);
+}
+
+.loginBoton:disabled{opacity:.7;cursor:not-allowed;transform:none;box-shadow:none}
 
 .botonAccesoSistemaOculto{
   position:fixed;
@@ -446,19 +484,22 @@ html, body {
 
 .botonInstalarAccesoRapidoMenu {
   width: 100%;
-  border: 1px solid rgba(245,241,232,0.45);
+  border: 2px solid rgba(245,241,232,0.45);
   border-radius: 14px;
   background: rgba(74,124,89,0.22);
   color: #f5f1e8;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  padding: 8px 10px;
+  padding: 9px 12px;
   cursor: pointer;
   margin-bottom: 8px;
+  transition: all 0.25s;
 }
 
 .botonInstalarAccesoRapidoMenu:hover {
   background: rgba(74,124,89,0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(74,124,89,0.2);
 }
 
 .botonSubirInicio{
@@ -662,9 +703,6 @@ html, body {
 h1{color:var(--primary);margin:0 0 12px}
 
 /* Small utilities */
-.boton{padding:8px 12px;border-radius:8px;border:none}
-.botonExito{background:#4caf50;color:white}
-.botonDanger{background:#d32f2f;color:white}
 
 .menu-toggle{position:absolute;top:16px;left:16px;z-index:1100;padding:6px 10px;font-size:18px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer}
 .menu-toggle:focus{outline:none}
@@ -779,10 +817,72 @@ header { background:linear-gradient(135deg, rgba(74,124,89,0.08) 0%, rgba(139,11
 .botonDanger { background:var(--danger); border-color:var(--danger); color:white; border:2px solid var(--danger); }
 .botonDanger:hover { background:#b64640; border-color:#b64640; box-shadow:0 8px 16px rgba(199,85,80,0.3); }
 
-.botonPequeno { padding:5px 9px; font-size:9px; background:var(--card-bg); color:var(--primary); border:1px solid #2a2a2a; border-radius:9px; cursor:pointer; transition:all 0.2s; font-weight:600; }
-.botonPequeno:hover { background:var(--primary); color:white; transform:scale(1.05); }
-.botonPequeno.botonDanger { background:var(--danger); border-color:var(--danger); color:white; }
-.botonPequeno.botonDanger:hover { background:#b64640; }
+.botonPequeno {
+  --boton-pequeno-bg: var(--card-bg);
+  --boton-pequeno-border: #2a2a2a;
+  --boton-pequeno-color: var(--primary);
+  --boton-pequeno-hover-bg: var(--primary);
+  --boton-pequeno-hover-border: var(--primary);
+  --boton-pequeno-hover-color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 9px;
+  line-height: 1.1;
+  background: var(--boton-pequeno-bg);
+  color: var(--boton-pequeno-color);
+  border: 2px solid var(--boton-pequeno-border);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: all 0.25s;
+  font-weight: 700;
+  text-align: center;
+}
+.botonPequeno:hover:not(:disabled) {
+  background: var(--boton-pequeno-hover-bg);
+  border-color: var(--boton-pequeno-hover-border);
+  color: var(--boton-pequeno-hover-color);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(74,124,89,0.22);
+}
+.botonPequeno:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.botonPequeno.botonExito {
+  --boton-pequeno-bg: var(--success);
+  --boton-pequeno-border: var(--success);
+  --boton-pequeno-color: #fff;
+  --boton-pequeno-hover-bg: #5a8d5e;
+  --boton-pequeno-hover-border: #5a8d5e;
+}
+.botonPequeno.botonDanger {
+  --boton-pequeno-bg: var(--danger);
+  --boton-pequeno-border: var(--danger);
+  --boton-pequeno-color: #fff;
+  --boton-pequeno-hover-bg: #b64640;
+  --boton-pequeno-hover-border: #b64640;
+}
+.botonPequeno.botonWarning {
+  --boton-pequeno-bg: #d9a441;
+  --boton-pequeno-border: #d9a441;
+  --boton-pequeno-color: #1f1a10;
+  --boton-pequeno-hover-bg: #c08e31;
+  --boton-pequeno-hover-border: #c08e31;
+  --boton-pequeno-hover-color: #1f1a10;
+}
+.botonPequeno.botonSecundario {
+  --boton-pequeno-bg: #f2ead8;
+  --boton-pequeno-border: #8b7b5a;
+  --boton-pequeno-color: #3b3528;
+  --boton-pequeno-hover-bg: #8b7b5a;
+  --boton-pequeno-hover-border: #8b7b5a;
+}
 
 .btnCategoriaWrapper { position:relative; display:inline-block; }
 .btnEliminarCategoria { position:absolute; right:5px; top:50%; transform:translateY(-50%); padding:3px 8px; font-size:11px; background:var(--danger); border:1px solid var(--danger); color:white; border-radius:15px; cursor:pointer; transition:all 0.2s; opacity:0; pointer-events:none; z-index:10; width:24px; height:24px; display:flex; align-items:center; justify-content:center; }
@@ -809,7 +909,24 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 
 /* ===== MODALS ===== */
 .modal { display:none; position:fixed; z-index:999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5); align-items:center; justify-content:center; padding:16px; }
-.contenidoModal { background-color:var(--card-bg); margin:0; padding:0; border-radius:30px; box-shadow:0 20px 60px rgba(0,0,0,0.25); width:90%; max-width:600px; max-height:90vh; overflow:hidden; display:flex; flex-direction:column; border:2px solid #2a2a2a; }
+.contenidoModal { background-color:var(--card-bg); margin:0; padding:0; border-radius:30px; box-shadow:0 20px 60px rgba(0,0,0,0.25); width:90%; max-width:var(--modal-max-width, 600px); max-height:90vh; overflow:hidden; display:flex; flex-direction:column; border:2px solid #2a2a2a; }
+.contenidoModal.modalAncho520 { --modal-max-width: 520px; }
+.contenidoModal.modalAncho560 { --modal-max-width: 560px; }
+.contenidoModal.modalAncho580 { --modal-max-width: 580px; }
+.contenidoModal.modalAncho600 { --modal-max-width: 600px; }
+.contenidoModal.modalAncho620 { --modal-max-width: 620px; }
+.contenidoModal.modalAncho700 { --modal-max-width: 700px; }
+.contenidoModal.modalAncho820 { --modal-max-width: 820px; }
+.contenidoModal.modalAncho900 { --modal-max-width: 900px; }
+.contenidoModal.modalAncho920 { --modal-max-width: 920px; }
+.contenidoModal.modalAncho980 { --modal-max-width: 980px; }
+.contenidoModal.modalAncho1000 { --modal-max-width: 1000px; }
+.contenidoModal.modalAncho1100 { --modal-max-width: 1100px; }
+.contenidoModal.modalConOffsetSuperior {
+  margin-top: 70px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+}
 
 #modalConfirmacion {
   z-index: 7600;
@@ -1415,9 +1532,10 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
 /* ===== IMPORT/EXPORT BUTTONS ===== */
 .botonesImportarExportar { display:flex; gap:8px; }
 .botonImportar, .botonExportar { padding:6px 10px; border-radius:11px; cursor:pointer; font-size:9px; font-weight:700; transition:all 0.3s; display:flex; align-items:center; gap:4px; border:2px solid #2a2a2a; }
-.botonImportar { background:linear-gradient(135deg, rgba(107,158,111,0.2) 0%, rgba(107,158,111,0.1) 100%); color:var(--success); border-color:var(--success); }
+.botonImportar, .botonExportar { border-radius:14px; font-size:10px; padding:6px 12px; }
+.botonImportar { background:rgba(107,158,111,0.12); color:var(--success); border-color:var(--success); }
 .botonImportar:hover { background:var(--success); color:white; transform:translateY(-2px); box-shadow:0 6px 14px rgba(107,158,111,0.3); border-color:var(--success); }
-.botonExportar { background:linear-gradient(135deg, rgba(74,124,89,0.2) 0%, rgba(74,124,89,0.1) 100%); color:var(--primary); border-color:var(--primary); }
+.botonExportar { background:rgba(74,124,89,0.12); color:var(--primary); border-color:var(--primary); }
 .botonExportar:hover { background:var(--primary); color:white; transform:translateY(-2px); box-shadow:0 6px 14px rgba(74,124,89,0.3); border-color:var(--primary); }
 .inputArchivoOculto { display:none; }
 
@@ -1633,6 +1751,17 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   .boton { padding:4px 8px; font-size:8px; border-radius:10px; margin-right:3px; margin-bottom:3px; }
   .botonPequeno { padding:3px 7px; font-size:7px; border-radius:8px; }
   .botonImportar, .botonExportar { padding:4px 6px; font-size:7px; gap:2px; border-radius:8px; }
+
+  .miniModalRecuperarPasswordCard {
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .miniModalRecuperarPasswordAcciones > button,
+  .accionesAlertasDesplegable .botonPequeno {
+    flex-basis: 100%;
+    width: 100%;
+  }
   
   /* Modal centrado en pantallas pequeñas */
   .contenidoModal { 

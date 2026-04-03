@@ -75,9 +75,16 @@
 }
 
 .botonSecundario {
-  background: #f4f8f5;
+  background: rgba(74,124,89,0.08);
   color: #274d3b;
-  border: 1px solid #c8d7ce;
+  border: 2px solid #c8d7ce;
+  border-radius: 14px;
+}
+
+.botonSecundario:hover {
+  background: #274d3b;
+  color: #fff;
+  border-color: #274d3b;
 }
 
 .tiendaAnalisisTabs {
@@ -91,18 +98,25 @@
 }
 
 .tiendaAnalisisTabs button {
-  border: none;
+  border: 2px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: #365246;
   padding: 10px 16px;
   font-weight: 800;
   cursor: pointer;
+  transition: all 0.25s;
+}
+
+.tiendaAnalisisTabs button:hover {
+  background: rgba(47,106,74,0.08);
+  border-color: rgba(47,106,74,0.18);
 }
 
 .tiendaAnalisisTabs button.activa {
   background: #2f6a4a;
   color: #fff;
+  border-color: #2f6a4a;
 }
 
 .tiendaAnalisisResumen,
@@ -251,23 +265,23 @@
 .tiendaAnalisisModalBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(12, 28, 20, 0.46);
-  backdrop-filter: blur(6px);
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .tiendaAnalisisModal {
   width: min(1040px, 100%);
-  max-height: calc(100vh - 48px);
+  max-height: 90vh;
   overflow-y: auto;
-  border-radius: 24px;
+  border-radius: 30px;
   padding: 18px;
-  background: #f9fcfa;
-  box-shadow: 0 30px 70px rgba(16, 35, 26, 0.22);
+  background: var(--card-bg);
+  border: 2px solid #2a2a2a;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
 }
 
 .tiendaAnalisisModal .tiendaAnalisisEyebrow {
@@ -280,7 +294,11 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin: -18px -18px 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+  color: #fff;
+  border-bottom: 2px solid #2a2a2a;
 }
 
 .tiendaAnalisisModalHead h2 {
@@ -289,15 +307,22 @@
 }
 
 .tiendaAnalisisModalHead .cerrarModal {
-  border: none;
+  border: 2px solid #fff;
   width: 38px;
   height: 38px;
   border-radius: 999px;
-  background: #e8f1eb;
-  color: #274d3b;
+  background: rgba(255,255,255,0.2);
+  color: #fff;
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
+  transition: all 0.3s;
+}
+
+.tiendaAnalisisModalHead .cerrarModal:hover {
+  background: #fff;
+  color: var(--primary);
+  transform: scale(1.08) rotate(90deg);
 }
 
 .tiendaAnalisisComparadorControles {

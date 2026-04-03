@@ -10552,7 +10552,7 @@ function Tienda({
                     type="button"
                     className="tiendaAuthRecuperarBtn"
                     onClick={() => {
-                      setMostrarPanelRecuperarCliente((prev) => !prev);
+                      setMostrarPanelRecuperarCliente(true);
                       setRecuperacionClienteMensaje('');
                       if (!recuperarClienteEmail && credenciales.email) {
                         setRecuperarClienteEmail(String(credenciales.email || ''));
@@ -10561,51 +10561,6 @@ function Tienda({
                   >
                     Se te olvidó tu contraseña?
                   </button>
-
-                  {mostrarPanelRecuperarCliente && (
-                    <div className="tiendaAuthRecuperarPanel">
-                      <div className="tiendaAuthRecuperarForm">
-                        <input
-                          type="email"
-                          placeholder="Correo registrado"
-                          value={recuperarClienteEmail}
-                          onChange={(e) => setRecuperarClienteEmail(e.target.value)}
-                          autoComplete="email"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          inputMode="email"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              enviarRecuperacionCliente();
-                            }
-                          }}
-                          required
-                        />
-                        <button
-                          type="button"
-                          className="boton"
-                          disabled={enviandoRecuperacionCliente}
-                          onClick={() => enviarRecuperacionCliente()}
-                        >
-                          {enviandoRecuperacionCliente ? 'Enviando...' : 'Enviar temporal'}
-                        </button>
-                      </div>
-                      {TURNSTILE_PUBLIC_AUTH_ENABLED && (
-                        <div className="tiendaTurnstileWrap tiendaTurnstileWrapRecuperacion">
-                          <TurnstileWidget
-                            key={`recover-${recuperacionTurnstileResetKey}`}
-                            action="tienda_recovery"
-                            onVerify={(token) => setRecuperacionTurnstileToken(token)}
-                            onExpire={() => setRecuperacionTurnstileToken('')}
-                            onError={() => setRecuperacionTurnstileToken('')}
-                          />
-                        </div>
-                      )}
-                      {!!recuperacionClienteMensaje && <div className="tiendaAuthRecuperarMsg">{recuperacionClienteMensaje}</div>}
-                    </div>
-                  )}
                 </>
               ) : (
                 <>
@@ -10730,6 +10685,77 @@ function Tienda({
                 </div>
               )}
             </form>
+
+            {modoAuth === 'login' && mostrarPanelRecuperarCliente && (
+              <div
+                className="tiendaMiniModalRecuperarPassword"
+                onClick={() => {
+                  setMostrarPanelRecuperarCliente(false);
+                  setRecuperacionClienteMensaje('');
+                  reiniciarTurnstileRecuperacionCliente();
+                }}
+              >
+                <div className="tiendaMiniModalRecuperarPasswordCard" onClick={(e) => e.stopPropagation()}>
+                  <h3>Recuperar contraseña</h3>
+                  <p>Escribe tu correo registrado. Si existe en el sistema, te enviaremos una contraseña temporal.</p>
+                  <div className="tiendaMiniModalRecuperarPasswordForm">
+                    <input
+                      className="tiendaMiniModalRecuperarPasswordInput"
+                      type="email"
+                      placeholder="correo@ejemplo.com"
+                      value={recuperarClienteEmail}
+                      onChange={(e) => setRecuperarClienteEmail(e.target.value)}
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      inputMode="email"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          enviarRecuperacionCliente();
+                        }
+                      }}
+                      required
+                    />
+                    {TURNSTILE_PUBLIC_AUTH_ENABLED && (
+                      <div className="tiendaTurnstileWrap tiendaTurnstileWrapRecuperacion tiendaTurnstileWrapRecuperacionModal">
+                        <TurnstileWidget
+                          key={`recover-${recuperacionTurnstileResetKey}`}
+                          action="tienda_recovery"
+                          onVerify={(token) => setRecuperacionTurnstileToken(token)}
+                          onExpire={() => setRecuperacionTurnstileToken('')}
+                          onError={() => setRecuperacionTurnstileToken('')}
+                        />
+                      </div>
+                    )}
+                    {!!recuperacionClienteMensaje && <div className="tiendaAuthRecuperarMsg">{recuperacionClienteMensaje}</div>}
+                    <div className="tiendaMiniModalRecuperarPasswordAcciones">
+                      <button
+                        type="button"
+                        className="boton botonExito"
+                        disabled={enviandoRecuperacionCliente}
+                        onClick={() => enviarRecuperacionCliente()}
+                      >
+                        {enviandoRecuperacionCliente ? 'Enviando...' : 'Enviar correo'}
+                      </button>
+                      <button
+                        type="button"
+                        className="boton"
+                        onClick={() => {
+                          setMostrarPanelRecuperarCliente(false);
+                          setRecuperacionClienteMensaje('');
+                          reiniciarTurnstileRecuperacionCliente();
+                        }}
+                        disabled={enviandoRecuperacionCliente}
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

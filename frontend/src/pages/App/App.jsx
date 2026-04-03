@@ -22,7 +22,7 @@ import Utensilios from '../utensilios/Utensilios.jsx';
 import AdminUsuarios from '../admin-usuarios/AdminUsuarios.jsx';
 import AdminSeguridad from '../admin-seguridad/AdminSeguridad.jsx';
 import PasswordInput from '../../components/PasswordInput.jsx';
-import { fetchAPIJSON } from '../../utils/api.jsx';
+import { fetchAPI, fetchAPIJSON } from '../../utils/api.jsx';
 import { mostrarModalCambiarPassword } from '../modal-cambiar-password.jsx';
 import { inicializarCierreModalConEsc, mostrarConfirmacion } from '../../utils/modales.jsx';
 import { conectarWebSocket, cerrarWebSocket } from '../../utils/websocket.jsx';
@@ -795,9 +795,36 @@ export default function App() {
 
   React.useEffect(() => {
     let cancelado = false;
+    const rutaActual = getPageFromLocation();
+    const rutaAdminSolicitada = Boolean(rutaActual && rutaActual !== 'tienda' && rutaActual !== 'metricas-analisis');
+    const haySesionPersistida = Boolean(token || currentUser?.username);
+
+    if (!haySesionPersistida && !showAccesoSistema && !rutaAdminSolicitada) {
+      setSesionInternaValidada(true);
+      return () => {
+        cancelado = true;
+      };
+    }
 
     setSesionInternaValidada(false);
-    fetchAPIJSON('/api/auth/validar').then((res) => {
+    fetchAPI('/api/auth/validar').then(async (respuesta) => {
+      if (cancelado) return;
+
+      if (respuesta.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('usuario');
+        setToken('');
+        setCurrentUser(null);
+        setSesionInternaValidada(true);
+        return;
+      }
+
+      if (!respuesta.ok) {
+        setSesionInternaValidada(true);
+        return;
+      }
+
+      const res = await respuesta.json().catch(() => ({}));
       if (cancelado) return;
       const usuarioNormalizado = normalizarUsuario(res?.usuario || currentUser);
       localStorage.setItem('token', ADMIN_COOKIE_SESSION_SENTINEL);
@@ -808,32 +835,28 @@ export default function App() {
       notificarCambioSesionInterna(ADMIN_COOKIE_SESSION_SENTINEL, usuarioNormalizado);
     }).catch(() => {
       if (cancelado) return;
-      localStorage.removeItem('token');
-      if (currentUser?.username) {
-        localStorage.removeItem('usuario');
-        setCurrentUser(null);
-        setLoginError('Tu sesión expiró. Inicia sesión nuevamente.');
-      }
-      setToken('');
       setSesionInternaValidada(true);
     });
 
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [currentUser, getPageFromLocation, showAccesoSistema, token]);
 
   React.useEffect(() => {
     const onAuthInvalid = (event) => {
       const mensaje = event?.detail?.mensaje || 'Tu sesión expiró. Inicia sesión nuevamente.';
+      const habiaSesionInterna = Boolean(localStorage.getItem('token') || currentUser?.username);
       Promise.resolve(cerrarSesion()).finally(() => {
-        setLoginError(mensaje);
+        if (habiaSesionInterna) {
+          setLoginError(mensaje);
+        }
       });
     };
 
     window.addEventListener('chipactli:auth-invalid', onAuthInvalid);
     return () => window.removeEventListener('chipactli:auth-invalid', onAuthInvalid);
-  }, [cerrarSesion]);
+  }, [cerrarSesion, currentUser]);
 
   React.useEffect(() => {
     const enModoStandalone = () => {
@@ -1345,6 +1368,9 @@ export default function App() {
               className="menuContextoTrastiendaItem"
               onClick={() => {
                 setMenuContextoTrastienda({ visible: false, x: 0, y: 0 });
+                setLoginError('');
+                setForgotError('');
+                setForgotSuccess('');
                 setShowAccesoSistema(true);
               }}
             >
@@ -1420,7 +1446,7 @@ export default function App() {
                       {forgotError && <div className="loginError">{forgotError}</div>}
                       {forgotSuccess && <div className="loginSuccess">{forgotSuccess}</div>}
                       <div className="miniModalRecuperarPasswordAcciones">
-                        <button type="submit" className="loginBoton" disabled={forgotLoading}>
+                        <button type="submit" className="boton botonExito" disabled={forgotLoading}>
                           {forgotLoading ? 'Enviando...' : 'Enviar correo'}
                         </button>
                         <button
@@ -1679,7 +1705,7 @@ export default function App() {
       {/* legacy modal for pending products */}
       {showPendientes && (
         <div id="modalPendientesInsumos" className="modal" style={{ display: 'flex' }} onClick={() => setShowPendientes(false)}>
-          <div className="contenidoModal" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
+          <div className="contenidoModal modalAncho600" onClick={e => e.stopPropagation()}>
             <div className="encabezadoModal">
               <h3>Productos pendientes o incompletos</h3>
               <button className="cerrarModal" onClick={() => setShowPendientes(false)}>&times;</button>
@@ -1813,7 +1839,7 @@ export default function App() {
 
       {fichasProveedorPendientes.visible && (
         <div className="modal" style={{ display: 'flex', zIndex: 3300 }} onClick={(e) => e.stopPropagation()}>
-          <div className="contenidoModal modalProveedorObligatorio" style={{ maxWidth: '1100px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="contenidoModal modalProveedorObligatorio modalAncho1100" onClick={(e) => e.stopPropagation()}>
             <div className="encabezadoModal">
               <h3>Completar fichas de proveedores</h3>
             </div>

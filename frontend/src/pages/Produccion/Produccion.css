@@ -236,7 +236,34 @@
 }
 
 .botonCortesiaProduccion {
-  background: #9b59b6;
+  background: #d9a441;
+  border-color: #d9a441;
+  color: #1f1a10;
+}
+
+.botonPequeno.botonVender {
+  --boton-pequeno-bg: #4a7c59;
+  --boton-pequeno-border: #4a7c59;
+  --boton-pequeno-color: #fff;
+  --boton-pequeno-hover-bg: #3f6a4d;
+  --boton-pequeno-hover-border: #3f6a4d;
+}
+
+.botonPequeno.botonCortesiaProduccion {
+  --boton-pequeno-bg: #d9a441;
+  --boton-pequeno-border: #d9a441;
+  --boton-pequeno-color: #1f1a10;
+  --boton-pequeno-hover-bg: #c08e31;
+  --boton-pequeno-hover-border: #c08e31;
+  --boton-pequeno-hover-color: #1f1a10;
+}
+
+.botonPequeno.botonHistorial {
+  --boton-pequeno-bg: #5b7a95;
+  --boton-pequeno-border: #5b7a95;
+  --boton-pequeno-color: #fff;
+  --boton-pequeno-hover-bg: #4e6880;
+  --boton-pequeno-hover-border: #4e6880;
 }
 
 .produccionCardHistorial {

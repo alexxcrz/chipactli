@@ -1268,6 +1268,17 @@ function Tienda({
     }
   }, [tokenInterno]);
 
+  const clienteSesionVerificada = Boolean(clienteToken)
+    && (tokenPareceJwt(clienteToken) || Number(cliente?.id || 0) > 0);
+
+  function puedeUsarSesionCliente(token = clienteToken, opciones = {}) {
+    const tokenActual = String(token || '').trim();
+    if (!tokenActual) return false;
+    if (tokenPareceJwt(tokenActual)) return true;
+    if (opciones?.permitirValidacionCookie) return true;
+    return Number(cliente?.id || 0) > 0;
+  }
+
   useEffect(() => {
     const sincronizarTokenInterno = (tokenForzado = null) => {
       const tokenActual = tokenForzado === null
@@ -2258,19 +2269,19 @@ function Tienda({
     setNotificacionesClientePedidos((prev) => (Array.isArray(prev)
       ? prev.map((item) => ({ ...item, leida: true }))
       : []));
-    if (!clienteToken) return;
+    if (!puedeUsarSesionCliente(clienteToken)) return;
     fetchJson('/tienda/auth/notificaciones/marcar-leidas', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${clienteToken}` }
+      headers: headersClienteSesion({}, clienteToken)
     }).catch(() => {});
   }
 
   function limpiarNotificacionesCliente() {
     setNotificacionesClientePedidos([]);
-    if (!clienteToken) return;
+    if (!puedeUsarSesionCliente(clienteToken)) return;
     fetchJson('/tienda/auth/notificaciones', {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${clienteToken}` }
+      headers: headersClienteSesion({}, clienteToken)
     }).catch(() => {});
   }
 
@@ -2753,17 +2764,24 @@ function Tienda({
       estadoOrdenesInicializadoRef.current = false;
       return;
     }
+    cargarPerfil(clienteToken);
+  }, [clienteToken]);
+
+  useEffect(() => {
+    if (!clienteSesionVerificada) return undefined;
+
     estadoOrdenesClienteRef.current = new Map();
     estadoOrdenesInicializadoRef.current = false;
-    cargarPerfil(clienteToken);
     cargarMisOrdenes(clienteToken);
     cargarNotificacionesCliente(clienteToken);
     cargarDireccionesPerfil(clienteToken);
     cargarCarritoServidor(clienteToken, { fusionarLocal: true, aplicarEstado: true, silencioso: true });
-  }, [clienteToken]);
+
+    return undefined;
+  }, [clienteSesionVerificada, clienteToken]);
 
   useEffect(() => {
-    if (!clienteToken) return undefined;
+    if (!clienteSesionVerificada) return undefined;
 
     const intervalo = setInterval(() => {
       cargarMisOrdenes(clienteToken);
@@ -2771,10 +2789,10 @@ function Tienda({
     }, 5000);
 
     return () => clearInterval(intervalo);
-  }, [clienteToken]);
+  }, [clienteSesionVerificada, clienteToken]);
 
   useEffect(() => {
-    if (!clienteToken) return undefined;
+    if (!clienteSesionVerificada) return undefined;
 
     const refrescar = async () => {
       if (guardandoCarritoServidorRef.current) return;
@@ -2802,10 +2820,10 @@ function Tienda({
 
     const intervalo = setInterval(refrescar, SINCRONIZACION_CARRITO_PULL_MS);
     return () => clearInterval(intervalo);
-  }, [clienteToken, carrito]);
+  }, [clienteSesionVerificada, clienteToken, carrito]);
 
   useEffect(() => {
-    if (!clienteToken) return undefined;
+    if (!clienteSesionVerificada) return undefined;
 
     const alVolverVisible = () => {
       if (document.visibilityState === 'visible') {
@@ -2825,7 +2843,7 @@ function Tienda({
 
     document.addEventListener('visibilitychange', alVolverVisible);
     return () => document.removeEventListener('visibilitychange', alVolverVisible);
-  }, [clienteToken]);
+  }, [clienteSesionVerificada, clienteToken]);
 
   useEffect(() => {
     setPermisoNotificacionesPedidos(obtenerPermisoNotificacionesNativas());
@@ -3990,10 +4008,10 @@ function Tienda({
   }
 
   async function cargarDireccionesPerfil(token = clienteToken) {
-    if (!token) return;
+    if (!puedeUsarSesionCliente(token)) return;
     try {
       const data = await fetchJson('/tienda/auth/direcciones', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headersClienteSesion({}, token)
       });
       setDireccionesPerfil(Array.isArray(data?.direcciones) ? data.direcciones : []);
     } catch {
@@ -4002,10 +4020,10 @@ function Tienda({
   }
 
   async function cargarNotificacionesCliente(token = clienteToken) {
-    if (!token) return;
+    if (!puedeUsarSesionCliente(token)) return;
     try {
       const data = await fetchJson('/tienda/auth/notificaciones', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headersClienteSesion({}, token)
       });
       const lista = Array.isArray(data?.notificaciones) ? data.notificaciones : [];
       setNotificacionesClientePedidos(lista.map((item) => ({
@@ -4022,7 +4040,7 @@ function Tienda({
   }
 
   async function guardarCarritoServidor(items, creadoEn, token = clienteToken, silencioso = true) {
-    if (!token) return null;
+    if (!puedeUsarSesionCliente(token)) return null;
 
     const itemsNormalizados = normalizarListaCarritoCliente(items);
     guardandoCarritoServidorRef.current = true;
@@ -4031,7 +4049,7 @@ function Tienda({
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          ...headersClienteSesion({}, token)
         },
         body: JSON.stringify({
           items: itemsNormalizados,
@@ -4053,7 +4071,7 @@ function Tienda({
   }
 
   function guardarCarritoServidorKeepAlive(items, creadoEn, token = clienteToken) {
-    if (!token) return;
+    if (!puedeUsarSesionCliente(token)) return;
     const itemsNormalizados = normalizarListaCarritoCliente(items);
 
     fetch(apiUrl('/tienda/auth/carrito'), {
@@ -4061,7 +4079,7 @@ function Tienda({
       keepalive: true,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        ...headersClienteSesion({}, token)
       },
       body: JSON.stringify({
         items: itemsNormalizados,
@@ -4074,7 +4092,7 @@ function Tienda({
 
   function sincronizarCarritoPendienteAntesDeSalir(tokenForzado = '') {
     const tokenActual = String(tokenForzado || clienteTokenActualRef.current || '').trim();
-    if (!tokenActual) return;
+    if (!puedeUsarSesionCliente(tokenActual)) return;
     if (guardandoCarritoServidorRef.current) return;
 
     if (debounceCarritoServidorRef.current) {
@@ -4091,7 +4109,7 @@ function Tienda({
   }
 
   async function cargarCarritoServidor(token = clienteToken, opciones = {}) {
-    if (!token) return null;
+    if (!puedeUsarSesionCliente(token)) return null;
 
     const fusionarLocal = Boolean(opciones?.fusionarLocal);
     const aplicarEstado = opciones?.aplicarEstado !== false;
@@ -4099,7 +4117,7 @@ function Tienda({
 
     try {
       const data = await fetchJson('/tienda/auth/carrito', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headersClienteSesion({}, token)
       });
 
       const itemsServidor = normalizarListaCarritoCliente(data?.items || []);
@@ -4555,6 +4573,7 @@ function Tienda({
   useEffect(() => {
     let timerRefresco = null;
     const idClienteActual = Number(cliente?.id) || extraerIdClienteToken(clienteToken) || 0;
+    const clientePuedeUsarSesion = puedeUsarSesionCliente(clienteToken);
 
     const onRealtime = (event) => {
       const tipo = String(event?.detail?.tipo || '').trim();
@@ -4593,7 +4612,7 @@ function Tienda({
         cargarConfigTiendaAdmin();
       }
 
-      if (clienteToken && tipo === 'tienda_servicio_domicilio_habilitado') {
+      if (clientePuedeUsarSesion && tipo === 'tienda_servicio_domicilio_habilitado') {
         cargarConfigTienda();
         const mensajeDomicilio = String(event?.detail?.mensaje || '').trim()
           || 'Ya contamos con servicio a domicilio.';
@@ -4613,7 +4632,7 @@ function Tienda({
         }
       }
 
-      if (clienteToken && tipo === 'tienda_carrito_actualizado') {
+      if (clientePuedeUsarSesion && tipo === 'tienda_carrito_actualizado') {
         const idClienteEvento = Number(event?.detail?.id_cliente) || 0;
         if (!idClienteActual || !idClienteEvento || idClienteEvento === idClienteActual) {
           cargarCarritoServidor(clienteToken, {
@@ -4625,7 +4644,7 @@ function Tienda({
       }
 
       const esEventoPedidoCliente = (tipo === 'tienda_orden_nueva' || tipo === 'tienda_orden_actualizada');
-      if (!clienteToken || !esEventoPedidoCliente) return;
+  if (!clientePuedeUsarSesion || !esEventoPedidoCliente) return;
 
       const idClienteEvento = Number(event?.detail?.id_cliente) || 0;
       if (idClienteActual && idClienteEvento && idClienteEvento !== idClienteActual) return;
@@ -6002,10 +6021,10 @@ function Tienda({
   }
 
   async function cargarMisOrdenes(token = clienteToken) {
-    if (!token) return;
+    if (!puedeUsarSesionCliente(token)) return;
     try {
       const data = await fetchJson('/tienda/ordenes/mis', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: headersClienteSesion({}, token)
       });
       const lista = Array.isArray(data) ? data : [];
       setOrdenes(lista);

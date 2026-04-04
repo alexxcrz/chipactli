@@ -1421,6 +1421,8 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   align-items: center;
   justify-content: center;
   padding: 18px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modalNotificacion .contenidoModal {
@@ -1431,9 +1433,17 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   overflow: hidden;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
   animation: slideInCenter 0.18s ease;
+  max-height: calc(100dvh - 36px);
+  background-clip: padding-box;
+  isolation: isolate;
 }
 
-.modalNotificacion .encabezadoModal { display: flex; }
+.modalNotificacion .encabezadoModal {
+  display: flex;
+  margin: -1px -1px 0;
+  padding: 16px 18px;
+  border-radius: 18px 18px 0 0;
+}
 
 @keyframes slideInCenter {
   from { transform: translateY(-12px); opacity: 0; }
@@ -1453,6 +1463,7 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 18px 20px 20px;
 }
 
 .modalNotificacion #mensajeNotificacion {
@@ -1707,13 +1718,43 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
   
   /* Notifications */
   .modalNotificacion {
-    padding: 10px;
+    align-items: flex-start;
+    padding:
+      max(10px, env(safe-area-inset-top, 0px))
+      10px
+      max(10px, env(safe-area-inset-bottom, 0px));
   }
 
   .modalNotificacion .contenidoModal {
-    width: 95vw;
-    max-width: 95vw;
+    width: min(100%, calc(100vw - 20px));
+    max-width: min(100%, calc(100vw - 20px));
+    min-width: 0;
+    margin-top: 4px;
+    max-height: calc(100dvh - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     border-radius: 24px;
+  }
+
+  .modalNotificacion .encabezadoModal {
+    padding: 16px;
+    border-radius: 24px 24px 0 0;
+  }
+
+  .modalNotificacion .cuerpoModalNotificacion {
+    padding: 16px;
+    gap: 10px;
+  }
+
+  .modalNotificacion #mensajeNotificacion {
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .modalNotificacion .detalleNotificacion {
+    font-size: 14px;
+  }
+
+  .modalNotificacion .accionesNotificacion .boton {
+    margin-right: 0;
   }
   
   /* Tabs */
@@ -1774,6 +1815,37 @@ table tr:first-child th:last-child { border-radius:0 15px 0 0; }
     border-radius:20px;
   }
   .encabezadoModal h3 { font-size:16px; }
+
+  .modalNotificacion {
+    padding:
+      max(8px, env(safe-area-inset-top, 0px))
+      8px
+      max(8px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .modalNotificacion .contenidoModal {
+    width: min(100%, calc(100vw - 16px));
+    max-width: min(100%, calc(100vw - 16px));
+    border-radius: 20px;
+  }
+
+  .modalNotificacion .encabezadoModal {
+    padding: 14px 14px 13px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .modalNotificacion .cuerpoModalNotificacion {
+    padding: 14px;
+  }
+
+  .modalNotificacion .accionesNotificacion {
+    flex-direction: column;
+  }
+
+  .modalNotificacion .accionesNotificacion .boton {
+    width: 100%;
+    margin-right: 0;
+  }
   
   .elementoIngrediente { flex-wrap:wrap; gap:5px; border-radius:15px; }
   

@@ -41,6 +41,19 @@ function badgeNivelClase(nivel = '') {
   return 'info';
 }
 
+function esAuthInvalidoRuidoLocal(evento = {}) {
+  const tipo = normalizarTexto(evento?.tipo);
+  if (tipo !== 'auth_invalid_token') return false;
+
+  const ip = String(evento?.ip || '').trim();
+  const ruta = String(evento?.ruta || '').trim();
+  const usuario = String(evento?.detalle?.usuario || '').trim();
+  const esLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.16.');
+  const esRutaInterna = ruta.startsWith('/tienda/admin/') || ruta.startsWith('/inventario/') || ruta.startsWith('/api/privado/security/') || ruta.startsWith('/produccion/');
+
+  return esLocal && esRutaInterna && !usuario;
+}
+
 function obtenerUsuarioActual() {
   try {
     return JSON.parse(localStorage.getItem('usuario') || 'null');
@@ -157,8 +170,8 @@ export default function AdminSeguridad() {
     ? 'activo'
     : (webhookPendientePeroOpcional ? 'opcional en local' : 'pendiente');
   const textoWebhookMinimo = estado?.webhook_alertas_configurado
-    ? (estado?.webhook_min_level || 'N/D')
-    : (webhookPendientePeroOpcional ? 'N/A en local' : (estado?.webhook_min_level || 'N/D'));
+    ? `desde ${estado?.webhook_min_level || 'N/D'}`
+    : (webhookPendientePeroOpcional ? 'N/A en local' : `desde ${estado?.webhook_min_level || 'N/D'}`);
 
   async function cargarPanel(limit = limiteLogs, silencioso = false) {
     if (!silencioso) setCargando(true);
@@ -431,7 +444,10 @@ export default function AdminSeguridad() {
 
   const totalPaginasLogs = Math.max(1, Math.ceil(logsFiltrados.length / Math.max(1, tamanoPaginaLogs)));
 
-  const authInvalidTokenEventos = useMemo(() => logs.filter((evento) => normalizarTexto(evento?.tipo) === 'auth_invalid_token'), [logs]);
+  const authInvalidTokenEventos = useMemo(
+    () => logs.filter((evento) => normalizarTexto(evento?.tipo) === 'auth_invalid_token' && !esAuthInvalidoRuidoLocal(evento)),
+    [logs]
+  );
   const resumenAuthInvalidToken = useMemo(() => {
     const porRuta = {};
     for (const evento of authInvalidTokenEventos) {
@@ -720,7 +736,7 @@ export default function AdminSeguridad() {
           <h3>Estado General</h3>
           <div className="adminSeguridadStats">
             <div>
-              <span>Webhook mínimo</span>
+              <span>Nivel mínimo webhook</span>
               <strong>{textoWebhookMinimo}</strong>
             </div>
             <div>

@@ -10619,6 +10619,17 @@ function Tienda({
                         autoComplete="new-password"
                         required
                       />
+                      {TURNSTILE_PUBLIC_AUTH_ENABLED && (
+                        <div className="tiendaTurnstileWrap">
+                          <TurnstileWidget
+                            key={`auth-${modoAuth}-${clienteTurnstileResetKey}`}
+                            action="tienda_register"
+                            onVerify={(token) => setClienteTurnstileToken(token)}
+                            onExpire={() => setClienteTurnstileToken('')}
+                            onError={() => setClienteTurnstileToken('')}
+                          />
+                        </div>
+                      )}
                     </>
                   )}
                 </>
